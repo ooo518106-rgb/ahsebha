@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>حاسبة الإعلانات ROAS - احسبها</title>
+  <meta name="description" content="احسب ROAS و CPA وربحية حملاتك الإعلانية. أداة مجانية للمسوقين وأصحاب المتاجر.">
+  <meta name="keywords" content="ROAS، CPA، إعلانات، تسويق، فيسبوك، سناب، تيك توك">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📢</text></svg>">
+  <meta name="theme-color" content="#4f46e5">
+  
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "WebApplication",
+    "name": "حاسبة الإعلانات ROAS",
+    "description": "قيّم ربحية حملاتك الإعلانية"
+  }
+  </script>
+  
+  <link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+
+<header class="site-header">
+  <div class="header-inner">
+    <a href="../index.html" class="logo"><span class="logo-icon">💼</span><span>احسبها</span></a>
+    <nav class="nav">
+      <a href="../index.html">الرئيسية</a>
+      <a href="../about.html">عن الموقع</a>
+      <a href="../contact.html">اتصل بنا</a>
+      <button class="theme-toggle">🌙 داكن</button>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <section class="page-hero">
+    <div class="page-hero-icon">📢</div>
+    <h1 class="page-title">حاسبة الإعلانات ROAS</h1>
+    <p class="page-subtitle">اعرف إن كانت حملتك الإعلانية مربحة</p>
+  </section>
+
+  <div class="container">
+    <div class="calculator">
+      
+      <div class="form-group">
+        <label>إجمالي الإنفاق الإعلاني (ر.س)</label>
+        <input type="number" id="ad-spend" value="1000" min="0" step="100" oninput="calcROAS()">
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label>عدد الطلبات</label>
+          <input type="number" id="orders" value="50" min="1" step="1" oninput="calcROAS()">
+        </div>
+        <div class="form-group">
+          <label>متوسط قيمة الطلب (ر.س)</label>
+          <input type="number" id="aov" value="150" min="0" step="10" oninput="calcROAS()">
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label>هامش الربح على المنتج (%)</label>
+        <input type="number" id="margin-percent" value="40" min="0" max="100" step="1" oninput="calcROAS()">
+      </div>
+
+      <button class="btn-primary" onclick="calcROAS()">احسب</button>
+
+      <div id="roas-alert" class="alert alert-info">املأ البيانات لتحليل الحملة</div>
+
+      <div class="results">
+        <div class="result-card">
+          <div class="result-label">الإيراد</div>
+          <div class="result-value" id="revenue">0.00 ر.س</div>
+        </div>
+        <div class="result-card">
+          <div class="result-label">ROAS</div>
+          <div class="result-value" id="roas">0.00x</div>
+        </div>
+        <div class="result-card">
+          <div class="result-label">CPA</div>
+          <div class="result-value" id="cpa">0.00 ر.س</div>
+        </div>
+        <div class="result-card">
+          <div class="result-label">ربح إجمالي</div>
+          <div class="result-value" id="gross-profit">0.00 ر.س</div>
+        </div>
+        <div class="result-card">
+          <div class="result-label">💰 ربح صافي</div>
+          <div class="result-value positive" id="net-profit">0.00 ر.س</div>
+        </div>
+        <div class="result-card">
+          <div class="result-label">أقصى CPA</div>
+          <div class="result-value" id="max-cpa">0.00 ر.س</div>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="ad-slot">📢 مكان إعلان AdSense</div>
+
+    <article class="content">
+      <h2>ما هو ROAS؟</h2>
+      <p><strong>ROAS</strong> (Return on Ad Spend) = العائد على الإنفاق الإعلاني. يخبرك كم ريال إيرادات حصلت مقابل كل ريال أنفقته على الإعلانات.</p>
+      <p><strong>المعادلة:</strong></p>
+      <ul>
+        <li>ROAS = الإيراد ÷ الإنفاق الإعلاني</li>
+        <li>مثال: أنفقت 1000، حققت 4000 → ROAS = 4x</li>
+      </ul>
+
+      <h2>ما هو CPA؟</h2>
+      <p><strong>CPA</strong> (Cost Per Acquisition) = تكلفة اكتساب عميل واحد. يخبرك متوسط تكلفة الحصول على طلب واحد.</p>
+      <ul>
+        <li>CPA = الإنفاق الإعلاني ÷ عدد الطلبات</li>
+      </ul>
+
+      <h2>ROAS التعادل (Break-even ROAS)</h2>
+      <p>هو أقل ROAS تحتاجه لتغطية تكاليف الإعلان فقط (بدون ربح). يعتمد على هامش الربح:</p>
+      <ul>
+        <li>هامش 20% → ROAS التعادل = 5x</li>
+        <li>هامش 25% → ROAS التعادل = 4x</li>
+        <li>هامش 40% → ROAS التعادل = 2.5x</li>
+        <li>هامش 50% → ROAS التعادل = 2x</li>
+      </ul>
+
+      <h2>أقصى CPA مقبول</h2>
+      <p>أقصى مبلغ يمكنك دفعه لاكتساب عميل دون خسارة:</p>
+      <ul>
+        <li>أقصى CPA = متوسط قيمة الطلب × هامش الربح</li>
+        <li>مثال: 150 ريال × 40% = 60 ريال</li>
+      </ul>
+
+      <h2>مثال عملي</h2>
+      <p>أنفقت <strong>1000 ريال</strong> على الإعلان، حصلت على <strong>50 طلب</strong> بمتوسط <strong>150 ريال</strong>، وهامش ربحك <strong>40%</strong>:</p>
+      <ul>
+        <li>الإيراد = 50 × 150 = <strong>7500 ريال</strong></li>
+        <li>ROAS = 7500 ÷ 1000 = <strong>7.5x</strong> 🎉</li>
+        <li>CPA = 1000 ÷ 50 = <strong>20 ريال</strong></li>
+        <li>الربح الإجمالي = 7500 × 40% = <strong>3000 ريال</strong></li>
+        <li>الربح الصافي = 3000 - 1000 = <strong>2000 ريال</strong> ✅</li>
+        <li>ROAS التعادل = 100 ÷ 40 = <strong>2.5x</strong></li>
+      </ul>
+      <p>النتيجة: 7.5x > 2.5x → <strong>حملة ناجحة جداً!</strong></p>
+
+      <h2>كيف تحسّن ROAS؟</h2>
+      <ul>
+        <li>💡 <strong>حسّن الاستهداف:</strong> ركز على الجمهور المناسب</li>
+        <li>💡 <strong>اختبر إبداعات متعددة:</strong> فيديوهات، صور، نصوص</li>
+        <li>💡 <strong>أوقف الإعلانات الخاسرة</strong> بسرعة</li>
+        <li>💡 <strong>حسّن صفحة المنتج:</strong> صور، وصف، سعر</li>
+        <li>💡 <strong>ارفع السلة المتوسطة:</strong> عروض "اشترِ 2"</li>
+      </ul>
+
+      <h2>أسئلة شائعة</h2>
+
+      <details>
+        <summary>ما هو ROAS الجيد؟</summary>
+        <p>يعتمد على هامش الربح. بشكل عام: أقل من التعادل = خسارة. أقل من 1.5× التعادل = ضعيف. أكثر من 1.5× التعادل = جيد.</p>
+      </details>
+
+      <details>
+        <summary>هل ROAS يشمل تكاليف المنتج؟</summary>
+        <p>لا، ROAS يقيس الإيراد مقابل الإنفاق الإعلاني فقط. لحساب الربح الفعلي نحتاج طرح تكاليف المنتج والشحن أيضاً.</p>
+      </details>
+
+      <details>
+        <summary>هل يمكن أن يكون ROAS أعلى من 10؟</summary>
+        <p>نعم، خصوصاً في المنتجات ذات الهامش العالي (رقمية، استشارات). لكن في التجارة الإلكترونية العادية، 3-5x يعتبر ممتاز.</p>
+      </details>
+
+      <details>
+        <summary>كيف أحسب ROAS لكل منصة إعلانية؟</summary>
+        <p>قسّم الإيراد لكل منصة على الإنفاق على تلك المنصة. ستحصل على ROAS لكل منصة (سناب، تيك توك، فيسبوك...) وقارن بينها.</p>
+      </details>
+    </article>
+
+    <section class="related">
+      <h3>🔗 أدوات ذات صلة</h3>
+      <div class="related-grid">
+        <a href="ecommerce-profit.html" class="tool-card">
+          <div class="tool-card-icon">📦</div>
+          <div class="tool-card-title">هامش الربح</div>
+        </a>
+        <a href="salla-commission.html" class="tool-card">
+          <div class="tool-card-icon">🏪</div>
+          <div class="tool-card-title">عمولة سلة وزد</div>
+        </a>
+        <a href="tabby-tamara.html" class="tool-card">
+          <div class="tool-card-icon">💳</div>
+          <div class="tool-card-title">تابي وتمارا</div>
+        </a>
+      </div>
+    </section>
+
+  </div>
+</main>
+
+<footer class="site-footer">
+  <div class="footer-inner">
+    <div class="footer-col">
+      <h4>احسبها</h4>
+      <p style="font-size:0.9rem;">أدوات حسابية مجانية للتجار</p>
+    </div>
+    <div class="footer-col">
+      <h4>روابط</h4>
+      <a href="../about.html">عن الموقع</a>
+      <a href="../contact.html">اتصل بنا</a>
+    </div>
+  </div>
+  <div class="footer-bottom">© 2025 احسبها</div>
+</footer>
+
+<script src="../assets/main.js"></script>
+<script src="../assets/tools.js"></script>
+<script>calcROAS();</script>
+</body>
+</html>
