@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>حاسبة القروض والأقساط - احسبها</title>
+  <meta name="description" content="احسب القسط الشهري للقرض بطريقتين: متناقصة (تنخفض الفائدة) وثابتة (مرابحة - شائعة في البنوك الخليجية). أداة مجانية دقيقة.">
+  <meta name="keywords" content="قرض، أقساط، فائدة متناقصة، مرابحة، بنك، تمويل">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏦</text></svg>">
+  <meta name="theme-color" content="#4f46e5">
+  
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "WebApplication",
+    "name": "حاسبة القروض والأقساط",
+    "description": "احسب القسط الشهري بطريقة متناقصة أو ثابتة",
+    "applicationCategory": "FinanceApplication"
+  }
+  </script>
+  
+  <link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+
+<header class="site-header">
+  <div class="header-inner">
+    <a href="../index.html" class="logo">
+      <span class="logo-icon">💼</span>
+      <span>احسبها</span>
+    </a>
+    <nav class="nav">
+      <a href="../index.html">الرئيسية</a>
+      <a href="../about.html">عن الموقع</a>
+      <a href="../contact.html">اتصل بنا</a>
+      <button class="theme-toggle">🌙 داكن</button>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <section class="page-hero">
+    <div class="page-hero-icon">🏦</div>
+    <h1 class="page-title">حاسبة القروض والأقساط</h1>
+    <p class="page-subtitle">احسب قسطك الشهري بطريقتين: متناقصة أو ثابتة</p>
+  </section>
+
+  <div class="container">
+    <div class="calculator">
+      
+      <div class="form-group">
+        <label>مبلغ التمويل (ر.س)</label>
+        <input type="number" id="amount" value="100000" min="0" step="1000" oninput="calcLoan()">
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label>نسبة الفائدة/الربح السنوية (%)</label>
+          <input type="number" id="rate" value="5" min="0" step="0.1" oninput="calcLoan()">
+        </div>
+        <div class="form-group">
+          <label>المدة (أشهر)</label>
+          <input type="number" id="months" value="60" min="1" max="360" step="1" oninput="calcLoan()">
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label>طريقة الحساب</label>
+        <select id="method" onchange="calcLoan()">
+          <option value="declining">متناقصة (تنخفض الفائدة مع الرصيد) - شائعة في البنوك</option>
+          <option value="fixed">ثابتة / مرابحة (نسبة على كامل المبلغ) - شائعة في التمويل الإسلامي</option>
+        </select>
+      </div>
+
+      <button class="btn-primary" onclick="calcLoan()">احسب القسط</button>
+
+      <div class="results">
+        <div class="result-card">
+          <div class="result-label">🏦 القسط الشهري</div>
+          <div class="result-value positive" id="payment">0.00 ر.س</div>
+        </div>
+        <div class="result-card">
+          <div class="result-label">الفوائد / الربح</div>
+          <div class="result-value" id="interest">0.00 ر.س</div>
+        </div>
+        <div class="result-card">
+          <div class="result-label">إجمالي السداد</div>
+          <div class="result-value" id="total">0.00 ر.س</div>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="ad-slot">📢 مكان إعلان AdSense</div>
+
+    <article class="content">
+      <h2>ما الفرق بين الفائدة المتناقصة والثابتة؟</h2>
+      
+      <h3>1. الفائدة المتناقصة (Declining Balance)</h3>
+      <p>يُحسب الربح على الرصيد المتبقي من القرض، فتنخفض قيمة الفائدة مع كل قسط. يُستخدم هذا النظام في معظم البنوك التجارية حول العالم، ويُنتج إجمالي فائدة أقل من المرابحة.</p>
+
+      <h3>2. الفائدة الثابتة / المرابحة (Fixed Rate)</h3>
+      <p>يُحسب الربح كنسبة مئوية على كامل مبلغ التمويل من البداية. يُستخدم في التمويل الإسلامي (المرابحة، الإجارة، التورق)، وهو شائع في البنوك الخليجية.</p>
+      
+      <p><strong>مثال توضيحي:</strong> على قرض 100,000 ريال لمدة 5 سنوات بنسبة 5%:</p>
+      <ul>
+        <li>طريقة متناقصة: إجمالي الفوائد ≈ <strong>13,227 ريال</strong></li>
+        <li>طريقة ثابتة (مرابحة): إجمالي الربح = 100,000 × 5% × 5 = <strong>25,000 ريال</strong></li>
+      </ul>
+      <p>الفرق واضح! لذلك من المهم معرفة الطريقة التي يستخدمها بنكك.</p>
+
+      <h2>كيف تُحسب الفائدة المتناقصة؟</h2>
+      <p>تُستخدم معادلة رياضية معقدة (تُسمى معادلة القسط الثابت):</p>
+      <ul>
+        <li>القسط = المبلغ × [معدل شهري × (1+معدل)^أشهر] ÷ [(1+معدل)^أشهر - 1]</li>
+        <li>حيث المعدل الشهري = النسبة السنوية ÷ 12</li>
+      </ul>
+
+      <h2>نصائح قبل أخذ قرض</h2>
+      <ul>
+        <li>💡 <strong>قارن بين البنوك:</strong> النسب قد تختلف بشكل كبير</li>
+        <li>💡 <strong>اسأل عن الطريقة:</strong> متناقصة أم مرابحة؟ الفرق قد يصل لعشرات الآلاف</li>
+        <li>💡 <strong>اختر مدة أقصر:</strong> كل شهر إضافي يعني فائدة أكثر</li>
+        <li>💡 <strong>راجع الرسوم الإدارية:</strong> بعض البنوك تفرض رسوماً إضافية</li>
+        <li>💡 <strong>لا تتحمل قسطاً أكبر من 33% من راتبك</strong></li>
+      </ul>
+
+      <h2>أسئلة شائعة</h2>
+
+      <details>
+        <summary>هل طريقة المرابحة حلال؟</summary>
+        <p>نعم، المرابحة صيغة تمويل إسلامي معتمدة من هيئات رقابية شرعية. لكن يجب التأكد من أن البنك لا يفرض غرامات تأخير ربوية. راجع مفتيك.</p>
+      </details>
+
+      <details>
+        <summary>هل يمكن السداد المبكر؟</summary>
+        <p>نعم، لكن شروط السداد المبكر تختلف. في النظام المتناقص يُحسب الخصم تلقائياً. في المرابحة قد يفرض البنك شرطاً بعدم الخصم أو خصماً بسيطاً.</p>
+      </details>
+
+      <details>
+        <summary>ما هو معدل الدخل للقسط؟</summary>
+        <p>القاعدة المعتادة: ألا يتجاوز القسط 33% من الراتب الشهري. بعض البنوك تقبل 45% في حالات خاصة.</p>
+      </details>
+
+      <details>
+        <summary>هل تتأثر الحاسبة بالعملة؟</summary>
+        <p>لا، النتيجة نفسها بأي عملة تدخلها (ريال، درهم، دينار...). فقط أدخل المبلغ بعملتك.</p>
+      </details>
+
+      <details>
+        <summary>لماذا الفرق كبير بين الطريقتين؟</summary>
+        <p>في المتناقصة، تدفع فائدة على الرصيد الفعلي المتبقي. في الثابتة، تدفع فائدة على كامل المبلغ طوال المدة، حتى بعد أن سددت جزءاً كبيراً منه.</p>
+      </details>
+    </article>
+
+    <section class="related">
+      <h3>🔗 أدوات ذات صلة</h3>
+      <div class="related-grid">
+        <a href="zakat.html" class="tool-card">
+          <div class="tool-card-icon">🕋</div>
+          <div class="tool-card-title">حاسبة الزكاة</div>
+        </a>
+        <a href="vat.html" class="tool-card">
+          <div class="tool-card-icon">🧾</div>
+          <div class="tool-card-title">ضريبة القيمة المضافة</div>
+        </a>
+        <a href="tabby-tamara.html" class="tool-card">
+          <div class="tool-card-icon">💳</div>
+          <div class="tool-card-title">تابي وتمارا</div>
+        </a>
+      </div>
+    </section>
+
+  </div>
+</main>
+
+<footer class="site-footer">
+  <div class="footer-inner">
+    <div class="footer-col">
+      <h4>احسبها</h4>
+      <p style="font-size:0.9rem;">أدوات حسابية مجانية للتجار</p>
+    </div>
+    <div class="footer-col">
+      <h4>روابط</h4>
+      <a href="../about.html">عن الموقع</a>
+      <a href="../contact.html">اتصل بنا</a>
+    </div>
+  </div>
+  <div class="footer-bottom">© 2025 احسبها</div>
+</footer>
+
+<script src="../assets/main.js"></script>
+<script src="../assets/tools.js"></script>
+<script>calcLoan();</script>
+</body>
+</html>
