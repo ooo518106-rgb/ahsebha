@@ -1,3 +1,17 @@
+// ═══ Google Analytics ═══
+(function() {
+  var script = document.createElement('script');
+  script.async = true;
+  script.src = 'https://www.googletagmanager.com/gtag/js?id=G-DRZH2DY196';
+  document.head.appendChild(script);
+
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+  gtag('config', 'G-DRZH2DY196');
+  window.gtag = gtag;
+})();
+
 // ═══ Theme Management ═══
 function initTheme() {
   const saved = localStorage.getItem('theme');
