@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://ooo518106-rgb.github.io/ahsebha/sitemap.xml
