@@ -3,7 +3,10 @@
   <url>
     <loc>https://ooo518106-rgb.github.io/ahsebha/</loc>
     <priority>1.0</priority>
-    <changefreq>weekly</changefreq>
+  </url>
+  <url>
+    <loc>https://ooo518106-rgb.github.io/ahsebha/index.html</loc>
+    <priority>1.0</priority>
   </url>
   <url>
     <loc>https://ooo518106-rgb.github.io/ahsebha/tools/tabby-tamara.html</loc>
