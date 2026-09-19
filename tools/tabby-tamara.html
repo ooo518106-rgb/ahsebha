@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>حاسبة رسوم تابي وتمارا - احسبها</title>
+  <meta name="description" content="احسب بدقة المبلغ الصافي الذي سيصلك بعد عمولة تابي أو تمارا والضريبة. أداة مجانية سريعة بدون تسجيل.">
+  <meta name="keywords" content="تابي، تمارا، رسوم تابي، عمولة تمارا، حاسبة تابي، دفع آجل">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💳</text></svg>">
+  <meta name="theme-color" content="#4f46e5">
+  
+  <meta property="og:title" content="حاسبة رسوم تابي وتمارا - احسبها">
+  <meta property="og:description" content="احسب المبلغ الصافي بعد العمولة والضريبة">
+  <meta property="og:type" content="website">
+  
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "WebApplication",
+    "name": "حاسبة رسوم تابي وتمارا",
+    "description": "احسب صافي المبلغ بعد عمولة تابي أو تمارا",
+    "applicationCategory": "BusinessApplication",
+    "operatingSystem": "All"
+  }
+  </script>
+  
+  <link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+
+<header class="site-header">
+  <div class="header-inner">
+    <a href="../index.html" class="logo">
+      <span class="logo-icon">💼</span>
+      <span>احسبها</span>
+    </a>
+    <nav class="nav">
+      <a href="../index.html">الرئيسية</a>
+      <a href="../about.html">عن الموقع</a>
+      <a href="../contact.html">اتصل بنا</a>
+      <button class="theme-toggle">🌙 داكن</button>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <section class="page-hero">
+    <div class="page-hero-icon">💳</div>
+    <h1 class="page-title">حاسبة رسوم تابي وتمارا</h1>
+    <p class="page-subtitle">اعرف المبلغ الصافي الذي سيصلك بعد العمولة والضريبة</p>
+  </section>
+
+  <div class="container">
+    <div class="calculator">
+      
+      <div class="form-group">
+        <label>سعر المنتج (ر.س)</label>
+        <input type="number" id="price" value="100" min="0" step="1" oninput="calcTabby()">
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label>نسبة العمولة (%)</label>
+          <input type="number" id="fee" value="7" min="0" step="0.1" oninput="calcTabby()">
+        </div>
+        <div class="form-group">
+          <label>رسوم ثابتة (ر.س)</label>
+          <input type="number" id="fixed" value="1.5" min="0" step="0.5" oninput="calcTabby()">
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label>ضريبة القيمة المضافة على العمولة (%)</label>
+        <input type="number" id="vat" value="15" min="0" step="1" oninput="calcTabby()">
+      </div>
+
+      <button class="btn-primary" onclick="calcTabby()">احسب</button>
+
+      <div id="tabby-alert" class="alert alert-info">أدخل الأرقام واضغط احسب</div>
+
+      <div class="results">
+        <div class="result-card">
+          <div class="result-label">العمولة</div>
+          <div class="result-value" id="commission">0.00 ر.س</div>
+        </div>
+        <div class="result-card">
+          <div class="result-label">الضريبة</div>
+          <div class="result-value" id="vat-amount">0.00 ر.س</div>
+        </div>
+        <div class="result-card">
+          <div class="result-label">إجمالي الخصم</div>
+          <div class="result-value" id="total-deduction">0.00 ر.س</div>
+        </div>
+        <div class="result-card">
+          <div class="result-label">💵 الصافي للتاجر</div>
+          <div class="result-value positive" id="net-amount">0.00 ر.س</div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- إعلان -->
+    <div class="ad-slot">📢 مكان إعلان AdSense</div>
+
+    <!-- محتوى SEO -->
+    <article class="content">
+      <h2>ما هي رسوم تابي وتمارا؟</h2>
+      <p>تابي وتمارا هما منصتا دفع آجل (Buy Now Pay Later) رائدتان في الشرق الأوسط. تتيحان للعملاء شراء المنتجات وتقسيط قيمتها على عدة دفعات بدون فوائد، مما يزيد معدل التحويل في المتاجر الإلكترونية.</p>
+      <p>لكن هذه الخدمة ليست مجانية للتاجر — تفرض المنصة عمولة على كل عملية، بالإضافة إلى ضريبة القيمة المضافة على هذه العمولة.</p>
+
+      <h2>كيف تُحسب العمولة؟</h2>
+      <p>تُحسب العمولة كنسبة مئوية من سعر المنتج، عادة تتراوح بين 4% و 7%، بالإضافة إلى رسم ثابت لكل عملية. ثم تُضاف ضريبة القيمة المضافة (15% في السعودية) على العمولة.</p>
+      <p><strong>معادلة الحساب:</strong></p>
+      <ul>
+        <li>العمولة = (السعر × النسبة) + الرسم الثابت</li>
+        <li>الضريبة = العمولة × 15%</li>
+        <li>إجمالي الخصم = العمولة + الضريبة</li>
+        <li>المبلغ الصافي = سعر المنتج - إجمالي الخصم</li>
+      </ul>
+
+      <h2>مثال عملي</h2>
+      <p>لنفترض أنك بعت منتج بـ <strong>1000 ريال</strong> عبر تابي، والعمولة <strong>7%</strong> + <strong>1.5 ريال</strong> رسوم ثابتة:</p>
+      <ul>
+        <li>العمولة = (1000 × 7%) + 1.5 = <strong>71.5 ريال</strong></li>
+        <li>الضريبة = 71.5 × 15% = <strong>10.73 ريال</strong></li>
+        <li>إجمالي الخصم = <strong>82.23 ريال</strong></li>
+        <li>المبلغ الصافي = 1000 - 82.23 = <strong>917.77 ريال</strong></li>
+      </ul>
+
+      <h2>أسئلة شائعة</h2>
+
+      <details>
+        <summary>هل النسب ثابتة في تابي وتمارا؟</summary>
+        <p>لا، النسب تختلف حسب حجم المتجر، القطاع، وحجم المعاملات. عادة تتراوح بين 4% و 7% للتجار الجدد، وقد تصل لأقل من ذلك للمتاجر الكبيرة. راجع حسابك في تابي أو تمارا لمعرفة نسبتك الفعلية.</p>
+      </details>
+
+      <details>
+        <summary>هل يجب إضافة ضريبة القيمة المضافة على العمولة؟</summary>
+        <p>نعم، إذا كنت مسجلاً في هيئة الزكاة والضريبة والجمارك (ZATCA)، فإن العمولة تخضع لضريبة 15% التي تُخصم منك.</p>
+      </details>
+
+      <details>
+        <summary>هل الرسوم الثابتة مطلوبة؟</summary>
+        <p>بعض الحسابات التجارية لا تحتوي على رسوم ثابتة، فقط نسبة مئوية. إذا لم تكن هناك رسوم ثابتة، اجعلها 0 في الحاسبة.</p>
+      </details>
+
+      <details>
+        <summary>هل يمكنني استخدام تابي وتمارا معاً؟</summary>
+        <p>نعم، معظم المتاجر الكبيرة تدعم الاثنين معاً. قارن النسب والرسوم لكل منصة لاختيار الأنسب.</p>
+      </details>
+
+      <details>
+        <summary>كيف أزيد أرباحي مع تابي وتمارا؟</summary>
+        <p>أفضل طريقة: ارفع سعر المنتج قليلاً لتغطية العمولة، أو استخدم تابي وتمارا فقط على المنتجات ذات الهامش المرتفع (40%+).</p>
+      </details>
+    </article>
+
+    <!-- أدوات ذات صلة -->
+    <section class="related">
+      <h3>🔗 أدوات ذات صلة</h3>
+      <div class="related-grid">
+        <a href="zakat.html" class="tool-card">
+          <div class="tool-card-icon">🕋</div>
+          <div class="tool-card-title">حاسبة الزكاة</div>
+        </a>
+        <a href="vat.html" class="tool-card">
+          <div class="tool-card-icon">🧾</div>
+          <div class="tool-card-title">ضريبة القيمة المضافة</div>
+        </a>
+        <a href="loan-calculator.html" class="tool-card">
+          <div class="tool-card-icon">🏦</div>
+          <div class="tool-card-title">القروض والأقساط</div>
+        </a>
+      </div>
+    </section>
+
+  </div>
+</main>
+
+<footer class="site-footer">
+  <div class="footer-inner">
+    <div class="footer-col">
+      <h4>احسبها</h4>
+      <p style="font-size:0.9rem;">أدوات حسابية مجانية للتجار</p>
+    </div>
+    <div class="footer-col">
+      <h4>روابط</h4>
+      <a href="../about.html">عن الموقع</a>
+      <a href="../contact.html">اتصل بنا</a>
+    </div>
+  </div>
+  <div class="footer-bottom">© 2025 احسبها</div>
+</footer>
+
+<script src="../assets/main.js"></script>
+<script src="../assets/tools.js"></script>
+<script>calcTabby();</script>
+</body>
+</html>
