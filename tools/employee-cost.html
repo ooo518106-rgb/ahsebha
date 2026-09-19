@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>حاسبة تكلفة الموظف الإجمالية - احسبها</title>
+<meta name="description" content="احسب التكلفة الحقيقية للموظف شهرياً وسنوياً (راتب + بدلات + تأمينات + مكافآت) لأصحاب العمل.">
+<meta name="keywords" content="تكلفة الموظف، تأمينات، مكافآت، أصحاب العمل، GOSI">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>👥</text></svg>">
+<meta name="theme-color" content="#4f46e5">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "WebApplication",
+  "name": "حاسبة تكلفة الموظف",
+  "description": "احسب التكلفة الإجمالية للموظف",
+  "applicationCategory": "BusinessApplication"
+}
+</script>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+
+<header class="site-header">
+  <div class="header-inner">
+    <a href="../index.html" class="logo"><span class="logo-icon">💼</span><span>احسبها</span></a>
+    <nav class="nav">
+      <a href="../index.html">الرئيسية</a>
+      <a href="../about.html">عن الموقع</a>
+      <a href="../contact.html">اتصل بنا</a>
+      <button class="theme-toggle">🌙 داكن</button>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <section class="page-hero">
+    <div class="page-hero-icon">👥</div>
+    <h1 class="page-title">تكلفة الموظف الإجمالية</h1>
+    <p class="page-subtitle">اعرف التكلفة الحقيقية لكل موظف</p>
+  </section>
+
+  <div class="container">
+    <div class="calculator">
+
+      <div class="form-group">
+        <label>الراتب الأساسي (ر.س)</label>
+        <input type="number" id="ec-salary" value="5000" min="0" step="100" oninput="calcEmployeeCost()">
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label>بدل السكن (ر.س)</label>
+          <input type="number" id="ec-housing" value="1250" min="0" step="100" oninput="calcEmployeeCost()">
+        </div>
+        <div class="form-group">
+          <label>بدل المواصلات (ر.س)</label>
+          <input type="number" id="ec-transport" value="500" min="0" step="50" oninput="calcEmployeeCost()">
+        </div>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label>بدلات أخرى (ر.س)</label>
+          <input type="number" id="ec-other" value="0" min="0" step="100" oninput="calcEmployeeCost()">
+        </div>
+        <div class="form-group">
+          <label>مكافآت سنوية (ر.س)</label>
+          <input type="number" id="ec-bonus" value="0" min="0" step="500" oninput="calcEmployeeCost()">
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label>الجنسية</label>
+        <select id="ec-nationality" onchange="calcEmployeeCost()">
+          <option value="saudi">سعودي</option>
+          <option value="non-saudi">غير سعودي</option>
+        </select>
+      </div>
+
+      <button class="btn-primary" onclick="calcEmployeeCost()">احسب</button>
+
+      <div class="results">
+        <div class="result-card">
+          <div class="result-label">💼 التكلفة الشهرية</div>
+          <div class="result-value positive" id="ec-monthly">0.00 ر.س</div>
+        </div>
+        <div class="result-card">
+          <div class="result-label">📅 التكلفة السنوية</div>
+          <div class="result-value" id="ec-annual">0.00 ر.س</div>
+        </div>
+        <div class="result-card">
+          <div class="result-label">🛡️ التأمينات</div>
+          <div class="result-value" id="ec-gosi">0.00 ر.س</div>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="ad-slot">📢 مكان إعلان AdSense</div>
+
+    <article class="content">
+      <h2>ما هي تكلفة الموظف الحقيقية؟</h2>
+      <p>كثير من أصحاب العمل يحسبون تكلفة الموظف من راتبه فقط، لكن هناك <strong>تكاليف إضافية</strong> يجب حسابها:</p>
+      <ul>
+        <li>✅ الراتب الأساسي</li>
+        <li>✅ البدلات (سكن، مواصلات، بدلات أخرى)</li>
+        <li>✅ حصة صاحب العمل في التأمينات</li>
+        <li>✅ المكافآت السنوية</li>
+        <li>✅ تكلفة الإجازات (مدفوعة)</li>
+      </ul>
+
+      <h2>المعادلة</h2>
+      <ul>
+        <li><strong>التكلفة الشهرية</strong> = الراتب + البدلات + التأمينات</li>
+        <li><strong>التكلفة السنوية</strong> = التكلفة الشهرية × 12 + المكافآت</li>
+      </ul>
+
+      <h2>التأمينات (GOSI)</h2>
+      <ul>
+        <li><strong>السعودي:</strong> 12.75% (حصة صاحب العمل) في 2026</li>
+        <li><strong>غير السعودي:</strong> 2% فقط (تأمين ضد المخاطر)</li>
+      </ul>
+      <p><strong>الأساس:</strong> الراتب الأساسي + بدل السكن، بحد أقصى 45,000 ر.س.</p>
+
+      <h2>مثال عملي</h2>
+      <p>موظف سعودي: راتب 5,000 + سكن 1,250 + مواصلات 500:</p>
+      <ul>
+        <li>إجمالي الراتب = <strong>6,750 ر.س</strong></li>
+        <li>الأساس التأميني = 5,000 + 1,250 = 6,250 (تحت الحد الأقصى)</li>
+        <li>التأمينات = 6,250 × 12.75% = <strong>796.88 ر.س</strong></li>
+        <li>التكلفة الشهرية = 6,750 + 796.88 = <strong>7,546.88 ر.س</strong></li>
+        <li>التكلفة السنوية = 7,546.88 × 12 = <strong>90,562.50 ر.س</strong></li>
+      </ul>
+      <p>الفرق بين الراتب (5,000) والتكلفة الحقيقية (7,547) = <strong>51% إضافية!</strong></p>
+
+      <h2>تكاليف خفية إضافية</h2>
+      <ul>
+        <li>📅 <strong>الإجازات السنوية:</strong> 21-30 يوم مدفوعة</li>
+        <li>🏥 <strong>التأمين الطبي:</strong> إلزامي للموظف وعائلته</li>
+        <li>✈️ <strong>تذاكر السفر:</strong> للأجانب (سنوية)</li>
+        <li>💼 <strong>مكافأة نهاية الخدمة:</strong> نصف راتب عن كل سنة</li>
+        <li>📱 <strong>أدوات العمل:</strong> لابتوب، جوال، مكتب</li>
+      </ul>
+
+      <h2>لماذا هذا مهم؟</h2>
+      <ul>
+        <li>💡 <strong>تسعير الخدمات:</strong> اعرف ربحك الحقيقي من كل مشروع</li>
+        <li>💡 <strong>الميزانية:</strong> تخطيط دقيق للمصاريف</li>
+        <li>💡 <strong>المقارنة:</strong> الموظف مقابل المتعاقد</li>
+        <li>💡 <strong>الاستدامة:</strong> تجنّب الالتزامات أكبر من قدرتك</li>
+      </ul>
+
+      <h2>أسئلة شائعة</h2>
+
+      <details>
+        <summary>هل الحاسبة تشمل الإجازات والتأمين الطبي؟</summary>
+        <p>لا، هذه الحاسبة أساسية. أضف التكاليف الإضافية في خانة "بدلات أخرى" أو "مكافآت سنوية" لتقدير أدق.</p>
+      </details>
+
+      <details>
+        <summary>هل يمكن تقليل تكلفة التأمينات؟</summary>
+        <p>لا، النسب ثابتة نظامياً. لكن يمكنك تقليل التكلفة العامة بتحسين الكفاءة أو استخدام التعاقد الحر.</p>
+      </details>
+
+      <details>
+        <summary>ما الفرق بين الموظف والمتعاقد؟</summary>
+        <p>الموظف: تكلفة أعلى (تأمينات + إجازات + مكافأة) لكن التزام وحضور. المتعاقد: تكلفة أقل لكن مرونة أقل في الإدارة.</p>
+      </details>
+
+      <details>
+        <summary>هل التكلفة السنوية تشمل المكافأة؟</summary>
+        <p>الحاسبة تضيف المكافآت التي تُدخلها في خانة "مكافآت سنوية". أما مكافأة نهاية الخدمة فتُحسب عند انتهاء الخدمة فقط.</p>
+      </details>
+    </article>
+
+    <section class="related">
+      <h3>🔗 أدوات ذات صلة</h3>
+      <div class="related-grid">
+        <a href="salary.html" class="tool-card">
+          <div class="tool-card-icon">💸</div>
+          <div class="tool-card-title">حاسبة الرواتب</div>
+        </a>
+        <a href="end-of-service.html" class="tool-card">
+          <div class="tool-card-icon">🛡️</div>
+          <div class="tool-card-title">نهاية الخدمة</div>
+        </a>
+        <a href="loan-calculator.html" class="tool-card">
+          <div class="tool-card-icon">🏦</div>
+          <div class="tool-card-title">القروض</div>
+        </a>
+      </div>
+    </section>
+
+  </div>
+</main>
+
+<footer class="site-footer">
+  <div class="footer-inner">
+    <div class="footer-col">
+      <h4>احسبها</h4>
+      <p style="font-size:0.9rem;">أدوات حسابية مجانية للتجار</p>
+    </div>
+    <div class="footer-col">
+      <h4>روابط</h4>
+      <a href="../about.html">عن الموقع</a>
+      <a href="../contact.html">اتصل بنا</a>
+    </div>
+  </div>
+  <div class="footer-bottom">© 2025 احسبها</div>
+</footer>
+
+<script src="../assets/main.js"></script>
+<script src="../assets/tools.js"></script>
+<script>calcEmployeeCost();</script>
+</body>
+</html>
