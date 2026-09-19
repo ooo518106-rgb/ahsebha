@@ -1,0 +1,221 @@
+// ═══════════════════════════════════════════
+// احسبها - دوال جميع الحسابات
+// ═══════════════════════════════════════════
+
+// ═══ حاسبة تابي وتمارا ═══
+function calcTabby() {
+  const price = parseFloat(document.getElementById('price').value) || 0;
+  const feePercent = parseFloat(document.getElementById('fee').value) || 0;
+  const fixedFee = parseFloat(document.getElementById('fixed').value) || 0;
+  const vatPercent = parseFloat(document.getElementById('vat').value) || 0;
+
+  const commission = (price * feePercent / 100) + fixedFee;
+  const vat = commission * (vatPercent / 100);
+  const totalDeduction = commission + vat;
+  const net = price - totalDeduction;
+
+  const totalEl = document.getElementById('total-deduction');
+  const netEl = document.getElementById('net-amount');
+  const commEl = document.getElementById('commission');
+  const vatEl = document.getElementById('vat-amount');
+  const alertEl = document.getElementById('tabby-alert');
+
+  if (commEl) commEl.textContent = fmt(commission) + ' ر.س';
+  if (vatEl) vatEl.textContent = fmt(vat) + ' ر.س';
+  if (totalEl) totalEl.textContent = fmt(totalDeduction) + ' ر.س';
+  if (netEl) {
+    netEl.textContent = fmt(net) + ' ر.س';
+    netEl.className = 'result-value ' + (net > 0 ? 'positive' : 'negative');
+  }
+
+  if (alertEl) {
+    if (net <= 0) {
+      alertEl.className = 'alert alert-error';
+      alertEl.textContent = '⚠️ تحذير: بعد خصم العمولة والضريبة، لن تحصل على أي مبلغ!';
+    } else if (net < price * 0.5) {
+      alertEl.className = 'alert alert-warning';
+      alertEl.textContent = '⚡ تنبيه: أكثر من نصف قيمة المنتج تذهب للعمولة!';
+    } else {
+      alertEl.className = 'alert alert-success';
+      alertEl.textContent = '✅ عملية مربحة - تستلم ' + fmt(net) + ' ر.س';
+    }
+  }
+}
+
+// ═══ حاسبة الزكاة ═══
+function calcZakat() {
+  const wealth = parseFloat(document.getElementById('wealth').value) || 0;
+  const goldPrice = parseFloat(document.getElementById('gold-price').value) || 0;
+  const nisab = goldPrice * 85;
+  const zakat = wealth * 0.025;
+
+  const nisabEl = document.getElementById('nisab-value');
+  const zakatEl = document.getElementById('zakat-value');
+  const alertEl = document.getElementById('zakat-alert');
+
+  if (nisabEl) nisabEl.textContent = fmt(nisab) + ' ر.س';
+  if (zakatEl) zakatEl.textContent = fmt(zakat) + ' ر.س';
+
+  if (alertEl) {
+    if (wealth < nisab) {
+      alertEl.className = 'alert alert-warning';
+      alertEl.textContent = '⚠️ مالك أقل من النصاب (' + fmt(nisab) + ' ر.س) - لا تجب الزكاة';
+      if (zakatEl) zakatEl.textContent = '0.00 ر.س';
+    } else {
+      alertEl.className = 'alert alert-success';
+      alertEl.textContent = '✅ تجب عليك الزكاة بمقدار ' + fmt(zakat) + ' ر.س';
+    }
+  }
+}
+
+// ═══ حاسبة ضريبة القيمة المضافة ═══
+function calcVAT() {
+  const price = parseFloat(document.getElementById('price').value) || 0;
+  const rate = parseFloat(document.getElementById('rate').value) || 0;
+  const mode = document.getElementById('mode').value;
+
+  let base, vat, total;
+
+  if (mode === 'add') {
+    base = price;
+    vat = price * (rate / 100);
+    total = price + vat;
+  } else {
+    total = price;
+    base = price / (1 + rate / 100);
+    vat = price - base;
+  }
+
+  const baseEl = document.getElementById('base-price');
+  const vatEl = document.getElementById('vat-value');
+  const totalEl = document.getElementById('total-price');
+
+  if (baseEl) baseEl.textContent = fmt(base) + ' ر.س';
+  if (vatEl) vatEl.textContent = fmt(vat) + ' ر.س';
+  if (totalEl) totalEl.textContent = fmt(total) + ' ر.س';
+}
+
+// ═══ حاسبة القروض (متناقصة + ثابتة) ═══
+function calcLoan() {
+  const amount = parseFloat(document.getElementById('amount').value) || 0;
+  const rate = parseFloat(document.getElementById('rate').value) || 0;
+  const months = parseInt(document.getElementById('months').value) || 1;
+  const method = document.getElementById('method').value;
+
+  let payment, total, interest;
+
+  if (method === 'declining') {
+    if (rate > 0) {
+      const mr = (rate / 100) / 12;
+      const f = Math.pow(1 + mr, months);
+      payment = amount * (mr * f) / (f - 1);
+    } else {
+      payment = amount / months;
+    }
+    total = payment * months;
+    interest = total - amount;
+  } else {
+    // مرابحة (ثابتة)
+    interest = amount * (rate / 100) * (months / 12);
+    total = amount + interest;
+    payment = total / months;
+  }
+
+  const paymentEl = document.getElementById('payment');
+  const interestEl = document.getElementById('interest');
+  const totalEl = document.getElementById('total');
+
+  if (paymentEl) paymentEl.textContent = fmt(payment) + ' ر.س';
+  if (interestEl) interestEl.textContent = fmt(interest) + ' ر.س';
+  if (totalEl) totalEl.textContent = fmt(total) + ' ر.س';
+}
+
+// ═══ حاسبة هامش الربح (التجارة الإلكترونية) ═══
+function calcProfit() {
+  const cost = parseFloat(document.getElementById('cost').value) || 0;
+  const shipping = parseFloat(document.getElementById('shipping').value) || 0;
+  const sellPrice = parseFloat(document.getElementById('sell-price').value) || 0;
+  const gatewayPercent = parseFloat(document.getElementById('gateway').value) || 0;
+  const fixedFee = parseFloat(document.getElementById('fixed-fee').value) || 0;
+
+  const totalCost = cost + shipping;
+  const gateway = (sellPrice * gatewayPercent / 100) + fixedFee;
+  const profit = sellPrice - totalCost - gateway;
+  const margin = sellPrice > 0 ? (profit / sellPrice) * 100 : 0;
+
+  const costEl = document.getElementById('total-cost');
+  const gatewayEl = document.getElementById('gateway-fee');
+  const profitEl = document.getElementById('net-profit');
+  const marginEl = document.getElementById('margin');
+
+  if (costEl) costEl.textContent = fmt(totalCost) + ' ر.س';
+  if (gatewayEl) gatewayEl.textContent = fmt(gateway) + ' ر.س';
+  if (profitEl) {
+    profitEl.textContent = fmt(profit) + ' ر.س';
+    profitEl.className = 'result-value ' + (profit > 0 ? 'positive' : 'negative');
+  }
+  if (marginEl) marginEl.textContent = fmt(margin, 1) + '%';
+}
+
+// ═══ حاسبة الخصومات ═══
+function calcDiscount() {
+  const price = parseFloat(document.getElementById('price').value) || 0;
+  const type = document.getElementById('type').value;
+  let discount = 0;
+
+  if (type === 'percent') {
+    const percent = parseFloat(document.getElementById('percent').value) || 0;
+    discount = price * (percent / 100);
+  } else {
+    discount = parseFloat(document.getElementById('fixed-disc').value) || 0;
+    if (discount > price) discount = price;
+  }
+
+  const finalPrice = price - discount;
+
+  const discountEl = document.getElementById('discount-amount');
+  const finalEl = document.getElementById('final-price');
+
+  if (discountEl) discountEl.textContent = fmt(discount) + ' ر.س';
+  if (finalEl) finalEl.textContent = fmt(finalPrice) + ' ر.س';
+}
+
+// ═══ حاسبة العمر ═══
+function calcAge() {
+  const dobStr = document.getElementById('dob').value;
+  if (!dobStr) return;
+
+  const dob = new Date(dobStr);
+  const today = new Date();
+  const totalDays = Math.floor((today - dob) / (1000 * 60 * 60 * 24));
+  const totalWeeks = Math.floor(totalDays / 7);
+
+  let years = today.getFullYear() - dob.getFullYear();
+  let months = today.getMonth() - dob.getMonth();
+  let days = today.getDate() - dob.getDate();
+
+  if (days < 0) {
+    months--;
+    const prevMonth = new Date(today.getFullYear(), today.getMonth(), 0);
+    days += prevMonth.getDate();
+  }
+  if (months < 0) {
+    years--;
+    months += 12;
+  }
+
+  const yearsEl = document.getElementById('age-years');
+  const monthsEl = document.getElementById('age-months');
+  const daysEl = document.getElementById('age-days');
+  const totalEl = document.getElementById('age-total-days');
+
+  if (yearsEl) yearsEl.textContent = years;
+  if (monthsEl) monthsEl.textContent = months;
+  if (daysEl) daysEl.textContent = days;
+  if (totalEl) totalEl.textContent = totalDays.toLocaleString();
+}
+
+// ═══ تنسيق العملة ═══
+function fmtCurrency(num, currency = 'ر.س') {
+  return fmt(num) + ' ' + currency;
+}
