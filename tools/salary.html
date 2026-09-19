@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>حاسبة الرواتب - احسبها</title>
+<meta name="description" content="احسب الراتب الصافي بعد البدلات والخصومات. أداة مجانية سريعة للموظفين وأصحاب العمل.">
+<meta name="keywords" content="راتب، صافي الراتب، بدلات، خصومات، حاسبة رواتب">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💸</text></svg>">
+<meta name="theme-color" content="#4f46e5">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "WebApplication",
+  "name": "حاسبة الرواتب",
+  "description": "احسب الراتب الصافي بعد البدلات والخصومات",
+  "applicationCategory": "FinanceApplication"
+}
+</script>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+
+<header class="site-header">
+  <div class="header-inner">
+    <a href="../index.html" class="logo"><span class="logo-icon">💼</span><span>احسبها</span></a>
+    <nav class="nav">
+      <a href="../index.html">الرئيسية</a>
+      <a href="../about.html">عن الموقع</a>
+      <a href="../contact.html">اتصل بنا</a>
+      <button class="theme-toggle">🌙 داكن</button>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <section class="page-hero">
+    <div class="page-hero-icon">💸</div>
+    <h1 class="page-title">حاسبة الرواتب</h1>
+    <p class="page-subtitle">احسب الراتب الصافي بعد البدلات والخصومات</p>
+  </section>
+
+  <div class="container">
+    <div class="calculator">
+
+      <div class="form-group">
+        <label>الراتب الأساسي (ر.س)</label>
+        <input type="number" id="basic" value="5000" min="0" step="100" oninput="calcSalary()">
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label>البدلات (ر.س)</label>
+          <input type="number" id="allowances" value="1500" min="0" step="100" oninput="calcSalary()">
+        </div>
+        <div class="form-group">
+          <label>الخصومات (ر.س)</label>
+          <input type="number" id="deductions" value="0" min="0" step="100" oninput="calcSalary()">
+        </div>
+      </div>
+
+      <button class="btn-primary" onclick="calcSalary()">احسب</button>
+
+      <div id="salary-alert" class="alert alert-info">أدخل البيانات لمعرفة الصافي</div>
+
+      <div class="results">
+        <div class="result-card">
+          <div class="result-label">💰 الصافي المستحق</div>
+          <div class="result-value positive" id="net-salary">0.00 ر.س</div>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="ad-slot">📢 مكان إعلان AdSense</div>
+
+    <article class="content">
+      <h2>ما هي حاسبة الرواتب؟</h2>
+      <p>أداة سريعة تحسب لك <strong>صافي الراتب</strong> (الراتب المستحق الفعلي) بعد إضافة البدلات وطرح الخصومات من الراتب الأساسي.</p>
+
+      <h2>المعادلة</h2>
+      <ul>
+        <li>صافي الراتب = الراتب الأساسي + البدلات - الخصومات</li>
+      </ul>
+
+      <h2>مكونات الراتب</h2>
+      <h3>1. الراتب الأساسي</h3>
+      <p>المبلغ المتفق عليه في العقد، ويُحسب عليه التأمينات ومكافأة نهاية الخدمة.</p>
+
+      <h3>2. البدلات</h3>
+      <ul>
+        <li>🏠 <strong>بدل السكن:</strong> عادة 25% من الأساسي (3 أشهر سنوياً)</li>
+        <li>🚗 <strong>بدل المواصلات:</strong> 10% عادة (شهر واحد سنوياً)</li>
+        <li>📱 <strong>بدل الهاتف:</strong> مبلغ ثابت شهري</li>
+        <li>💼 <strong>بدل طبيعة العمل:</strong> حسب الوظيفة</li>
+      </ul>
+
+      <h3>3. الخصومات</h3>
+      <ul>
+        <li>⚠️ <strong>التأمينات الاجتماعية:</strong> 9.75% - 10.75% (حسب نظام الالتحاق)</li>
+        <li>📅 <strong>الغياب:</strong> يُخصم بحسبة الراتب ÷ 30 × أيام الغياب</li>
+        <li>💰 <strong>السلف:</strong> المبلغ المتفق عليه</li>
+        <li>🔧 <strong>الغرامات:</strong> حسب لائحة الجزاءات</li>
+      </ul>
+
+      <h2>مثال عملي</h2>
+      <p>موظف راتبه الأساسي <strong>5000 ريال</strong> + بدل سكن 1250 + بدل مواصلات 500:</p>
+      <ul>
+        <li>الراتب الإجمالي = 5000 + 1750 = <strong>6750 ريال</strong></li>
+        <li>التأمينات (10%) = <strong>675 ريال</strong></li>
+        <li>الصافي = 6750 - 675 = <strong>6075 ريال</strong></li>
+      </ul>
+
+      <h2>نصائح للموظفين</h2>
+      <ul>
+        <li>💡 <strong>راجع قسيمة الراتب شهرياً</strong> للتأكد من الخصومات</li>
+        <li>💡 <strong>اعرف نسبة التأمينات</strong> التي تنطبق عليك</li>
+        <li>💡 <strong>احتفظ بسجل الخصومات</strong> لأي اعتراض مستقبلي</li>
+      </ul>
+
+      <h2>نصائح لأصحاب العمل</h2>
+      <ul>
+        <li>💼 <strong>وضّح البدلات في العقد</strong> لتجنب النزاعات</li>
+        <li>💼 <strong>احسب التكلفة الحقيقية:</strong> الراتب + التأمينات + الإجازات</li>
+        <li>💼 <strong>التزم بنظام العمل</strong> السعودي أو الخليجي</li>
+      </ul>
+
+      <h2>أسئلة شائعة</h2>
+
+      <details>
+        <summary>ما الفرق بين الراتب الإجمالي والصافي؟</summary>
+        <p>الإجمالي = الأساسي + البدلات. الصافي = الإجمالي - الخصومات (تأمينات، غياب، سلف).</p>
+      </details>
+
+      <details>
+        <summary>هل التأمينات تُحسب على الراتب كامل؟</summary>
+        <p>لا، تُحسب على الراتب الأساسي + بدل السكن، بحد أقصى 45,000 ريال شهرياً.</p>
+      </details>
+
+      <details>
+        <summary>هل يختلف الراتب الصافي كل شهر؟</summary>
+        <p>غالباً ثابت، إلا إذا كان هناك غياب أو سلف أو مكافآت. التأمينات ثابتة شهرياً.</p>
+      </details>
+
+      <details>
+        <summary>هل تشمل الحاسبة التأمينات تلقائياً؟</summary>
+        <p>لا، هذه الحاسبة عامة. أدخل مبلغ التأمينات في خانة "الخصومات" يدوياً. يمكن استخدام حاسبة "نهاية الخدمة" لحساب التأمينات بدقة.</p>
+      </details>
+    </article>
+
+    <section class="related">
+      <h3>🔗 أدوات ذات صلة</h3>
+      <div class="related-grid">
+        <a href="end-of-service.html" class="tool-card">
+          <div class="tool-card-icon">🛡️</div>
+          <div class="tool-card-title">نهاية الخدمة</div>
+        </a>
+        <a href="employee-cost.html" class="tool-card">
+          <div class="tool-card-icon">👥</div>
+          <div class="tool-card-title">تكلفة الموظف</div>
+        </a>
+        <a href="zakat.html" class="tool-card">
+          <div class="tool-card-icon">🕋</div>
+          <div class="tool-card-title">حاسبة الزكاة</div>
+        </a>
+      </div>
+    </section>
+
+  </div>
+</main>
+
+<footer class="site-footer">
+  <div class="footer-inner">
+    <div class="footer-col">
+      <h4>احسبها</h4>
+      <p style="font-size:0.9rem;">أدوات حسابية مجانية للتجار</p>
+    </div>
+    <div class="footer-col">
+      <h4>روابط</h4>
+      <a href="../about.html">عن الموقع</a>
+      <a href="../contact.html">اتصل بنا</a>
+    </div>
+  </div>
+  <div class="footer-bottom">© 2025 احسبها</div>
+</footer>
+
+<script src="../assets/main.js"></script>
+<script src="../assets/tools.js"></script>
+<script>calcSalary();</script>
+</body>
+</html>
