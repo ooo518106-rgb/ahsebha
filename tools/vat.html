@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>حاسبة ضريبة القيمة المضافة - احسبها</title>
+  <meta name="description" content="احسب ضريبة القيمة المضافة VAT 15% بسهولة - إضافة أو استخراج الضريبة من أي مبلغ. أداة مجانية سريعة.">
+  <meta name="keywords" content="ضريبة، VAT، ضريبة القيمة المضافة، 15%، ZATCA">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧾</text></svg>">
+  <meta name="theme-color" content="#4f46e5">
+  
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "WebApplication",
+    "name": "حاسبة ضريبة القيمة المضافة",
+    "description": "احسب VAT بإضافة أو استخراج الضريبة",
+    "applicationCategory": "FinanceApplication"
+  }
+  </script>
+  
+  <link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+
+<header class="site-header">
+  <div class="header-inner">
+    <a href="../index.html" class="logo">
+      <span class="logo-icon">💼</span>
+      <span>احسبها</span>
+    </a>
+    <nav class="nav">
+      <a href="../index.html">الرئيسية</a>
+      <a href="../about.html">عن الموقع</a>
+      <a href="../contact.html">اتصل بنا</a>
+      <button class="theme-toggle">🌙 داكن</button>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <section class="page-hero">
+    <div class="page-hero-icon">🧾</div>
+    <h1 class="page-title">حاسبة ضريبة القيمة المضافة</h1>
+    <p class="page-subtitle">أضف أو استخرج الضريبة من أي مبلغ</p>
+  </section>
+
+  <div class="container">
+    <div class="calculator">
+      
+      <div class="form-group">
+        <label>الطريقة</label>
+        <select id="mode" onchange="calcVAT()">
+          <option value="add">إضافة الضريبة (السعر بدون ضريبة)</option>
+          <option value="extract">استخراج الضريبة (السعر شامل)</option>
+        </select>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label>المبلغ (ر.س)</label>
+          <input type="number" id="price" value="1000" min="0" step="10" oninput="calcVAT()">
+        </div>
+        <div class="form-group">
+          <label>نسبة الضريبة (%)</label>
+          <input type="number" id="rate" value="15" min="0" max="100" step="1" oninput="calcVAT()">
+        </div>
+      </div>
+
+      <button class="btn-primary" onclick="calcVAT()">احسب</button>
+
+      <div class="results">
+        <div class="result-card">
+          <div class="result-label">السعر قبل الضريبة</div>
+          <div class="result-value" id="base-price">0.00 ر.س</div>
+        </div>
+        <div class="result-card">
+          <div class="result-label">🧾 قيمة الضريبة</div>
+          <div class="result-value" id="vat-value">0.00 ر.س</div>
+        </div>
+        <div class="result-card">
+          <div class="result-label">💰 السعر مع الضريبة</div>
+          <div class="result-value positive" id="total-price">0.00 ر.س</div>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="ad-slot">📢 مكان إعلان AdSense</div>
+
+    <article class="content">
+      <h2>ما هي ضريبة القيمة المضافة؟</h2>
+      <p>ضريبة القيمة المضافة (Value Added Tax - VAT) هي ضريبة غير مباشرة تُفرض على معظم السلع والخدمات في كل مرحلة من مراحل الإنتاج والتوزيع. في المملكة العربية السعودية، تبلغ النسبة <strong>15%</strong> منذ يوليو 2020.</p>
+
+      <h2>كيف تُحسب الضريبة؟</h2>
+      <p>هناك طريقتان:</p>
+      <h3>1. إضافة الضريبة (السعر بدون ضريبة)</h3>
+      <ul>
+        <li>الضريبة = السعر × النسبة</li>
+        <li>السعر النهائي = السعر + الضريبة</li>
+      </ul>
+
+      <h3>2. استخراج الضريبة (السعر شامل الضريبة)</h3>
+      <ul>
+        <li>السعر قبل الضريبة = السعر ÷ (1 + النسبة)</li>
+        <li>الضريبة = السعر - السعر قبل الضريبة</li>
+      </ul>
+
+      <h2>مثال عملي</h2>
+      <p><strong>مثال 1 (إضافة):</strong> منتج بـ 1000 ريال بدون ضريبة:</p>
+      <ul>
+        <li>الضريبة = 1000 × 15% = <strong>150 ريال</strong></li>
+        <li>السعر النهائي = <strong>1150 ريال</strong></li>
+      </ul>
+
+      <p><strong>مثال 2 (استخراج):</strong> منتج بـ 1150 ريال شامل الضريبة:</p>
+      <ul>
+        <li>السعر قبل الضريبة = 1150 ÷ 1.15 = <strong>1000 ريال</strong></li>
+        <li>الضريبة = <strong>150 ريال</strong></li>
+      </ul>
+
+      <h2>من يجب عليه التسجيل في الضريبة؟</h2>
+      <p>في السعودية، يجب التسجيل الإلزامي في ضريبة القيمة المضافة إذا تجاوزت إيراداتك السنوية <strong>375,000 ريال</strong>. التسجيل الاختياري متاح إذا تجاوزت <strong>187,500 ريال</strong>.</p>
+
+      <h2>أسئلة شائعة</h2>
+
+      <details>
+        <summary>ما هي نسبة ضريبة القيمة المضافة في السعودية؟</summary>
+        <p>النسبة الحالية 15% منذ 1 يوليو 2020. قبل ذلك كانت 5%.</p>
+      </details>
+
+      <details>
+        <summary>هل كل المنتجات خاضعة للضريبة؟</summary>
+        <p>لا، هناك سلع وخدمات معفاة مثل: بعض الخدمات المالية، التأمين الصحي، التعليم الأهلي، وتأجير العقارات السكنية.</p>
+      </details>
+
+      <details>
+        <summary>متى أقدم الإقرار الضريبي؟</summary>
+        <p>يُقدَّم الإقرار الضريبي شهرياً أو ربع سنوي حسب حجم المنشأة، خلال 30 يوماً من نهاية الفترة.</p>
+      </details>
+
+      <details>
+        <summary>هل أستطيع خصم ضريبة المدخلات؟</summary>
+        <p>نعم، إذا كنت مسجلاً في ZATCA، يمكنك خصم الضريبة التي دفعت على مشترياتك التجارية من ضريبة مبيعاتك.</p>
+      </details>
+
+      <details>
+        <summary>ما الفرق بين الإعفاء والنسبة الصفرية؟</summary>
+        <p>الإعفاء: لا تفرض ضريبة ولا تخصم مدخلات. النسبة الصفرية: تفرض 0% لكن تستطيع خصم ضريبة المدخلات (للتصدير مثلاً).</p>
+      </details>
+    </article>
+
+    <section class="related">
+      <h3>🔗 أدوات ذات صلة</h3>
+      <div class="related-grid">
+        <a href="zakat.html" class="tool-card">
+          <div class="tool-card-icon">🕋</div>
+          <div class="tool-card-title">حاسبة الزكاة</div>
+        </a>
+        <a href="tabby-tamara.html" class="tool-card">
+          <div class="tool-card-icon">💳</div>
+          <div class="tool-card-title">تابي وتمارا</div>
+        </a>
+        <a href="loan-calculator.html" class="tool-card">
+          <div class="tool-card-icon">🏦</div>
+          <div class="tool-card-title">القروض والأقساط</div>
+        </a>
+      </div>
+    </section>
+
+  </div>
+</main>
+
+<footer class="site-footer">
+  <div class="footer-inner">
+    <div class="footer-col">
+      <h4>احسبها</h4>
+      <p style="font-size:0.9rem;">أدوات حسابية مجانية للتجار</p>
+    </div>
+    <div class="footer-col">
+      <h4>روابط</h4>
+      <a href="../about.html">عن الموقع</a>
+      <a href="../contact.html">اتصل بنا</a>
+    </div>
+  </div>
+  <div class="footer-bottom">© 2025 احسبها</div>
+</footer>
+
+<script src="../assets/main.js"></script>
+<script src="../assets/tools.js"></script>
+<script>calcVAT();</script>
+</body>
+</html>
