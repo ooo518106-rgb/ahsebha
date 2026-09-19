@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>حاسبة عمولة سلة وزد - احسبها</title>
+  <meta name="description" content="احسب صافي ربحك بعد خصم عمولة سلة أو زد أو شوبيفاي ورسوم الدفع والضريبة. أداة مجانية دقيقة للتجار.">
+  <meta name="keywords" content="سلة، زد، شوبيفاي، عمولة، رسوم، متجر إلكتروني، ربح">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏪</text></svg>">
+  <meta name="theme-color" content="#4f46e5">
+  
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "WebApplication",
+    "name": "حاسبة عمولة سلة وزد",
+    "description": "احسب صافي الربح بعد عمولة المنصة والدفع",
+    "applicationCategory": "BusinessApplication"
+  }
+  </script>
+  
+  <link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+
+<header class="site-header">
+  <div class="header-inner">
+    <a href="../index.html" class="logo"><span class="logo-icon">💼</span><span>احسبها</span></a>
+    <nav class="nav">
+      <a href="../index.html">الرئيسية</a>
+      <a href="../about.html">عن الموقع</a>
+      <a href="../contact.html">اتصل بنا</a>
+      <button class="theme-toggle">🌙 داكن</button>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <section class="page-hero">
+    <div class="page-hero-icon">🏪</div>
+    <h1 class="page-title">حاسبة عمولة سلة وزد</h1>
+    <p class="page-subtitle">اعرف صافي ربحك بعد خصم عمولة المنصة والدفع والضريبة</p>
+  </section>
+
+  <div class="container">
+    <div class="calculator">
+      
+      <div class="form-group">
+        <label>المنصة</label>
+        <select id="platform" onchange="setPlatformDefaults()">
+          <option value="salla">سلة</option>
+          <option value="zid">زد</option>
+          <option value="shopify">شوبيفاي</option>
+          <option value="custom">مخصصة</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label>سعر البيع (ر.س)</label>
+        <input type="number" id="sell-price" value="100" min="0" step="1" oninput="calcSalla()">
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label>تكلفة المنتج (ر.س)</label>
+          <input type="number" id="product-cost" value="40" min="0" step="1" oninput="calcSalla()">
+        </div>
+        <div class="form-group">
+          <label>الشحن الذي تدفعه (ر.س)</label>
+          <input type="number" id="shipping" value="15" min="0" step="1" oninput="calcSalla()">
+        </div>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label>عمولة المنصة (%)</label>
+          <input type="number" id="commission" value="2" min="0" step="0.1" oninput="calcSalla()">
+        </div>
+        <div class="form-group">
+          <label>رسوم الدفع (%)</label>
+          <input type="number" id="payment" value="2.5" min="0" step="0.1" oninput="calcSalla()">
+        </div>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label>رسوم دفع ثابتة (ر.س)</label>
+          <input type="number" id="payment-fixed" value="1" min="0" step="0.5" oninput="calcSalla()">
+        </div>
+        <div class="form-group">
+          <label>ضريبة القيمة المضافة (%)</label>
+          <input type="number" id="vat" value="15" min="0" step="1" oninput="calcSalla()">
+        </div>
+      </div>
+
+      <button class="btn-primary" onclick="calcSalla()">احسب الربح</button>
+
+      <div id="salla-alert" class="alert alert-info">املأ البيانات واضغط احسب</div>
+
+      <div class="results">
+        <div class="result-card">
+          <div class="result-label">عمولة المنصة</div>
+          <div class="result-value" id="platform-fee">0.00 ر.س</div>
+        </div>
+        <div class="result-card">
+          <div class="result-label">رسوم الدفع</div>
+          <div class="result-value" id="payment-fee">0.00 ر.س</div>
+        </div>
+        <div class="result-card">
+          <div class="result-label">إجمالي الخصومات</div>
+          <div class="result-value" id="total-deductions">0.00 ر.س</div>
+        </div>
+        <div class="result-card">
+          <div class="result-label">💰 الربح الصافي</div>
+          <div class="result-value positive" id="net-profit">0.00 ر.س</div>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="ad-slot">📢 مكان إعلان AdSense</div>
+
+    <article class="content">
+      <h2>ما هي عمولة سلة وزد وشوبيفاي؟</h2>
+      <p>منصات التجارة الإلكترونية مثل <strong>سلة</strong> و<strong>زد</strong> (في السعودية) و<strong>شوبيفاي</strong> (عالمياً) تفرض عمولة على كل عملية بيع، بالإضافة إلى رسوم بوابة الدفع وضريبة القيمة المضافة على هذه الرسوم.</p>
+
+      <h2>كيف تُحسب العمولة؟</h2>
+      <p>الحساب يشمل 4 خصومات رئيسية:</p>
+      <ol>
+        <li><strong>عمولة المنصة:</strong> نسبة من سعر البيع (تختلف حسب الباقة)</li>
+        <li><strong>رسوم بوابة الدفع:</strong> نسبة + مبلغ ثابت لكل عملية</li>
+        <li><strong>ضريبة القيمة المضافة:</strong> 15% على مجموع العمولات</li>
+        <li><strong>تكاليف إضافية:</strong> تكلفة المنتج + الشحن</li>
+      </ol>
+
+      <h2>النسب التقريبية</h2>
+      <table style="width:100%; border-collapse:collapse; margin:16px 0;">
+        <tr style="background:var(--bg);">
+          <th style="padding:8px; border:1px solid var(--border); text-align:right;">المنصة</th>
+          <th style="padding:8px; border:1px solid var(--border); text-align:right;">عمولة المنصة</th>
+          <th style="padding:8px; border:1px solid var(--border); text-align:right;">رسوم الدفع</th>
+        </tr>
+        <tr>
+          <td style="padding:8px; border:1px solid var(--border);">سلة</td>
+          <td style="padding:8px; border:1px solid var(--border);">~2%</td>
+          <td style="padding:8px; border:1px solid var(--border);">~2.5%</td>
+        </tr>
+        <tr>
+          <td style="padding:8px; border:1px solid var(--border);">زد</td>
+          <td style="padding:8px; border:1px solid var(--border);">~2%</td>
+          <td style="padding:8px; border:1px solid var(--border);">~2.5%</td>
+        </tr>
+        <tr>
+          <td style="padding:8px; border:1px solid var(--border);">شوبيفاي</td>
+          <td style="padding:8px; border:1px solid var(--border);">~2.9%</td>
+          <td style="padding:8px; border:1px solid var(--border);">~2.9%</td>
+        </tr>
+      </table>
+      <p><em>ملاحظة: النسب الفعلية تعتمد على باقتك واتفاقك مع المنصة.</em></p>
+
+      <h2>مثال عملي</h2>
+      <p>بعت منتجاً بـ <strong>100 ريال</strong> على سلة، والعمولة 2% + رسوم دفع 2.5% + 1 ريال ثابت:</p>
+      <ul>
+        <li>عمولة سلة = 100 × 2% = <strong>2 ريال</strong></li>
+        <li>رسوم الدفع = (100 × 2.5%) + 1 = <strong>3.5 ريال</strong></li>
+        <li>الضريبة = (2 + 3.5) × 15% = <strong>0.83 ريال</strong></li>
+        <li>إجمالي الخصومات = <strong>6.33 ريال</strong></li>
+        <li>الصافي للتاجر = 100 - 6.33 = <strong>93.67 ريال</strong></li>
+      </ul>
+
+      <h2>نصائح لزيادة الربح</h2>
+      <ul>
+        <li>💡 <strong>ارفع السعر بنسبة 5%:</strong> لتغطية العمولة</li>
+        <li>💡 <strong>قلل الشحن:</strong> استخدم شركات شحن اقتصادية</li>
+        <li>💡 <strong>اختر باقة مناسبة:</strong> الباقات الأعلى قد تكون أوفر مع كثرة المبيعات</li>
+        <li>💡 <strong>راقب الهوامش:</strong> لا تبع منتجات بهامش أقل من 30%</li>
+      </ul>
+
+      <h2>أسئلة شائعة</h2>
+
+      <details>
+        <summary>هل النسب في الجدول دقيقة؟</summary>
+        <p>النسب تقريبية. النسب الفعلية تعتمد على باقتك والاتفاق مع المنصة. راجع عقدك أو لوحة التحكم لمعرفة نسبتك الدقيقة.</p>
+      </details>
+
+      <details>
+        <summary>هل رسوم الدفع تُحسب مرة واحدة أم مرتين؟</summary>
+        <p>مرة واحدة فقط. تُخصم من صافي المبلغ الذي يدخل حسابك.</p>
+      </details>
+
+      <details>
+        <summary>هل تشمل الحاسبة رسوم المحفظة؟</summary>
+        <p>لا، هذه الحاسبة تركز على العمولات الأساسية. إذا كانت منصتك تفرض رسوم سحب أو تحويل، أضفها يدوياً.</p>
+      </details>
+
+      <details>
+        <summary>هل أستطيع استخدام الحاسبة لمتجر شوبيفاي؟</summary>
+        <p>نعم، اختر "شوبيفاي" من القائمة وسيتم تعبئة النسب الافتراضية.</p>
+      </details>
+    </article>
+
+    <section class="related">
+      <h3>🔗 أدوات ذات صلة</h3>
+      <div class="related-grid">
+        <a href="tabby-tamara.html" class="tool-card">
+          <div class="tool-card-icon">💳</div>
+          <div class="tool-card-title">تابي وتمارا</div>
+        </a>
+        <a href="vat.html" class="tool-card">
+          <div class="tool-card-icon">🧾</div>
+          <div class="tool-card-title">ضريبة القيمة المضافة</div>
+        </a>
+        <a href="loan-calculator.html" class="tool-card">
+          <div class="tool-card-icon">🏦</div>
+          <div class="tool-card-title">القروض والأقساط</div>
+        </a>
+      </div>
+    </section>
+
+  </div>
+</main>
+
+<footer class="site-footer">
+  <div class="footer-inner">
+    <div class="footer-col">
+      <h4>احسبها</h4>
+      <p style="font-size:0.9rem;">أدوات حسابية مجانية للتجار</p>
+    </div>
+    <div class="footer-col">
+      <h4>روابط</h4>
+      <a href="../about.html">عن الموقع</a>
+      <a href="../contact.html">اتصل بنا</a>
+    </div>
+  </div>
+  <div class="footer-bottom">© 2025 احسبها</div>
+</footer>
+
+<script src="../assets/main.js"></script>
+<script src="../assets/tools.js"></script>
+<script>
+function setPlatformDefaults() {
+  const platform = document.getElementById('platform').value;
+  const defaults = {
+    salla: { commission: 2, payment: 2.5 },
+    zid: { commission: 2, payment: 2.5 },
+    shopify: { commission: 2.9, payment: 2.9 },
+    custom: { commission: 0, payment: 0 }
+  };
+  document.getElementById('commission').value = defaults[platform].commission;
+  document.getElementById('payment').value = defaults[platform].payment;
+  calcSalla();
+}
+calcSalla();
+</script>
+</body>
+</html>
