@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>حاسبة الخصومات - احسبها</title>
+  <meta name="description" content="احسب السعر النهائي بعد الخصم بنسبة مئوية أو مبلغ ثابت. أداة مجانية سريعة للتجار والمتسوقين.">
+  <meta name="keywords" content="خصم، تخفيض، سعر نهائي، عروض، تسوق">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏷️</text></svg>">
+  <meta name="theme-color" content="#4f46e5">
+  
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "WebApplication",
+    "name": "حاسبة الخصومات",
+    "description": "احسب السعر النهائي بعد الخصم"
+  }
+  </script>
+  
+  <link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+
+<header class="site-header">
+  <div class="header-inner">
+    <a href="../index.html" class="logo"><span class="logo-icon">💼</span><span>احسبها</span></a>
+    <nav class="nav">
+      <a href="../index.html">الرئيسية</a>
+      <a href="../about.html">عن الموقع</a>
+      <a href="../contact.html">اتصل بنا</a>
+      <button class="theme-toggle">🌙 داكن</button>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <section class="page-hero">
+    <div class="page-hero-icon">🏷️</div>
+    <h1 class="page-title">حاسبة الخصومات</h1>
+    <p class="page-subtitle">احسب السعر النهائي بعد الخصم</p>
+  </section>
+
+  <div class="container">
+    <div class="calculator">
+      
+      <div class="form-group">
+        <label>السعر الأساسي (ر.س)</label>
+        <input type="number" id="price" value="100" min="0" step="1" oninput="calcDiscount()">
+      </div>
+
+      <div class="form-group">
+        <label>نوع الخصم</label>
+        <select id="type" onchange="toggleDiscountType()">
+          <option value="percent">نسبة مئوية (%)</option>
+          <option value="fixed">مبلغ ثابت (ر.س)</option>
+        </select>
+      </div>
+
+      <div class="form-group" id="percent-group">
+        <label>نسبة الخصم (%)</label>
+        <input type="number" id="percent" value="20" min="0" max="100" step="1" oninput="calcDiscount()">
+      </div>
+
+      <div class="form-group" id="fixed-group" style="display:none;">
+        <label>مبلغ الخصم (ر.س)</label>
+        <input type="number" id="fixed-disc" value="20" min="0" step="5" oninput="calcDiscount()">
+      </div>
+
+      <button class="btn-primary" onclick="calcDiscount()">احسب</button>
+
+      <div class="results">
+        <div class="result-card">
+          <div class="result-label">💰 قيمة التوفير</div>
+          <div class="result-value positive" id="discount-amount">0.00 ر.س</div>
+        </div>
+        <div class="result-card">
+          <div class="result-label">نسبة التوفير</div>
+          <div class="result-value" id="saving-percent">0%</div>
+        </div>
+        <div class="result-card">
+          <div class="result-label">🏷️ السعر النهائي</div>
+          <div class="result-value" id="final-price">0.00 ر.س</div>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="ad-slot">📢 مكان إعلان AdSense</div>
+
+    <article class="content">
+      <h2>ما هي حاسبة الخصومات؟</h2>
+      <p>أداة بسيطة تحسب لك السعر النهائي بعد تطبيق خصم على منتج. تُستخدم كثيراً في التسوق، حسابات العروض، والتخطيط للتخفيضات في المتاجر.</p>
+
+      <h2>أنواع الخصومات</h2>
+      <h3>1. الخصم بنسبة مئوية</h3>
+      <p>مثال: منتج بـ 100 ريال، خصم 20%:</p>
+      <ul>
+        <li>قيمة الخصم = 100 × 20% = 20 ريال</li>
+        <li>السعر النهائي = 100 - 20 = <strong>80 ريال</strong></li>
+      </ul>
+
+      <h3>2. الخصم بمبلغ ثابت</h3>
+      <p>مثال: منتج بـ 100 ريال، خصم 30 ريال:</p>
+      <ul>
+        <li>قيمة الخصم = <strong>30 ريال</strong></li>
+        <li>السعر النهائي = 100 - 30 = <strong>70 ريال</strong></li>
+      </ul>
+
+      <h2>كيف تُقارن بين العروض؟</h2>
+      <p>أحياناً تكون العروض مربكة مثل: "خصم 30% على الثاني" أو "اشترِ 3 بسعر 2". لحساب قيمة الخصم الفعلية:</p>
+      <ul>
+        <li>"خصم 50% على الثاني" = <strong>خصم 25% فعلي</strong> (على متوسط المنتجين)</li>
+        <li>"اشترِ 2 واحصل على 1" = <strong>خصم 33% فعلي</strong></li>
+        <li>"اشترِ 3 واحصل على 1" = <strong>خصم 25% فعلي</strong></li>
+      </ul>
+
+      <h2>نصائح للتجار</h2>
+      <ul>
+        <li>💡 <strong>لا تزيد الخصم على 50%</strong> إلا في التصفيات النهائية</li>
+        <li>💡 <strong>ارفع السعر الأصلي قليلاً</strong> قبل الخصم (لكن بحذر)</li>
+        <li>💡 <strong>اجعل الخصم محدداً بمدة</strong> لتحفيز الشراء السريع</li>
+        <li>💡 <strong>وضّح قيمة التوفير</strong> ("وفّر 50 ريال")</li>
+      </ul>
+
+      <h2>أسئلة شائعة</h2>
+
+      <details>
+        <summary>هل الخصم يقلل الضريبة؟</summary>
+        <p>نعم، الضريبة تُحسب على السعر بعد الخصم. إذا كان المنتج 100 ريال بخصم 20%، الضريبة 15% تُحسب على 80 ريال.</p>
+      </details>
+
+      <details>
+        <summary>هل يمكن أن يكون الخصم 100%؟</summary>
+        <p>نعم، نظرياً (منتج مجاني)، لكن عملياً نادر جداً للتجار لأنهم يخسرون كل المبلغ.</p>
+      </details>
+
+      <details>
+        <summary>كيف أحسب "خصم إضافي"؟</summary>
+        <p>عند وجود خصمين متتاليين، اضرب النسب (وليس جمعها). مثال: خصم 20% + 10% إضافي = 100 × 0.8 × 0.9 = 72 ريال (وليس 70).</p>
+      </details>
+
+      <details>
+        <summary>هل الخصم يؤثر على هامش الربح؟</summary>
+        <p>بالتأكيد. إذا كان هامشك 30% وقدمت خصم 25%، سيتبقى لك 5% فقط. احسب بعناية قبل أي عرض ترويجي.</p>
+      </details>
+    </article>
+
+    <section class="related">
+      <h3>🔗 أدوات ذات صلة</h3>
+      <div class="related-grid">
+        <a href="ecommerce-profit.html" class="tool-card">
+          <div class="tool-card-icon">📦</div>
+          <div class="tool-card-title">هامش الربح</div>
+        </a>
+        <a href="vat.html" class="tool-card">
+          <div class="tool-card-icon">🧾</div>
+          <div class="tool-card-title">ضريبة VAT</div>
+        </a>
+        <a href="roas.html" class="tool-card">
+          <div class="tool-card-icon">📢</div>
+          <div class="tool-card-title">حاسبة الإعلانات</div>
+        </a>
+      </div>
+    </section>
+
+  </div>
+</main>
+
+<footer class="site-footer">
+  <div class="footer-inner">
+    <div class="footer-col">
+      <h4>احسبها</h4>
+      <p style="font-size:0.9rem;">أدوات حسابية مجانية للتجار</p>
+    </div>
+    <div class="footer-col">
+      <h4>روابط</h4>
+      <a href="../about.html">عن الموقع</a>
+      <a href="../contact.html">اتصل بنا</a>
+    </div>
+  </div>
+  <div class="footer-bottom">© 2025 احسبها</div>
+</footer>
+
+<script src="../assets/main.js"></script>
+<script src="../assets/tools.js"></script>
+<script>calcDiscount();</script>
+</body>
+</html>
