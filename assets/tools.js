@@ -262,3 +262,47 @@ function calcSalla() {
 function fmtCurrency(num, currency = 'ر.س') {
   return fmt(num) + ' ' + currency;
 }
+
+// ═══ حاسبة الإعلانات ROAS ═══
+function calcROAS() {
+  const adSpend = parseFloat(document.getElementById('ad-spend').value) || 0;
+  const orders = parseInt(document.getElementById('orders').value) || 1;
+  const aov = parseFloat(document.getElementById('aov').value) || 0;
+  const marginPercent = parseFloat(document.getElementById('margin-percent').value) || 0;
+
+  const revenue = orders * aov;
+  const roas = adSpend > 0 ? revenue / adSpend : 0;
+  const cpa = orders > 0 ? adSpend / orders : 0;
+  const grossProfit = revenue * (marginPercent / 100);
+  const netProfit = grossProfit - adSpend;
+  const breakevenRoas = marginPercent > 0 ? 100 / marginPercent : 0;
+  const maxCpa = aov * (marginPercent / 100);
+
+  const set = (id, val, cls) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.textContent = val;
+    if (cls) el.className = 'result-value ' + cls;
+  };
+
+  set('revenue', fmt(revenue) + ' ر.س');
+  set('roas', roas.toFixed(2) + 'x', roas >= breakevenRoas ? 'positive' : 'negative');
+  set('cpa', fmt(cpa) + ' ر.س');
+  set('gross-profit', fmt(grossProfit) + ' ر.س');
+  set('net-profit', fmt(netProfit) + ' ر.س', netProfit > 0 ? 'positive' : 'negative');
+  set('max-cpa', fmt(maxCpa) + ' ر.س');
+
+  const alertEl = document.getElementById('roas-alert');
+  if (alertEl) {
+    if (roas < breakevenRoas) {
+      alertEl.className = 'alert alert-error';
+      alertEl.textContent = '⚠️ حملة خاسرة! ROAS الحالي (' + roas.toFixed(2) + 'x) أقل من التعادل (' + breakevenRoas.toFixed(2) + 'x)';
+    } else if (roas < breakevenRoas * 1.5) {
+      alertEl.className = 'alert alert-warning';
+      alertEl.textContent = '⚡ ربح ضعيف. حاول تحسين الحملة للوصول إلى ' + (breakevenRoas * 1.5).toFixed(2) + 'x';
+    } else {
+      alertEl.className = 'alert alert-success';
+      alertEl.textContent = '🎉 حملة مربحة! ROAS = ' + roas.toFixed(2) + 'x';
+    }
+  }
+}
