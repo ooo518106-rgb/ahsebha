@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>حاسبة نهاية الخدمة والتأمينات - احسبها</title>
+<meta name="description" content="احسب مكافأة نهاية الخدمة حسب نظام العمل السعودي (المادة 84 و85) + حصص التأمينات الاجتماعية للموظف وصاحب العمل.">
+<meta name="keywords" content="نهاية الخدمة، مكافأة، تأمينات، GOSI، استقالة، إنهاء">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛡️</text></svg>">
+<meta name="theme-color" content="#4f46e5">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "WebApplication",
+  "name": "حاسبة نهاية الخدمة",
+  "description": "احسب مكافأة نهاية الخدمة والتأمينات",
+  "applicationCategory": "FinanceApplication"
+}
+</script>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+
+<header class="site-header">
+  <div class="header-inner">
+    <a href="../index.html" class="logo"><span class="logo-icon">💼</span><span>احسبها</span></a>
+    <nav class="nav">
+      <a href="../index.html">الرئيسية</a>
+      <a href="../about.html">عن الموقع</a>
+      <a href="../contact.html">اتصل بنا</a>
+      <button class="theme-toggle">🌙 داكن</button>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <section class="page-hero">
+    <div class="page-hero-icon">🛡️</div>
+    <h1 class="page-title">حاسبة نهاية الخدمة</h1>
+    <p class="page-subtitle">مكافأة نهاية الخدمة + التأمينات حسب النظام السعودي</p>
+  </section>
+
+  <div class="container">
+    <div class="calculator">
+
+      <div class="form-group">
+        <label>الراتب الأخير (ر.س)</label>
+        <input type="number" id="eos-salary" value="5000" min="0" step="100" oninput="calcEndOfService()">
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label>سنوات الخدمة</label>
+          <input type="number" id="eos-years" value="5" min="0" step="1" oninput="calcEndOfService()">
+        </div>
+        <div class="form-group">
+          <label>أشهر إضافية</label>
+          <input type="number" id="eos-months" value="0" min="0" max="11" step="1" oninput="calcEndOfService()">
+        </div>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label>السبب</label>
+          <select id="eos-reason" onchange="calcEndOfService()">
+            <option value="resign">استقالة</option>
+            <option value="terminate">إنهاء من صاحب العمل</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>الجنسية</label>
+          <select id="eos-nationality" onchange="calcEndOfService()">
+            <option value="saudi">سعودي</option>
+            <option value="non-saudi">غير سعودي</option>
+          </select>
+        </div>
+      </div>
+
+      <button class="btn-primary" onclick="calcEndOfService()">احسب</button>
+
+      <div class="results">
+        <div class="result-card">
+          <div class="result-label">💰 المكافأة</div>
+          <div class="result-value positive" id="gratuity">0.00 ر.س</div>
+        </div>
+        <div class="result-card">
+          <div class="result-label">🛡️ حصة التأمينات</div>
+          <div class="result-value" id="gosi-share">0.00 ر.س</div>
+        </div>
+        <div class="result-card">
+          <div class="result-label">المجموع</div>
+          <div class="result-value" id="eos-total">0.00 ر.س</div>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="ad-slot">📢 مكان إعلان AdSense</div>
+
+    <article class="content">
+      <h2>ما هي مكافأة نهاية الخدمة؟</h2>
+      <p>مكافأة إلزامية يدفعها صاحب العمل للموظف عند انتهاء علاقة العمل، حسب نظام العمل السعودي (المادتان 84 و85).</p>
+
+      <h2>كيف تُحسب؟</h2>
+      <h3>نظام العمل السعودي</h3>
+      <ul>
+        <li><strong>أول 5 سنوات:</strong> نصف راتب عن كل سنة (0.5)</li>
+        <li><strong>ما بعد 5 سنوات:</strong> راتب كامل عن كل سنة (1.0)</li>
+      </ul>
+      <p><strong>المعادلة:</strong></p>
+      <ul>
+        <li>المكافأة = (عدد سنوات الخدمة ≤ 5) × 0.5 × الراتب + (سنوات > 5) × 1.0 × الراتب</li>
+      </ul>
+
+      <h2>الاستقالة مقابل الإنهاء</h2>
+      <p>الحساب يختلف حسب سبب انتهاء الخدمة:</p>
+      <ul>
+        <li>✅ <strong>إنهاء من صاحب العمل:</strong> المكافأة كاملة</li>
+        <li>⚠️ <strong>استقالة:</strong>
+          <ul>
+            <li>أقل من سنتين: لا شيء</li>
+            <li>2 - 5 سنوات: ⅓ المكافأة</li>
+            <li>5 - 10 سنوات: ⅔ المكافأة</li>
+            <li>أكثر من 10 سنوات: المكافأة كاملة</li>
+          </ul>
+        </li>
+      </ul>
+
+      <h2>التأمينات الاجتماعية (GOSI)</h2>
+      <p>النسب تختلف حسب نظام الالتحاق:</p>
+      <ul>
+        <li><strong>المسجلون قبل 3 يوليو 2024:</strong> 9.75% موظف + 11.75% صاحب عمل</li>
+        <li><strong>المسجلون بعد 3 يوليو 2024:</strong> نسبة متدرجة ترتفع سنوياً</li>
+      </ul>
+      <p>في <strong>2026</strong> = 10.75% موظف + 12.75% صاحب عمل.</p>
+      <p><strong>الأساس:</strong> الراتب الأساسي + بدل السكن، بحد أقصى 45,000 ر.س شهرياً.</p>
+
+      <h2>مثال عملي</h2>
+      <p>موظف سعودي، راتبه 5,000، خدم 7 سنوات، واستقال:</p>
+      <ul>
+        <li>المكافأة الكاملة = (5 × 0.5 × 5000) + (2 × 1.0 × 5000) = 12,500 + 10,000 = <strong>22,500 ر.س</strong></li>
+        <li>بسبب الاستقالة (5-10 سنوات) → ⅔ = <strong>15,000 ر.س</strong></li>
+        <li>التأمينات (حصة صاحب العمل) = 5000 × 12.75% = <strong>637.5 ر.س</strong></li>
+      </ul>
+
+      <h2>أسئلة شائعة</h2>
+
+      <details>
+        <summary>هل تُحسب المكافأة على الراتب الأساسي أم الإجمالي؟</summary>
+        <p>تُحسب على "الأجر الأخير" شامل الأساسي + البدلات الثابتة (السكن والمواصلات). بعض الفقهاء يرون الأساسي فقط.</p>
+      </details>
+
+      <details>
+        <summary>هل يمكن التنازل عن المكافأة في العقد؟</summary>
+        <p>لا، أي شرط يخالف النظام يُعد باطلاً. المكافأة حق نظامي لا يمكن التنازل عنه.</p>
+      </details>
+
+      <details>
+        <summary>متى يجب دفع المكافأة؟</summary>
+        <p>خلال 14 يوماً من انتهاء علاقة العمل، وإلا يُلزم صاحب العمل بدفعها مع غرامة.</p>
+      </details>
+
+      <details>
+        <summary>هل تُحسب فترات الإجازات في الخدمة؟</summary>
+        <p>نعم، تُحسب جميع فترات العمل الفعلية + الإجازات السنوية والمرضية المعتمدة.</p>
+      </details>
+
+      <details>
+        <summary>ما الفرق بين حصة الموظف وحصة صاحب العمل في التأمينات؟</summary>
+        <p>حصة الموظف تُخصم من راتبه (10.75% في 2026). حصة صاحب العمل (12.75%) يدفعها رب العمل من جيبه ولا تُخصم من الموظف.</p>
+      </details>
+    </article>
+
+    <section class="related">
+      <h3>🔗 أدوات ذات صلة</h3>
+      <div class="related-grid">
+        <a href="salary.html" class="tool-card">
+          <div class="tool-card-icon">💸</div>
+          <div class="tool-card-title">حاسبة الرواتب</div>
+        </a>
+        <a href="employee-cost.html" class="tool-card">
+          <div class="tool-card-icon">👥</div>
+          <div class="tool-card-title">تكلفة الموظف</div>
+        </a>
+        <a href="zakat.html" class="tool-card">
+          <div class="tool-card-icon">🕋</div>
+          <div class="tool-card-title">حاسبة الزكاة</div>
+        </a>
+      </div>
+    </section>
+
+  </div>
+</main>
+
+<footer class="site-footer">
+  <div class="footer-inner">
+    <div class="footer-col">
+      <h4>احسبها</h4>
+      <p style="font-size:0.9rem;">أدوات حسابية مجانية للتجار</p>
+    </div>
+    <div class="footer-col">
+      <h4>روابط</h4>
+      <a href="../about.html">عن الموقع</a>
+      <a href="../contact.html">اتصل بنا</a>
+    </div>
+  </div>
+  <div class="footer-bottom">© 2025 احسبها</div>
+</footer>
+
+<script src="../assets/main.js"></script>
+<script src="../assets/tools.js"></script>
+<script>calcEndOfService();</script>
+</body>
+</html>
