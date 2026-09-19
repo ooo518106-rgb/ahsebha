@@ -347,3 +347,146 @@ function toggleDiscountType() {
   }
   calcDiscount();
 }
+
+// ═══ حاسبة الرواتب ═══
+function calcSalary() {
+  const basic = parseFloat(document.getElementById('basic').value) || 0;
+  const allow = parseFloat(document.getElementById('allowances').value) || 0;
+  const deduct = parseFloat(document.getElementById('deductions').value) || 0;
+  const net = basic + allow - deduct;
+  const el = document.getElementById('net-salary');
+  const alertEl = document.getElementById('salary-alert');
+  if (el) el.textContent = fmt(net) + ' ر.س';
+  if (alertEl) {
+    if (net < 0) {
+      alertEl.className = 'alert alert-error';
+      alertEl.textContent = '⚠️ الخصومات تتجاوز الراتب!';
+    } else if (net < basic) {
+      alertEl.className = 'alert alert-warning';
+      alertEl.textContent = '⚡ صافي الراتب أقل من الأساسي';
+    } else {
+      alertEl.className = 'alert alert-success';
+      alertEl.textContent = '✅ الراتب المستحق: ' + fmt(net) + ' ر.س';
+    }
+  }
+}
+
+// ═══ نهاية الخدمة ═══
+function calcEndOfService() {
+  const salary = parseFloat(document.getElementById('eos-salary').value) || 0;
+  const years = parseInt(document.getElementById('eos-years').value) || 0;
+  const months = parseInt(document.getElementById('eos-months').value) || 0;
+  const reason = document.getElementById('eos-reason').value;
+  const nationality = document.getElementById('eos-nationality').value;
+
+  const totalYears = years + months / 12;
+  const first5 = Math.min(totalYears, 5);
+  const after5 = Math.max(totalYears - 5, 0);
+  let gratuity = (first5 * salary * 0.5) + (after5 * salary);
+
+  if (reason === 'resign') {
+    if (totalYears < 2) gratuity = 0;
+    else if (totalYears < 5) gratuity /= 3;
+    else if (totalYears < 10) gratuity *= 2 / 3;
+  }
+
+  let gosiRate = 0;
+  if (nationality === 'saudi') {
+    const today = new Date();
+    const cutoff = new Date('2024-07-03');
+    if (new Date() > cutoff) {
+      const y = today.getFullYear();
+      if (y >= 2027) gosiRate = 0.1325;
+      else if (y === 2026) gosiRate = 0.1275;
+      else gosiRate = 0.12;
+    } else {
+      gosiRate = 0.1175;
+    }
+  } else {
+    gosiRate = 0.02;
+  }
+
+  const gosi = salary * gosiRate;
+
+  const gEl = document.getElementById('gratuity');
+  const gosiEl = document.getElementById('gosi-share');
+  const tEl = document.getElementById('eos-total');
+
+  if (gEl) gEl.textContent = fmt(gratuity) + ' ر.س';
+  if (gosiEl) gosiEl.textContent = fmt(gosi) + ' ر.س';
+  if (tEl) tEl.textContent = fmt(gratuity + gosi) + ' ر.س';
+}
+
+// ═══ تكلفة الموظف ═══
+function calcEmployeeCost() {
+  const salary = parseFloat(document.getElementById('ec-salary').value) || 0;
+  const housing = parseFloat(document.getElementById('ec-housing').value) || 0;
+  const transport = parseFloat(document.getElementById('ec-transport').value) || 0;
+  const other = parseFloat(document.getElementById('ec-other').value) || 0;
+  const bonus = parseFloat(document.getElementById('ec-bonus').value) || 0;
+  const nationality = document.getElementById('ec-nationality').value;
+
+  const totalSal = salary + housing + transport + other;
+  const gosiBase = Math.min(salary + housing, 45000);
+  let gosiRate = nationality === 'saudi' ? 0.1275 : 0.02;
+  const gosi = (nationality === 'saudi' ? gosiBase : totalSal) * gosiRate;
+
+  const monthly = totalSal + gosi;
+  const annual = (monthly * 12) + bonus;
+
+  const mEl = document.getElementById('ec-monthly');
+  const aEl = document.getElementById('ec-annual');
+  const gEl = document.getElementById('ec-gosi');
+
+  if (mEl) mEl.textContent = fmt(monthly) + ' ر.س';
+  if (aEl) aEl.textContent = fmt(annual) + ' ر.س';
+  if (gEl) gEl.textContent = fmt(gosi) + ' ر.س';
+}
+
+// ═══ حاسبة الدوام الدقيقة ═══
+function calcWorkingHours() {
+  const salary = parseFloat(document.getElementById('wh-salary').value) || 0;
+  const startDate = document.getElementById('wh-start-date').value;
+  const startTime = document.getElementById('wh-start-time').value;
+  const endDate = document.getElementById('wh-end-date').value;
+  const endTime = document.getElementById('wh-end-time').value;
+
+  if (!startDate || !startTime || !endDate || !endTime) return;
+
+  const start = new Date(startDate + 'T' + startTime);
+  const end = new Date(endDate + 'T' + endTime);
+
+  if (end <= start) {
+    const alertEl = document.getElementById('wh-alert');
+    if (alertEl) {
+      alertEl.className = 'alert alert-error';
+      alertEl.textContent = '⚠️ وقت النهاية يجب أن يكون بعد البداية';
+    }
+    return;
+  }
+
+  const diffMs = end - start;
+  const diffSec = diffMs / 1000;
+  const days = Math.floor(diffSec / 86400);
+  const hours = Math.floor((diffSec % 86400) / 3600);
+  const minutes = Math.floor((diffSec % 3600) / 60);
+
+  const monthSec = 30 * 24 * 3600;
+  const earned = (diffSec / monthSec) * salary;
+
+  const set = (id, val) => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = val;
+  };
+
+  set('wh-days', days);
+  set('wh-hours', hours);
+  set('wh-minutes', minutes);
+  set('wh-earned', fmt(earned) + ' ر.س');
+
+  const alertEl = document.getElementById('wh-alert');
+  if (alertEl) {
+    alertEl.className = 'alert alert-success';
+    alertEl.textContent = '✅ الراتب المستحق: ' + fmt(earned) + ' ر.س';
+  }
+}
