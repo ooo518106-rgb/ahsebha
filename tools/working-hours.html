@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>حاسبة الدوام الدقيقة - احسبها</title>
+<meta name="description" content="احسب عدد ساعات عملك بدقة والراتب المستحق حسب الوقت الفعلي بين تاريخين. أداة مجانية للموظفين وأصحاب العمل.">
+<meta name="keywords" content="ساعات العمل، دوام، راتب، time tracking، ساعات فعلية">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📅</text></svg>">
+<meta name="theme-color" content="#4f46e5">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "WebApplication",
+  "name": "حاسبة الدوام الدقيقة",
+  "description": "احسب ساعات العمل والراتب الفعلي",
+  "applicationCategory": "BusinessApplication"
+}
+</script>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+
+<header class="site-header">
+  <div class="header-inner">
+    <a href="../index.html" class="logo"><span class="logo-icon">💼</span><span>احسبها</span></a>
+    <nav class="nav">
+      <a href="../index.html">الرئيسية</a>
+      <a href="../about.html">عن الموقع</a>
+      <a href="../contact.html">اتصل بنا</a>
+      <button class="theme-toggle">🌙 داكن</button>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <section class="page-hero">
+    <div class="page-hero-icon">📅</div>
+    <h1 class="page-title">حاسبة الدوام الدقيقة</h1>
+    <p class="page-subtitle">احسب ساعات العمل الفعلية والراتب المستحق</p>
+  </section>
+
+  <div class="container">
+    <div class="calculator">
+
+      <div class="form-group">
+        <label>الراتب الشهري (ر.س)</label>
+        <input type="number" id="wh-salary" value="5000" min="0" step="100" oninput="calcWorkingHours()">
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label>تاريخ البداية</label>
+          <input type="date" id="wh-start-date" oninput="calcWorkingHours()">
+        </div>
+        <div class="form-group">
+          <label>وقت البداية</label>
+          <input type="time" id="wh-start-time" value="08:00" oninput="calcWorkingHours()">
+        </div>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label>تاريخ النهاية</label>
+          <input type="date" id="wh-end-date" oninput="calcWorkingHours()">
+        </div>
+        <div class="form-group">
+          <label>وقت النهاية</label>
+          <input type="time" id="wh-end-time" value="16:00" oninput="calcWorkingHours()">
+        </div>
+      </div>
+
+      <button class="btn-primary" onclick="calcWorkingHours()">احسب</button>
+
+      <div id="wh-alert" class="alert alert-info">اختر التواريخ والأوقات</div>
+
+      <div class="results">
+        <div class="result-card">
+          <div class="result-label">أيام</div>
+          <div class="result-value" id="wh-days">0</div>
+        </div>
+        <div class="result-card">
+          <div class="result-label">ساعات</div>
+          <div class="result-value" id="wh-hours">0</div>
+        </div>
+        <div class="result-card">
+          <div class="result-label">دقائق</div>
+          <div class="result-value" id="wh-minutes">0</div>
+        </div>
+        <div class="result-card">
+          <div class="result-label">💰 الراتب المستحق</div>
+          <div class="result-value positive" id="wh-earned">0.00 ر.س</div>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="ad-slot">📢 مكان إعلان AdSense</div>
+
+    <article class="content">
+      <h2>ما هي حاسبة الدوام الدقيقة؟</h2>
+      <p>أداة تحسب لك <strong>عدد ساعات العمل الفعلية</strong> والراتب المستحق بعدد الساعات الحقيقية، بالدقيقة والثانية. تُستخدم في:</p>
+      <ul>
+        <li>✅ حساب ساعات العمل الإضافية (Overtime)</li>
+        <li>✅ حساب راتب المشاريع بالساعات</li>
+        <li>✅ إدارة وقت الفريلانسرز</li>
+        <li>✅ توثيق ساعات العمل للعملاء</li>
+      </ul>
+
+      <h2>كيف تُحسب؟</h2>
+      <p>الحاسبة تعتمد على:</p>
+      <ul>
+        <li><strong>الفارق الزمني:</strong> بين وقت البداية والنهاية (بالتاريخ والساعة)</li>
+        <li><strong>الراتب بالساعة:</strong> الراتب الشهري ÷ (30 يوم × 24 ساعة)</li>
+        <li><strong>الراتب المستحق:</strong> الفارق الزمني × الراتب بالساعة</li>
+      </ul>
+
+      <h2>مثال عملي</h2>
+      <p>موظف راتبه الشهري <strong>5,000 ريال</strong>، عمل من <strong>1 يناير 8:00 صباحاً</strong> إلى <strong>1 يناير 4:00 مساءً</strong>:</p>
+      <ul>
+        <li>الفارق = <strong>8 ساعات</strong></li>
+        <li>الراتب بالساعة = 5,000 ÷ (30 × 24) = <strong>6.94 ر.س/ساعة</strong></li>
+        <li>المستحق = 8 × 6.94 = <strong>55.52 ر.س</strong></li>
+      </ul>
+
+      <h2>طريقة الحساب الشهري</h2>
+      <p>هناك طريقتان شائعتان لحساب الراتب بالساعة:</p>
+      <h3>1. الطريقة الحالية (24 ساعة × 30 يوم)</h3>
+      <p>الراتب ÷ 720 = راتب الساعة. تعطي قيمة أقل للساعة، مناسبة لحساب الوقت الفعلي الكامل.</p>
+
+      <h3>2. طريقة ساعات العمل الرسمية</h3>
+      <p>الراتب ÷ (عدد أيام العمل × ساعات العمل اليومية) = راتب الساعة. مثال: 5,000 ÷ (22 × 8) = 28.4 ر.س/ساعة. أعلى قيمة، تُستخدم لحساب الأوفرتايم.</p>
+
+      <h2>استخدامات عملية</h2>
+      <ul>
+        <li>💼 <strong>للموظف:</strong> احسب راتبك إذا عملت ساعات إضافية</li>
+        <li>💼 <strong>للفريلانسر:</strong> احسب فاتورتك بدقة لكل مشروع</li>
+        <li>💼 <strong>لصاحب العمل:</strong> احسب تكلفة المشاريع</li>
+        <li>💼 <strong>للمقاول:</strong> وثّق ساعات العمل لتقديم الفواتير</li>
+      </ul>
+
+      <h2>أسئلة شائعة</h2>
+
+      <details>
+        <summary>هل الحاسبة تشمل العطل والإجازات؟</summary>
+        <p>لا، الحاسبة تعتمد على الفارق الزمني فقط. إذا كنت تحسب راتباً مع استثناء العطل، استخدم حاسبة "أيام العمل".</p>
+      </details>
+
+      <details>
+        <summary>هل يمكن حساب أكثر من يوم؟</summary>
+        <p>نعم، ضع تاريخ البداية والنهاية مختلفين، وستحسب الحاسبة الفارق الكلي بالدقة.</p>
+      </details>
+
+      <details>
+        <summary>ما الفرق بين حاسبة الدوام وحاسبة الرواتب؟</summary>
+        <p>حاسبة الرواتب: لحساب الراتب الشهري الثابت. حاسبة الدوام: لحساب الراتب حسب ساعات العمل الفعلية.</p>
+      </details>
+
+      <details>
+        <summary>هل الحاسبة دقيقة بنسبة 100%؟</summary>
+        <p>نعم، الدقة بالثانية. لكنها تعتمد على الطريقة الحالية (720 ساعة شهرياً). إذا كنت تستخدم طريقة مختلفة، اضبط الراتب يدوياً.</p>
+      </details>
+    </article>
+
+    <section class="related">
+      <h3>🔗 أدوات ذات صلة</h3>
+      <div class="related-grid">
+        <a href="salary.html" class="tool-card">
+          <div class="tool-card-icon">💸</div>
+          <div class="tool-card-title">حاسبة الرواتب</div>
+        </a>
+        <a href="employee-cost.html" class="tool-card">
+          <div class="tool-card-icon">👥</div>
+          <div class="tool-card-title">تكلفة الموظف</div>
+        </a>
+        <a href="end-of-service.html" class="tool-card">
+          <div class="tool-card-icon">🛡️</div>
+          <div class="tool-card-title">نهاية الخدمة</div>
+        </a>
+      </div>
+    </section>
+
+  </div>
+</main>
+
+<footer class="site-footer">
+  <div class="footer-inner">
+    <div class="footer-col">
+      <h4>احسبها</h4>
+      <p style="font-size:0.9rem;">أدوات حسابية مجانية للتجار</p>
+    </div>
+    <div class="footer-col">
+      <h4>روابط</h4>
+      <a href="../about.html">عن الموقع</a>
+      <a href="../contact.html">اتصل بنا</a>
+    </div>
+  </div>
+  <div class="footer-bottom">© 2025 احسبها</div>
+</footer>
+
+<script src="../assets/main.js"></script>
+<script src="../assets/tools.js"></script>
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+  const today = new Date().toISOString().split('T')[0];
+  document.getElementById('wh-start-date').value = today;
+  document.getElementById('wh-end-date').value = today;
+  calcWorkingHours();
+});
+</script>
+</body>
+</html>
