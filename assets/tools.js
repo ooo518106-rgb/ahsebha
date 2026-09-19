@@ -215,6 +215,49 @@ function calcAge() {
   if (totalEl) totalEl.textContent = totalDays.toLocaleString();
 }
 
+// ═══ حاسبة عمولة سلة وزد ═══
+function calcSalla() {
+  const sellPrice = parseFloat(document.getElementById('sell-price').value) || 0;
+  const productCost = parseFloat(document.getElementById('product-cost').value) || 0;
+  const shipping = parseFloat(document.getElementById('shipping').value) || 0;
+  const commission = parseFloat(document.getElementById('commission').value) || 0;
+  const payment = parseFloat(document.getElementById('payment').value) || 0;
+  const paymentFixed = parseFloat(document.getElementById('payment-fixed').value) || 0;
+  const vat = parseFloat(document.getElementById('vat').value) || 0;
+
+  const platformFee = sellPrice * (commission / 100);
+  const paymentFee = (sellPrice * (payment / 100)) + paymentFixed;
+  const vatFee = (platformFee + paymentFee) * (vat / 100);
+  const totalDeductions = platformFee + paymentFee + vatFee;
+  const netProfit = sellPrice - productCost - shipping - totalDeductions;
+
+  const pfEl = document.getElementById('platform-fee');
+  const payEl = document.getElementById('payment-fee');
+  const tdEl = document.getElementById('total-deductions');
+  const npEl = document.getElementById('net-profit');
+  const alertEl = document.getElementById('salla-alert');
+
+  if (pfEl) pfEl.textContent = fmt(platformFee) + ' ر.س';
+  if (payEl) payEl.textContent = fmt(paymentFee) + ' ر.س';
+  if (tdEl) tdEl.textContent = fmt(totalDeductions) + ' ر.س';
+  if (npEl) {
+    npEl.textContent = fmt(netProfit) + ' ر.س';
+    npEl.className = 'result-value ' + (netProfit > 0 ? 'positive' : 'negative');
+  }
+
+  if (alertEl) {
+    if (netProfit <= 0) {
+      alertEl.className = 'alert alert-error';
+      alertEl.textContent = '⚠️ خسارة! راجع التسعير أو التكاليف';
+    } else if (netProfit < sellPrice * 0.2) {
+      alertEl.className = 'alert alert-warning';
+      alertEl.textContent = '⚡ هامش ضعيف (أقل من 20%)';
+    } else {
+      alertEl.className = 'alert alert-success';
+      alertEl.textContent = '✅ عملية مربحة - ربح ' + fmt(netProfit) + ' ر.س';
+    }
+  }
+}
 // ═══ تنسيق العملة ═══
 function fmtCurrency(num, currency = 'ر.س') {
   return fmt(num) + ' ' + currency;
