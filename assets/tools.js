@@ -306,3 +306,44 @@ function calcROAS() {
     }
   }
 }
+
+// ═══ حاسبة الخصومات ═══
+function calcDiscount() {
+  const price = parseFloat(document.getElementById('price').value) || 0;
+  const type = document.getElementById('type').value;
+  let discount = 0;
+
+  if (type === 'percent') {
+    const percent = parseFloat(document.getElementById('percent').value) || 0;
+    discount = price * (percent / 100);
+  } else {
+    discount = parseFloat(document.getElementById('fixed-disc').value) || 0;
+    if (discount > price) discount = price;
+  }
+
+  const finalPrice = price - discount;
+  const savingPercent = price > 0 ? (discount / price) * 100 : 0;
+
+  const dEl = document.getElementById('discount-amount');
+  const fEl = document.getElementById('final-price');
+  const pEl = document.getElementById('saving-percent');
+
+  if (dEl) dEl.textContent = fmt(discount) + ' ر.س';
+  if (fEl) fEl.textContent = fmt(finalPrice) + ' ر.س';
+  if (pEl) pEl.textContent = savingPercent.toFixed(1) + '%';
+}
+
+function toggleDiscountType() {
+  const type = document.getElementById('type').value;
+  const percentGroup = document.getElementById('percent-group');
+  const fixedGroup = document.getElementById('fixed-group');
+
+  if (type === 'percent') {
+    percentGroup.style.display = 'block';
+    fixedGroup.style.display = 'none';
+  } else {
+    percentGroup.style.display = 'none';
+    fixedGroup.style.display = 'block';
+  }
+  calcDiscount();
+}
