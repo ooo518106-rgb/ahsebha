@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>خدمات احسبها — سيرة ذاتية، ترجمة، مقالات، إكسل وعروض تقديمية</title>
+<meta name="description" content="اطلب سيرة ذاتية ATS، ترجمة عربي إنجليزي، مقالات SEO، أوصاف منتجات، شيت إكسل أو عرض بوربوينت، وادفع بأمان عبر PayPal واستلم خلال 24 ساعة.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🤝</text></svg>">
+<meta name="theme-color" content="#4f46e5">
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="services.css">
+</head>
+<body>
+
+<header class="site-header">
+  <div class="header-inner">
+    <a href="../index.html" class="logo"><span class="logo-icon">💼</span><span>احسبها</span></a>
+    <nav class="nav">
+      <a href="../index.html">الأدوات</a>
+      <a href="index.html">الخدمات</a>
+      <a href="../contact.html">اتصل بنا</a>
+      <button class="theme-toggle">🌙 داكن</button>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <section class="page-hero">
+    <div class="page-hero-icon">🤝</div>
+    <h1 class="page-title">خدمات احسبها</h1>
+    <p class="page-subtitle">اطلب الخدمة وادفع أونلاين، واستلم شغلك خلال 24 ساعة</p>
+  </section>
+
+  <div class="container">
+    <ol class="svc-steps">
+      <li><b>اختر الخدمة</b> واكتب تفاصيل طلبك</li>
+      <li><b>ادفع بأمان</b> عبر PayPal أو البطاقة البنكية</li>
+      <li><b>استلم ملفاتك</b> من صفحة طلبك خلال 24 ساعة</li>
+    </ol>
+
+    <div class="svc-grid" id="svc-grid"><div class="alert alert-info">جارٍ تحميل الخدمات…</div></div>
+
+    <form class="calculator" id="order-form" hidden onsubmit="return false" novalidate>
+      <div class="order-head">
+        <h2 id="svc-title"></h2>
+        <button type="button" class="link-btn" id="change-svc">غيّر الخدمة</button>
+      </div>
+      <p class="page-subtitle" id="svc-delivers" style="margin:-8px 0 18px;font-size:.9rem"></p>
+
+      <div id="svc-fields"></div>
+
+      <div class="form-group" id="g-email">
+        <label for="f-email">بريدك الإلكتروني (للتواصل بخصوص الطلب)</label>
+        <input type="email" id="f-email" autocomplete="email" maxlength="200" placeholder="name@example.com" dir="ltr">
+        <div class="err" id="e-email" hidden></div>
+      </div>
+
+      <div class="total">
+        <div><div>المبلغ</div><div class="sub">بالدولار الأمريكي، يُدفع مرة واحدة</div></div>
+        <div class="amt" id="total-amt">$0</div>
+      </div>
+
+      <div class="form-group" id="g-terms">
+        <label class="check"><input type="checkbox" id="f-terms"><span>قرأت <a href="#terms">شروط الخدمة وسياسة الاسترجاع</a> وأوافق عليها</span></label>
+        <div class="err" id="e-terms" hidden></div>
+      </div>
+
+      <div id="order-msg" class="alert" hidden role="status"></div>
+      <div id="paypal-buttons"></div>
+    </form>
+
+    <section class="mine" id="mine" hidden>
+      <h3>طلباتك السابقة على هذا الجهاز</h3>
+      <div id="mine-list"></div>
+    </section>
+
+    <article class="content" id="terms">
+      <h2>كيف تُنفَّذ الخدمات؟</h2>
+      <p>تُنفَّذ الخدمات بواسطة مساعد ذكي يعمل بالذكاء الاصطناعي، وفق معايير جودة محددة لكل خدمة. لذلك نسلّم بسرعة وبسعر أقل من السوق.</p>
+
+      <h2>مدة التسليم</h2>
+      <p>خلال 24 ساعة من تأكيد الدفع في أغلب الطلبات. تتابع حالة طلبك وتستلم ملفاتك من رابط صفحة الطلب الذي يظهر بعد الدفع، فاحفظه.</p>
+
+      <h2>شروط الخدمة وسياسة الاسترجاع</h2>
+      <ul>
+        <li>إذا لم نستطع تنفيذ طلبك لأي سبب، نعيد لك المبلغ كاملاً عبر PayPal.</li>
+        <li>إذا لم نسلّم خلال 72 ساعة من الدفع، يحق لك استرجاع المبلغ كاملاً.</li>
+        <li>تعديل واحد مجاني خلال 3 أيام من التسليم عبر صفحة <a href="../contact.html">اتصل بنا</a> مع رقم الطلب.</li>
+        <li>لا نقبل: حل الواجبات والاختبارات أو الأبحاث الجامعية لتقديمها باسم الطالب، الترجمة القانونية المعتمدة، أو أي محتوى مضلل أو مخالف. هذه الطلبات تُلغى ويُعاد مبلغها.</li>
+        <li>مسؤوليتك مراجعة المحتوى قبل استخدامه رسمياً، خاصة المعلومات الشخصية والأرقام.</li>
+      </ul>
+
+      <h2>الخصوصية</h2>
+      <p>نستخدم المعلومات التي ترسلها لتنفيذ طلبك فقط، ولا نشاركها مع أي طرف. الدفع يتم مباشرة عبر PayPal ولا نرى بيانات بطاقتك.</p>
+    </article>
+  </div>
+</main>
+
+<footer class="site-footer">
+  <div class="footer-inner">
+    <div class="footer-col">
+      <h4>احسبها</h4>
+      <p style="font-size:0.9rem;">أدوات حسابية مجانية وخدمات رقمية للتجار والأفراد</p>
+    </div>
+    <div class="footer-col">
+      <h4>روابط</h4>
+      <a href="index.html">الخدمات</a>
+      <a href="../privacy.html">الخصوصية</a>
+      <a href="../contact.html">اتصل بنا</a>
+    </div>
+  </div>
+  <div class="footer-bottom">© 2026 احسبها</div>
+</footer>
+
+<script src="../assets/main.js"></script>
+<script src="config.js"></script>
+<script src="services.js"></script>
+<script>AhsebhaServices.initOrderPage();</script>
+</body>
+</html>
