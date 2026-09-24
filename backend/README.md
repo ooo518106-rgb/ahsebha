@@ -36,10 +36,10 @@
 
 ### 3. بيئة Claude (عشان الإيجنت يوصل للطلبات)
 من قائمة البيئة بعنوان الجلسة ← **Edit**:
-- **Environment variables**:
-  - `AHSEBHA_API` = عنوان الـ Worker (مثلاً `https://ahsebha-orders.<اسمك>.workers.dev`)
-  - `AHSEBHA_AGENT_TOKEN` = نفس قيمة `AGENT_TOKEN`
-- **Network access**: ضيف دومين الـ Worker (`ahsebha-orders.<اسمك>.workers.dev`) للدومينات المسموحة.
+- **Network access**: Custom، وضيف `ahsebha-orders.<اسمك>.workers.dev` و `github.com` و `*.github.com` و `*.githubusercontent.com`.
+- **Environment variables**: `AHSEBHA_API=https://ahsebha-orders.<اسمك>.workers.dev`
+- **API credentials ← Add credential**: النوع Bearer، الموقع `ahsebha-orders.<اسمك>.workers.dev`، والقيمة = `AGENT_TOKEN`.
+  هيك الإيجنت ما بيشوف كلمة السر، والبيئة بتضيفها لحالها لكل طلب للخادم.
 
 ### 4. آخر خطوة
 حط عنوان الـ Worker بملف `services/config.js`، وشغّل Routine «إيجنت تنفيذ الطلبات» كل ساعة.

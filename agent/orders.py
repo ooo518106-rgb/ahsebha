@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """أداة الإيجنت للتعامل مع خادم الطلبات (backend/worker.js).
 
-المتغيرات المطلوبة في البيئة:
+المتغيرات في البيئة:
   AHSEBHA_API          عنوان الخادم، مثل https://ahsebha-orders.NAME.workers.dev
-  AHSEBHA_AGENT_TOKEN  نفس قيمة AGENT_TOKEN في الخادم
+  AHSEBHA_AGENT_TOKEN  (اختياري) نفس قيمة AGENT_TOKEN. إذا مش موجود، منفترض إن
+                       بيئة Claude بتضيف ترويسة Authorization لحالها (API credentials).
 
 الاستعمال:
   python3 agent/orders.py list [--status paid,in_progress]
@@ -36,19 +37,18 @@ MIME = {
 def config():
     api = os.environ.get("AHSEBHA_API", "").rstrip("/")
     token = os.environ.get("AHSEBHA_AGENT_TOKEN", "")
-    if not api or not token:
-        sys.exit("AHSEBHA_API و AHSEBHA_AGENT_TOKEN مش موجودين بالبيئة. ضيفهم بإعدادات البيئة.")
+    if not api:
+        sys.exit("AHSEBHA_API مش موجود بالبيئة. ضيفه بإعدادات البيئة.")
     return api, token
 
 
 def call(method, path, body=None):
     api, token = config()
     data = None if body is None else json.dumps(body, ensure_ascii=False).encode("utf-8")
-    req = urllib.request.Request(api + path, data=data, method=method, headers={
-        "Authorization": "Bearer " + token,
-        "Content-Type": "application/json",
-        "User-Agent": "ahsebha-agent/1.0",
-    })
+    headers = {"Content-Type": "application/json", "User-Agent": "ahsebha-agent/1.0"}
+    if token:
+        headers["Authorization"] = "Bearer " + token
+    req = urllib.request.Request(api + path, data=data, method=method, headers=headers)
     try:
         with urllib.request.urlopen(req, timeout=120) as r:
             return json.loads(r.read().decode("utf-8") or "{}")
