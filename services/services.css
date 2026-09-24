@@ -1,0 +1,65 @@
+/* صفحات الخدمات — تبني على assets/style.css */
+.svc-steps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; max-width: 900px; margin: 0 auto 24px; counter-reset: st; }
+.svc-steps li { list-style: none; background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; counter-increment: st; font-size: 0.95rem; }
+.svc-steps li::before { content: counter(st); display: inline-grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; background: var(--primary); color: #fff; font-weight: 800; margin-inline-end: 8px; font-size: 0.9rem; }
+.svc-steps b { font-weight: 700; }
+
+.svc-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px; max-width: 1040px; margin: 0 auto; }
+.svc-card { text-align: start; font: inherit; color: var(--text); background: var(--card); border: 2px solid var(--border); border-radius: var(--radius); padding: 18px; cursor: pointer; display: flex; flex-direction: column; gap: 6px; transition: border-color .2s, box-shadow .2s, transform .2s; }
+.svc-card:hover { border-color: var(--primary); box-shadow: var(--shadow-md); transform: translateY(-2px); }
+.svc-card[aria-pressed="true"] { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(79,70,229,.15); }
+.svc-card .ic { font-size: 2rem; line-height: 1; }
+.svc-card .nm { font-weight: 800; font-size: 1.05rem; }
+.svc-card .bl { color: var(--text-muted); font-size: 0.9rem; }
+.svc-card .ft { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin-top: auto; padding-top: 6px; font-size: 0.85rem; color: var(--text-muted); }
+.svc-card .from b { color: var(--primary); font-size: 1.15rem; font-weight: 800; }
+
+.form-group textarea { width: 100%; min-height: 140px; padding: 12px 16px; font-size: 1rem; font-family: 'Cairo', sans-serif; border: 2px solid var(--border); border-radius: var(--radius); background: var(--bg); color: var(--text); resize: vertical; line-height: 1.7; }
+.form-group textarea:focus { outline: none; border-color: var(--primary); background: var(--card); }
+.form-group .hint { font-size: 0.8rem; color: var(--text-muted); margin-top: 4px; }
+.form-group .err { font-size: 0.85rem; color: var(--error); margin-top: 4px; font-weight: 600; }
+.form-group.has-err input, .form-group.has-err select, .form-group.has-err textarea { border-color: var(--error); }
+.check { display: flex; gap: 10px; align-items: flex-start; font-weight: 600; cursor: pointer; }
+.check input { width: 20px; height: 20px; margin-top: 4px; flex: none; accent-color: var(--primary); }
+
+.order-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 18px; }
+.order-head h2 { font-size: 1.25rem; font-weight: 800; }
+.link-btn { background: none; border: 0; color: var(--primary); font: inherit; font-weight: 700; cursor: pointer; padding: 0; }
+
+.total { display: flex; justify-content: space-between; align-items: center; gap: 12px; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 18px; margin: 8px 0 18px; }
+.total .amt { font-size: 1.6rem; font-weight: 900; color: var(--primary); font-variant-numeric: tabular-nums; }
+.total .sub { font-size: 0.85rem; color: var(--text-muted); }
+#paypal-buttons { min-height: 50px; margin-top: 8px; }
+
+.mine { max-width: 700px; margin: 0 auto; }
+.mine h3 { font-size: 1rem; margin-bottom: 8px; }
+.mine a { display: flex; justify-content: space-between; gap: 10px; padding: 10px 14px; background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 8px; color: var(--text); text-decoration: none; }
+.mine a:hover { border-color: var(--primary); }
+
+/* صفحة الطلب */
+.status-pill { display: inline-block; padding: 4px 14px; border-radius: 999px; font-weight: 800; font-size: 0.9rem; background: var(--bg); border: 1px solid var(--border); }
+.status-pill[data-s="paid"], .status-pill[data-s="in_progress"] { background: #dbeafe; color: #1e40af; border-color: transparent; }
+.status-pill[data-s="delivered"] { background: #d1fae5; color: #065f46; border-color: transparent; }
+.status-pill[data-s="needs_review"], .status-pill[data-s="awaiting_payment"] { background: #fef3c7; color: #92400e; border-color: transparent; }
+.status-pill[data-s="refunded"], .status-pill[data-s="cancelled"] { background: #fee2e2; color: #991b1b; border-color: transparent; }
+.timeline { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; margin: 20px 0; }
+.timeline div { text-align: center; font-size: 0.85rem; color: var(--text-muted); padding-top: 10px; border-top: 4px solid var(--border); }
+.timeline div.done { color: var(--text); font-weight: 700; border-top-color: var(--success); }
+.timeline div.now { color: var(--primary); font-weight: 800; border-top-color: var(--primary); }
+.kv { display: grid; grid-template-columns: auto 1fr; gap: 6px 16px; font-size: 0.95rem; }
+.kv dt { color: var(--text-muted); }
+.kv dd { margin: 0; font-weight: 600; font-variant-numeric: tabular-nums; }
+.result-text { white-space: pre-wrap; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; max-height: 480px; overflow: auto; line-height: 1.9; }
+.files { display: flex; flex-direction: column; gap: 8px; margin: 12px 0; }
+.files a { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 12px 16px; border-radius: var(--radius); background: var(--primary); color: #fff; text-decoration: none; font-weight: 700; }
+.files a span { font-weight: 500; opacity: .85; font-size: 0.85rem; }
+.btn-ghost { background: transparent; border: 2px solid var(--border); color: var(--text); padding: 8px 16px; border-radius: var(--radius); font: inherit; font-weight: 700; cursor: pointer; }
+.btn-ghost:hover { border-color: var(--primary); }
+.row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+
+@media (max-width: 640px) {
+  .svc-steps { grid-template-columns: 1fr; }
+  .timeline { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .svc-grid { grid-template-columns: 1fr; }
+}
+@media (prefers-reduced-motion: reduce) { .svc-card { transition: none; } .svc-card:hover { transform: none; } }

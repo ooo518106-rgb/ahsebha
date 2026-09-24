@@ -1,0 +1,14 @@
+# للنشر من سطر الأوامر (اختياري). النشر من لوحة Cloudflare بيكفي.
+name = "ahsebha-orders"
+main = "worker.js"
+compatibility_date = "2026-09-01"
+
+[vars]
+PAYPAL_ENV = "live"
+ALLOWED_ORIGIN = "https://ooo518106-rgb.github.io"
+# PAYPAL_CLIENT_ID بيتحط كـ var من اللوحة أو هون
+# PAYPAL_SECRET و AGENT_TOKEN: npx wrangler secret put PAYPAL_SECRET
+
+[[kv_namespaces]]
+binding = "ORDERS"
+id = "REPLACE_WITH_KV_NAMESPACE_ID"
