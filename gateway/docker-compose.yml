@@ -1,0 +1,20 @@
+# تشغيل البوابة مع HTTPS تلقائي (Caddy)
+# 1) انسخ .env.example لـ .env وعبّيه   2) docker compose up -d
+services:
+  gateway:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - ./data:/data
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    command: caddy reverse-proxy --from ${DOMAIN} --to gateway:3000
+    volumes:
+      - caddy_data:/data
+volumes:
+  caddy_data:

@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex">
+<title>بوابة واتساب — لوحة المدير</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<main class="wrap">
+  <h1>بوابة واتساب — لوحة المدير</h1>
+
+  <section class="card row" id="login">
+    <input id="token" type="password" placeholder="مفتاح المدير (ADMIN_TOKEN)" autocomplete="current-password">
+    <button id="loginBtn" type="button">دخول</button>
+  </section>
+
+  <section id="panel" hidden style="display:flex;flex-direction:column;gap:16px">
+    <div class="card" style="display:flex;flex-direction:column;gap:10px">
+      <h2>رقم جديد</h2>
+      <div class="row">
+        <input id="newName" placeholder="اسم المتجر">
+        <input id="newHook" placeholder="رابط الـ webhook (اختياري)" dir="ltr">
+        <button id="createBtn" type="button">إضافة</button>
+      </div>
+      <p class="muted small">بعد الإضافة، ابعت «رابط الربط» للتاجر ليمسح الـ QR من موبايله.</p>
+    </div>
+    <div class="grid" id="list"></div>
+  </section>
+</main>
+<script>
+(function () {
+  const $ = (id) => document.getElementById(id);
+  let token = "";
+  try { token = sessionStorage.getItem("gw-admin") || ""; } catch (e) {}
+  const LABEL = { connected: "متصل", qr: "بانتظار المسح", starting: "عم يتصل", disconnected: "منقطع", logged_out: "انفصل", stopped: "متوقف" };
+
+  async function api(method, path, body) {
+    const r = await fetch(path, { method, headers: { "Content-Type": "application/json", Authorization: "Bearer " + token }, body: body ? JSON.stringify(body) : undefined });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(d.message || ("HTTP " + r.status));
+    return d;
+  }
+  function el(tag, attrs, kids) {
+    const n = document.createElement(tag);
+    for (const k in attrs || {}) { const v = attrs[k]; if (v == null) continue; if (k === "text") n.textContent = v; else if (k.startsWith("on")) n.addEventListener(k.slice(2), v); else n.setAttribute(k, v); }
+    (kids || []).forEach((c) => c != null && n.append(c));
+    return n;
+  }
+  async function copy(text, btn) {
+    try { await navigator.clipboard.writeText(text); btn.textContent = "انتسخ ✓"; } catch (e) { prompt("انسخ:", text); }
+    setTimeout(() => { btn.textContent = btn.dataset.label; }, 1500);
+  }
+  const copyBtn = (label, text) => { const b = el("button", { class: "ghost", type: "button", text: label }); b.dataset.label = label; b.onclick = () => copy(text, b); return b; };
+
+  async function card(i) {
+    const d = await api("GET", "/admin/instances/" + i.id);
+    const qrBox = el("div", { class: "center", style: "min-height:0" });
+    if (d.state === "qr") {
+      const q = await api("GET", "/admin/instances/" + i.id + "/qr");
+      if (q.qr) qrBox.append(el("img", { class: "qr", src: q.qr, alt: "QR" }));
+    }
+    const connectUrl = location.origin + d.connectUrl;
+    return el("article", { class: "card", style: "display:flex;flex-direction:column;gap:10px" }, [
+      el("div", { class: "row", style: "justify-content:space-between" }, [el("h2", { text: d.name }), el("span", { class: "pill", "data-s": d.state, text: LABEL[d.state] || d.state })]),
+      el("dl", null, [
+        el("dt", { text: "المعرّف" }), el("dd", null, [el("code", { text: d.id })]),
+        el("dt", { text: "الرقم" }), el("dd", { text: d.me && d.me.phone ? "+" + d.me.phone : "—", dir: "ltr", style: "text-align:right" }),
+        el("dt", { text: "اليوم" }), el("dd", { text: d.usage.sentToday + " / " + d.usage.dailyLimit + " رسالة" }),
+        el("dt", { text: "Webhook" }), el("dd", null, [el("code", { text: d.webhookUrl || "—" })]),
+      ]),
+      qrBox,
+      el("div", { class: "row" }, [
+        copyBtn("رابط الربط للتاجر", connectUrl),
+        copyBtn("API Token", d.apiToken),
+        copyBtn("Webhook secret", d.webhookSecret),
+        el("button", { class: "ghost", type: "button", text: "إعادة اتصال", onclick: async () => { await api("POST", "/admin/instances/" + d.id + "/restart"); refresh(); } }),
+        el("button", { class: "danger", type: "button", text: "حذف", onclick: async (e) => {
+          const b = e.currentTarget;
+          if (b.dataset.sure !== "1") { b.dataset.sure = "1"; b.textContent = "متأكد؟ اكبس كمان مرة"; return; }
+          await api("DELETE", "/admin/instances/" + d.id); refresh();
+        } }),
+      ]),
+    ]);
+  }
+
+  let busy = false;
+  async function refresh() {
+    if (busy) return; busy = true;
+    try {
+      const { instances } = await api("GET", "/admin/instances");
+      const cards = await Promise.all(instances.map(card));
+      $("list").replaceChildren(...(cards.length ? cards : [el("p", { class: "muted", text: "ما في أرقام لسا." })]));
+    } catch (e) {
+      if (/مفتاح/.test(e.message)) { $("panel").hidden = true; $("login").hidden = false; }
+    } finally { busy = false; }
+  }
+
+  async function login() {
+    token = $("token").value.trim() || token;
+    try {
+      await api("GET", "/admin/instances");
+      try { sessionStorage.setItem("gw-admin", token); } catch (e) {}
+      $("login").hidden = true; $("panel").hidden = false;
+      refresh();
+    } catch (e) { $("token").value = ""; $("token").placeholder = "المفتاح غلط، جرّب كمان مرة"; }
+  }
+  $("loginBtn").onclick = login;
+  $("token").addEventListener("keydown", (e) => { if (e.key === "Enter") login(); });
+  $("createBtn").onclick = async () => {
+    const name = $("newName").value.trim();
+    if (!name) { $("newName").focus(); return; }
+    await api("POST", "/admin/instances", { name, webhookUrl: $("newHook").value.trim() || undefined });
+    $("newName").value = ""; $("newHook").value = "";
+    refresh();
+  };
+  if (token) login();
+  setInterval(() => { if (!$("panel").hidden) refresh(); }, 5000);
+})();
+</script>
+</body>
+</html>

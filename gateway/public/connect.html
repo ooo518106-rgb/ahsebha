@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex">
+<title>ربط واتساب — احسبها</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<main class="wrap narrow">
+  <h1>اربط واتساب متجرك</h1>
+  <p class="muted" id="name"></p>
+
+  <section class="card center" id="box">
+    <p>جارٍ التحميل…</p>
+  </section>
+
+  <ol class="steps">
+    <li>افتح واتساب على موبايل المتجر.</li>
+    <li>اكبس <b>⋮</b> أو <b>الإعدادات</b> ← <b>الأجهزة المرتبطة</b> ← <b>ربط جهاز</b>.</li>
+    <li>وجّه الكاميرا على الكود. الكود بيتجدد لحاله كل كم ثانية.</li>
+  </ol>
+  <p class="muted small">الربط متل واتساب ويب: بتضل تستعمل واتساب عالموبايل عادي، وبتقدر تفصل الربط وقت ما بدك من «الأجهزة المرتبطة».</p>
+</main>
+<script>
+(function () {
+  const q = new URLSearchParams(location.search);
+  const id = q.get("i"), k = q.get("k");
+  const box = document.getElementById("box");
+  const LABEL = { starting: "عم نجهّز الاتصال…", disconnected: "انقطع الاتصال، عم نعيد المحاولة…", stopped: "الرقم متوقف", logged_out: "انفصل الرقم. حدّث الصفحة لتطلع كود جديد." };
+  function show(html) { box.innerHTML = html; }
+  async function tick() {
+    if (!id || !k) return show("<p class='err'>رابط الربط ناقص.</p>");
+    try {
+      const r = await fetch("/connect/" + encodeURIComponent(id) + "?k=" + encodeURIComponent(k));
+      const d = await r.json();
+      if (!r.ok) return show("<p class='err'>" + (d.message || "رابط الربط غلط") + "</p>");
+      document.getElementById("name").textContent = d.name || "";
+      if (d.state === "connected") {
+        show("<div class='ok-big'>✓</div><p><b>تم الربط بنجاح</b></p><p class='muted'>" + (d.me && d.me.phone ? "+" + d.me.phone : "") + "</p><p class='muted small'>فيك تسكّر هالصفحة.</p>");
+        return;
+      }
+      if (d.state === "qr" && d.qr) show("<img class='qr' alt='كود الربط' src='" + d.qr + "'><p class='muted small'>امسح الكود من واتساب ← الأجهزة المرتبطة</p>");
+      else show("<p>" + (LABEL[d.state] || "…") + "</p>");
+    } catch (e) { show("<p class='err'>تعذّر الاتصال بالخادم، عم نعيد المحاولة…</p>"); }
+    setTimeout(tick, 3000);
+  }
+  tick();
+})();
+</script>
+</body>
+</html>
