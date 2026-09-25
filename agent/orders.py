@@ -13,6 +13,7 @@
   python3 agent/orders.py deliver ORDER_ID --text result.txt [--file out.docx ...] [--note "..."]
   python3 agent/orders.py flag ORDER_ID --reason "سبب داخلي" [--note "رسالة للزبون"]
   python3 agent/orders.py set ORDER_ID STATUS [--note "..."]      # paid | refunded | cancelled
+  python3 agent/orders.py delete ORDER_ID --yes                   # حذف الطلب وملفاته نهائياً
 """
 import argparse
 import base64
@@ -70,6 +71,7 @@ def main():
     s.add_argument("--note", help="ملاحظة قصيرة تظهر للزبون")
     s = sub.add_parser("flag"); s.add_argument("id"); s.add_argument("--reason", required=True); s.add_argument("--note")
     s = sub.add_parser("set"); s.add_argument("id"); s.add_argument("status"); s.add_argument("--note")
+    s = sub.add_parser("delete"); s.add_argument("id"); s.add_argument("--yes", action="store_true", required=True, help="تأكيد الحذف النهائي")
     a = p.parse_args()
 
     if a.cmd == "list":
@@ -98,6 +100,8 @@ def main():
     elif a.cmd == "flag":
         body = {"status": "needs_review", "note": a.reason, "publicNote": a.note or "نراجع طلبك وسنتواصل معك عبر بريدك الإلكتروني."}
         print(json.dumps(call("POST", f"/api/agent/orders/{a.id}/status", body), ensure_ascii=False))
+    elif a.cmd == "delete":
+        print(json.dumps(call("DELETE", f"/api/agent/orders/{a.id}"), ensure_ascii=False))
     elif a.cmd == "set":
         body = {"status": a.status}
         if a.note:

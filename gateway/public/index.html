@@ -34,7 +34,7 @@
   const $ = (id) => document.getElementById(id);
   let token = "";
   try { token = sessionStorage.getItem("gw-admin") || ""; } catch (e) {}
-  const LABEL = { connected: "متصل", qr: "بانتظار المسح", starting: "عم يتصل", disconnected: "منقطع", logged_out: "انفصل", stopped: "متوقف" };
+  const LABEL = { connected: "متصل", qr: "بانتظار المسح", qr_expired: "الكود انتهى", starting: "عم يتصل", disconnected: "منقطع", logged_out: "انفصل", stopped: "متوقف" };
 
   async function api(method, path, body) {
     const r = await fetch(path, { method, headers: { "Content-Type": "application/json", Authorization: "Bearer " + token }, body: body ? JSON.stringify(body) : undefined });

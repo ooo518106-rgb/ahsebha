@@ -9,6 +9,14 @@ const { randomId, randomToken } = require("./util");
 const MEDIA_TTL_MS = 24 * 3600e3;
 const MAX_MEDIA = 16 * 1024 * 1024;
 
+function checkWebhookUrl(u) {
+  if (!u) return "";
+  let url;
+  try { url = new URL(String(u)); } catch (e) { const err = new Error("رابط الـ webhook غير صالح"); err.status = 400; err.code = "bad_request"; throw err; }
+  if (!["http:", "https:"].includes(url.protocol)) { const err = new Error("رابط الـ webhook لازم يبلّش بـ http أو https"); err.status = 400; err.code = "bad_request"; throw err; }
+  return url.toString();
+}
+
 class Manager {
   constructor({ dataDir, publicUrl = "", logger, factory, sleep, deliverImpl = deliver }) {
     this.dataDir = dataDir;
@@ -42,7 +50,7 @@ class Manager {
       name: String(name || "رقم " + id).slice(0, 80),
       apiToken: randomToken(),
       connectKey: randomToken(),
-      webhookUrl: webhookUrl ? String(webhookUrl) : "",
+      webhookUrl: checkWebhookUrl(webhookUrl),
       webhookSecret: randomToken(),
       settings: settings && typeof settings === "object" ? settings : {},
       createdAt: new Date().toISOString(),
@@ -60,7 +68,7 @@ class Manager {
     if (!inst) return null;
     const m = inst.meta;
     if (typeof patch.name === "string") m.name = patch.name.slice(0, 80);
-    if (typeof patch.webhookUrl === "string") m.webhookUrl = patch.webhookUrl;
+    if (typeof patch.webhookUrl === "string") m.webhookUrl = checkWebhookUrl(patch.webhookUrl);
     if (patch.settings && typeof patch.settings === "object") {
       const allowed = ["replyWindowHours", "dailyLimit", "minDelayMs", "maxDelayMs", "typingMs", "ignoreGroups"];
       for (const k of allowed) if (k in patch.settings) m.settings[k] = patch.settings[k];
@@ -138,4 +146,4 @@ class Manager {
   }
 }
 
-module.exports = { Manager };
+module.exports = { Manager, checkWebhookUrl };

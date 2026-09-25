@@ -28,7 +28,7 @@
   const q = new URLSearchParams(location.search);
   const id = q.get("i"), k = q.get("k");
   const box = document.getElementById("box");
-  const LABEL = { starting: "عم نجهّز الاتصال…", disconnected: "انقطع الاتصال، عم نعيد المحاولة…", stopped: "الرقم متوقف", logged_out: "انفصل الرقم. حدّث الصفحة لتطلع كود جديد." };
+  const LABEL = { starting: "عم نجهّز الاتصال…", disconnected: "انقطع الاتصال، عم نعيد المحاولة…", stopped: "الرقم متوقف", logged_out: "انفصل الرقم." };
   function show(html) { box.innerHTML = html; }
   async function tick() {
     if (!id || !k) return show("<p class='err'>رابط الربط ناقص.</p>");
@@ -39,6 +39,15 @@
       document.getElementById("name").textContent = d.name || "";
       if (d.state === "connected") {
         show("<div class='ok-big'>✓</div><p><b>تم الربط بنجاح</b></p><p class='muted'>" + (d.me && d.me.phone ? "+" + d.me.phone : "") + "</p><p class='muted small'>فيك تسكّر هالصفحة.</p>");
+        return;
+      }
+      if (d.state === "qr_expired" || d.state === "logged_out") {
+        show("<p>انتهت صلاحية الكود.</p><button type='button' id='again'>اطلب كود جديد</button>");
+        document.getElementById("again").onclick = async () => {
+          show("<p>عم نجهّز كود جديد…</p>");
+          await fetch("/connect/" + encodeURIComponent(id) + "/restart?k=" + encodeURIComponent(k), { method: "POST" }).catch(() => {});
+          setTimeout(tick, 1500);
+        };
         return;
       }
       if (d.state === "qr" && d.qr) show("<img class='qr' alt='كود الربط' src='" + d.qr + "'><p class='muted small'>امسح الكود من واتساب ← الأجهزة المرتبطة</p>");

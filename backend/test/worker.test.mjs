@@ -12,6 +12,7 @@ class FakeKV {
     return e.v;
   }
   async put(k, v, o) { this.m.set(k, { v, meta: o && o.metadata, ttl: o && o.expirationTtl }); }
+  async delete(k) { this.m.delete(k); }
   async list({ prefix }) {
     return { list_complete: true, keys: [...this.m.entries()].filter(([k]) => k.startsWith(prefix)).map(([name, e]) => ({ name, metadata: e.meta })) };
   }
@@ -126,6 +127,12 @@ test("full flow: create, capture, agent deliver, customer download", async () =>
   // التحصيل مرة تانية ما بيغيّر شي
   const again = await (await call(env, "POST", `/api/orders/${created.id}/capture`, { key: created.key })).json();
   assert.equal(again.status, "delivered");
+
+  // حذف بيانات الطلب نهائياً
+  assert.equal((await call(env, "DELETE", `/api/agent/orders/${created.id}`)).status, 401);
+  assert.equal((await (await call(env, "DELETE", `/api/agent/orders/${created.id}`, null, auth)).json()).deleted, created.id);
+  assert.equal((await call(env, "GET", `/api/orders/${created.id}?key=${created.key}`)).status, 404);
+  assert.equal([...env.ORDERS.m.keys()].filter((k) => k.includes(created.id)).length, 0);
 });
 
 test("amount mismatch goes to review, not paid", async () => {

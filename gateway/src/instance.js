@@ -27,6 +27,7 @@ async function baileysFactory({ authDir, logger }) {
   return {
     sock,
     loggedOutCode: baileys.DisconnectReason.loggedOut,
+    restartCode: baileys.DisconnectReason.restartRequired,
     download: (m) => baileys.downloadMediaMessage(m, "buffer", {}, { logger, reuploadRequest: sock.updateMediaMessage }),
   };
 }
@@ -38,11 +39,13 @@ class Instance extends EventEmitter {
     this.logger = logger;
     this.factory = factory;
     this.authDir = path.join(dataDir, "auth", meta.id);
-    this.state = "stopped"; // stopped | starting | qr | connected | disconnected | logged_out
+    this.state = "stopped"; // stopped | starting | qr | qr_expired | connected | disconnected | logged_out
     this.qr = null;
     this.me = null;
     this.sock = null;
     this.retries = 0;
+    this.qrFails = 0; // كم مرة انتهى الـ QR بدون ما حدا يمسحه
+    this.seen = new Set(); // آخر الرسائل اللي وصلت، لمنع التكرار
     this.stopping = false;
     const settings = () => withDefaults(this.meta.settings);
     this.guard = new Guard(settings);
@@ -60,7 +63,7 @@ class Instance extends EventEmitter {
     this.stopping = false;
     fs.mkdirSync(this.authDir, { recursive: true });
     this._setState("starting");
-    const { sock, loggedOutCode, download } = await this.factory({ authDir: this.authDir, logger: this.logger });
+    const { sock, loggedOutCode, restartCode = 515, download } = await this.factory({ authDir: this.authDir, logger: this.logger });
     this.sock = sock;
     this.download = download;
 
@@ -69,6 +72,7 @@ class Instance extends EventEmitter {
       if (u.connection === "open") {
         this.qr = null;
         this.retries = 0;
+        this.qrFails = 0;
         this.me = sock.user ? { id: sock.user.id, phone: phoneOf(sock.user.id), name: sock.user.name || "" } : null;
         this._setState("connected", { me: this.me });
       }
@@ -80,6 +84,16 @@ class Instance extends EventEmitter {
           fs.rmSync(this.authDir, { recursive: true, force: true });
           this.me = null;
           return this._setState("logged_out");
+        }
+        // بعد مسح الـ QR واتساب بيطلب إعادة اتصال فورية
+        if (code === restartCode) {
+          setTimeout(() => { if (!this.stopping) this.start().catch((e) => this.logger?.error?.(e)); }, 500).unref?.();
+          return this._setState("disconnected", { code });
+        }
+        // الـ QR انتهى وما حدا مسحه: منوقف بعد 3 مرات بدل ما نضل نولّد أكواد للأبد
+        if (this.state === "qr" && ++this.qrFails >= 3) {
+          this.qr = null;
+          return this._setState("qr_expired");
         }
         this._setState("disconnected", { code });
         const wait = Math.min(60000, 2000 * 2 ** this.retries++);
@@ -94,6 +108,11 @@ class Instance extends EventEmitter {
         if (m.key?.fromMe || !m.message || SKIP_JIDS.includes(jid)) continue;
         if (jid.endsWith("@g.us") && withDefaults(this.meta.settings).ignoreGroups) continue;
         const msg = normalizeIncoming(m);
+        if (msg.idMessage) {
+          if (this.seen.has(msg.idMessage)) continue;
+          this.seen.add(msg.idMessage);
+          if (this.seen.size > 1000) this.seen.delete(this.seen.values().next().value);
+        }
         this.guard.noteIncoming(msg.chatId, msg.altChatId, msg.phone ? msg.phone + "@s.whatsapp.net" : null);
         this.emit("message", msg, m);
       }

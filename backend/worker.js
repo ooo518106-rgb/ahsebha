@@ -360,6 +360,13 @@ async function route(req, env) {
 
       if (m === "GET" && !action) { const { key, ...rest } = o; return json(rest); }
 
+      // حذف الطلب وملفاته نهائياً (طلب حذف بيانات من الزبون)
+      if (m === "DELETE" && !action) {
+        for (let n = 0; n < ((o.result && o.result.files) || []).length; n++) await env.ORDERS.delete(`file:${o.id}:${n}`);
+        await env.ORDERS.delete("order:" + o.id);
+        return json({ ok: true, deleted: o.id });
+      }
+
       if (m === "POST" && action === "/status") {
         const body = await readJson(req);
         const allowed = ["paid", "in_progress", "needs_review", "refunded", "cancelled"];

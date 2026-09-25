@@ -80,7 +80,7 @@
   "timestamp": 1790000000
 }
 ```
-وكمان `stateInstanceChanged` لما تتغيّر حالة الرقم: `qr`، `connected`، `disconnected`، `logged_out`.
+وكمان `stateInstanceChanged` لما تتغيّر حالة الرقم: `qr`، `connected`، `disconnected`، `qr_expired` (الكود انتهى بدون مسح، والتاجر بيطلب كود جديد من صفحة الربط)، `logged_out`.
 
 ## الاختبارات
 ```bash

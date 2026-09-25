@@ -24,7 +24,7 @@ button.danger { background: transparent; color: var(--err); border: 1px solid va
 .pill { display: inline-block; padding: 1px 10px; border-radius: 999px; font-size: 12px; font-weight: 700; border: 1px solid var(--line); }
 .pill[data-s="connected"] { color: var(--accent); border-color: var(--accent); }
 .pill[data-s="qr"], .pill[data-s="starting"], .pill[data-s="disconnected"] { color: var(--warn); border-color: var(--warn); }
-.pill[data-s="logged_out"], .pill[data-s="stopped"] { color: var(--err); border-color: var(--err); }
+.pill[data-s="logged_out"], .pill[data-s="stopped"], .pill[data-s="qr_expired"] { color: var(--err); border-color: var(--err); }
 code { font-size: 12px; background: var(--bg); padding: 2px 6px; border-radius: 6px; word-break: break-all; }
 dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 0; font-size: 13px; }
 dt { color: var(--muted); }

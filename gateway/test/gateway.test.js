@@ -163,3 +163,45 @@ test("API: create, QR, connect, receive, reply, media, logout, delete", async ()
     fs.rmSync(dataDir, { recursive: true, force: true });
   }
 });
+
+test("instance: QR expiry stops after 3 unscanned codes, restartRequired does not count, duplicates dropped", async () => {
+  const { Instance } = require("../src/instance");
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "gw-"));
+  const socks = [];
+  const inst = new Instance({ id: "T1", settings: {} }, { dataDir, factory: fakeFactory(socks), sleep: noSleep });
+  try {
+    await inst.start();
+    // بعد المسح واتساب بيطلب إعادة تشغيل (515): هاد مش فشل
+    socks.at(-1).ev.emit("connection.update", { qr: "q" });
+    socks.at(-1).ev.emit("connection.update", { connection: "close", lastDisconnect: { error: { output: { statusCode: 515 } } } });
+    assert.equal(inst.qrFails, 0);
+    await new Promise((r) => setTimeout(r, 600)); // إعادة الاتصال الفورية
+    for (let i = 0; i < 3; i++) {
+      const s = socks.at(-1);
+      s.ev.emit("connection.update", { qr: "q" + i });
+      s.ev.emit("connection.update", { connection: "close", lastDisconnect: { error: { output: { statusCode: 408 } } } });
+      if (i < 2) { inst.stopping = false; await inst.start(); }
+    }
+    assert.equal(inst.state, "qr_expired");
+
+    // تكرار نفس الرسالة من واتساب بيوصل مرة وحدة
+    await inst.start();
+    const got = [];
+    inst.on("message", (m) => got.push(m.idMessage));
+    const m = { key: { id: "DUP1", remoteJid: "962791234567@s.whatsapp.net" }, message: { conversation: "هلا" } };
+    socks.at(-1).ev.emit("messages.upsert", { type: "notify", messages: [m] });
+    socks.at(-1).ev.emit("messages.upsert", { type: "notify", messages: [m] });
+    assert.deepEqual(got, ["DUP1"]);
+  } finally {
+    await inst.stop();
+    fs.rmSync(dataDir, { recursive: true, force: true });
+  }
+});
+
+test("webhook URL must be http(s)", () => {
+  const { checkWebhookUrl } = require("../src/manager");
+  assert.equal(checkWebhookUrl(""), "");
+  assert.equal(checkWebhookUrl("https://bot.test/hook"), "https://bot.test/hook");
+  assert.throws(() => checkWebhookUrl("file:///etc/passwd"), /http/);
+  assert.throws(() => checkWebhookUrl("not a url"), /غير صالح/);
+});

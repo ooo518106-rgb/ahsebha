@@ -75,6 +75,15 @@ function createApp(manager, { adminToken }) {
     res.json({ name: inst.meta.name, ...(await qrPayload(inst)) });
   }));
 
+  // التاجر بيطلب كود جديد إذا الكود انتهى
+  app.post("/connect/:id/restart", wrap(async (req, res) => {
+    const inst = manager.get(req.params.id);
+    if (!inst || !safeEqual(req.query.k, inst.meta.connectKey)) throw httpError(404, "not_found", "رابط الربط غلط");
+    if (inst.state === "connected") return res.json({ state: inst.state });
+    await manager.restart(req.params.id);
+    res.json({ state: inst.state });
+  }));
+
   // ─── واجهة الـ API لكل رقم (متل Green-API) ───
   const instAuth = (req, res, next) => {
     const inst = manager.get(req.params.id);
