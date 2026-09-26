@@ -1,0 +1,19 @@
+{
+  "name": "برنامج محاسبة احسبها",
+  "short_name": "محاسبة احسبها",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f8fafc",
+  "theme_color": "#4f46e5",
+  "lang": "ar",
+  "dir": "rtl",
+  "description": "برنامج محاسبة عربي مجاني: فواتير ضريبية، مخزون، سندات، قيود وتقارير مالية.",
+  "icons": [
+    {
+      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'><rect width='192' height='192' rx='40' fill='%234f46e5'/><text x='96' y='128' font-size='96' text-anchor='middle'>📒</text></svg>",
+      "sizes": "192x192",
+      "type": "image/svg+xml"
+    }
+  ]
+}
