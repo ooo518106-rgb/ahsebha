@@ -11,7 +11,9 @@ const FEATURES = [
   ['🧾', 'فواتير ضريبية ورمز QR', 'فاتورة ضريبية ومبسطة وإشعارات دائنة، مع رمز QR حسب متطلبات هيئة الزكاة والضريبة والجمارك، وطباعة A4 أو إيصال حراري.'],
   ['📒', 'قيود تلقائية بالقيد المزدوج', 'كل فاتورة وسند ومصروف يولّد قيده تلقائياً، مع دليل حسابات قابل للتعديل وقيود يدوية للتسويات.'],
   ['📦', 'مخزون بالتكلفة المتوسطة', 'متابعة الكميات وتكلفة البضاعة المباعة وربح كل منتج، وتنبيه عند قرب النفاد، وتسويات الجرد.'],
-  ['👥', 'عملاء وموردون وكشوف حساب', 'أرصدة لحظية، أعمار الديون، ربط الدفعات بالفواتير، وإرسال الكشف عبر واتساب.'],
+  ['🖥️', 'كاشير وباركود', 'شاشة بيع سريعة بالباركود أو الكاميرا، دفع نقدي وبطاقة ومقسّم، طباعة إيصال، تقفيل الصندوق اليومي، وطباعة ملصقات الباركود.'],
+  ['👥', 'عملاء وموردون وكشوف حساب', 'أرصدة لحظية، أعمار الديون، ربط الدفعات بالفواتير، وتذكير المتأخرين عبر واتساب.'],
+  ['📥', 'استيراد من Excel ومستخدمون', 'انقل منتجاتك وعملاءك من ملف Excel دفعة واحدة، وأضف كاشير ومحاسب برموز دخول وصلاحيات.'],
   ['📊', 'تقارير مالية كاملة', 'قائمة الدخل، الميزانية العمومية، ميزان المراجعة، إقرار الضريبة، وحركة الصندوق والبنوك.'],
   ['🔒', 'بياناتك على جهازك', 'بدون تسجيل وبدون خوادم: كل شيء يُحفظ في متصفحك، مع نسخة احتياطية تنزّلها وتستعيدها متى شئت.'],
 ];
@@ -117,7 +119,7 @@ export function dashboard({ root }) {
 
   root.innerHTML = String(html`
     <div class="page-head"><div><h2>أهلاً بك 👋</h2><div class="sub">${s.name || ''} · ${fmtDate(t)}${s.country === 'SA' ? ` · ${hijri(t)}` : ''}</div></div>
-      <div class="actions"><a class="btn btn-primary" href="#/sales/new">🧾 فاتورة جديدة</a><a class="btn btn-ghost" href="#/expenses/new">💸 مصروف</a></div></div>
+      <div class="actions"><a class="btn btn-primary" href="#/sales/new">🧾 فاتورة جديدة</a><a class="btn btn-ghost" href="#/pos">🖥️ الكاشير</a><a class="btn btn-ghost" href="#/expenses/new">💸 مصروف</a></div></div>
     ${db.demo ? html`<p class="note note-info" style="margin-bottom:14px">🧪 هذه بيانات تجريبية للتجربة. عندما تكون جاهزاً: <a href="#/settings">الإعدادات</a> ← «حذف كل البيانات» ثم ابدأ بمنشأتك.</p>` : ''}
     ${needBackup ? html`<p class="note note-warn" style="margin-bottom:14px">💾 ${since == null ? 'لم تنزّل أي نسخة احتياطية بعد.' : `آخر نسخة احتياطية قبل ${since} يوم.`} بياناتك محفوظة على هذا الجهاز فقط. <a href="#/settings" data-backup>نزّل نسخة احتياطية الآن</a></p>` : ''}
     ${showSteps ? html`<div class="card" style="margin-bottom:14px"><div class="card-h"><h3>🚀 خطوات البداية</h3><span class="muted small">${steps.filter((x) => x[1]).length} من ${steps.length}</span></div>
@@ -127,7 +129,7 @@ export function dashboard({ root }) {
       ${kpi('المصروفات والتكاليف', money(D.expenses, { sym: true }), '#/reports/income', 'تشمل تكلفة البضاعة المباعة')}
       ${kpi('صافي الربح', money(D.profit, { sym: true }), '#/reports/income', monthLabel, D.profit < 0 ? 'neg' : 'pos')}
       ${kpi('النقدية والبنوك', money(D.cash, { sym: true }), '#/reports/cash', 'الرصيد المتوفر الآن')}
-      ${kpi('مستحق من العملاء', money(D.receivable, { sym: true }), '#/reports/aging-ar', D.overdue.length ? `${D.overdue.length} فاتورة متأخرة` : 'لا توجد متأخرات')}
+      ${kpi('مستحق من العملاء', money(D.receivable, { sym: true }), '#/collections', D.overdue.length ? `${D.overdue.length} فاتورة متأخرة · تذكير واتساب` : 'لا توجد متأخرات')}
       ${kpi('مستحق للموردين', money(D.payable, { sym: true }), '#/reports/aging-ap')}
       ${s.vat ? kpi(D.vatDue >= 0 ? 'ضريبة مستحقة للهيئة' : 'ضريبة قابلة للاسترداد', money(Math.abs(D.vatDue), { sym: true }), '#/reports/vat', 'الرصيد غير المسدد') : ''}
       ${kpi('قيمة المخزون', money(stockValue, { sym: true }), '#/reports/stock', D.low.length ? `${D.low.length} صنف قارب على النفاد` : 'بالتكلفة المتوسطة')}

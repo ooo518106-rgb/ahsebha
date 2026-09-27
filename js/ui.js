@@ -197,15 +197,24 @@ export function download(name, content, type = 'text/csv;charset=utf-8') {
   document.body.append(a); a.click();
   setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 1500);
 }
-export function exportTable(table, name) { download(name.replace(/[\\/:*?"<>|]/g, '-') + '.csv', toCSV(tableRows(table))); }
+// التصدير كملف Excel حقيقي؛ الأرقام تبقى أرقاماً قابلة للجمع
+export async function exportTable(table, name) {
+  const { writeXlsx } = await import('./xlsx.js');
+  const rows = tableRows(table).map((r) => r.map((c) => (/^-?\d+(\.\d+)?$/.test(c) && !/^0\d/.test(c) ? Number(c) : c)));
+  exportRows(rows, name, writeXlsx);
+}
+export function exportRows(rows, name, writeXlsx) {
+  const clean = name.replace(/[\\/:*?"<>|]/g, '-');
+  download(clean + '.xlsx', writeXlsx([{ name: clean.slice(0, 31), rows }]), 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+}
 
 // ─── الطباعة: تُعرض الورقة وحدها وتختفي الواجهة ───
-export function printHTML(content, { size = 'a4', title } = {}) {
+export function printHTML(content, { size = 'a4', title, page: pageCss } = {}) {
   const area = document.getElementById('print-area');
   const page = document.getElementById('print-page');
   area.innerHTML = String(content);
   area.className = 'print-' + size;
-  page.textContent = size === 'receipt' ? '@page { size: 80mm auto; margin: 3mm; }' : '@page { size: A4; margin: 10mm; }';
+  page.textContent = pageCss || (size === 'receipt' ? '@page { size: 80mm auto; margin: 3mm; }' : '@page { size: A4; margin: 10mm; }');
   document.body.classList.add('printing');
   const old = document.title;
   if (title) document.title = title;

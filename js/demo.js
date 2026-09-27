@@ -1,6 +1,7 @@
 // ═══ بيانات تجريبية واقعية: متجر إلكترونيات صغير لآخر خمسة أشهر ═══
 // مولّد ثابت (نفس النتيجة لنفس التاريخ) حتى تكون التجربة قابلة للتكرار.
 import { defaultAccounts, defaultSettings, addDays, addMonths, monthStart, monthEnd, calcDoc, expenseAsDoc } from './core.js';
+import { eanCheckDigit } from './barcode.js';
 
 export function demoData(today) {
   let seed = 7;
@@ -14,6 +15,7 @@ export function demoData(today) {
     address: 'الرياض — حي العليا، طريق الملك فهد', phone: '0501234567', email: 'sales@example.com',
     startDate: start, inclusive: true,
     invoiceNote: 'شكراً لتسوقكم معنا. الاستبدال خلال 7 أيام بالفاتورة والتغليف الأصلي.',
+    nameEn: 'Al Nukhba Electronics Est.', addressEn: 'Olaya, King Fahd Road, Riyadh', invoiceLang: 'bi', posCard: 'wallet',
   });
 
   const accounts = defaultAccounts();
@@ -43,6 +45,16 @@ export function demoData(today) {
     { id: 'p7', name: 'خدمة تعريف وبرمجة الأجهزة', sku: 'SRV-1', type: 'service', unit: 'خدمة', price: 50, cost: 0, tax: 'S', openQty: 0, openCost: 0, reorder: 0, active: true },
     { id: 'p8', name: 'توصيل داخل المدينة', sku: 'DLV', type: 'service', unit: 'مشوار', price: 25, cost: 0, tax: 'S', openQty: 0, openCost: 0, reorder: 0, active: true },
   ];
+  // الاسم الإنجليزي والتصنيف والباركود الداخلي (يبدأ بـ 20) لتجربة الكاشير والملصقات
+  const EXTRA = {
+    p1: ['Wireless Bluetooth Headphones', 'صوتيات'], p2: ['25W Fast Charger', 'شواحن وكيابل'], p3: ['Durable USB-C Cable 1m', 'شواحن وكيابل'],
+    p4: ['Power Bank 10000 mAh', 'شواحن وكيابل'], p5: ['Shockproof Phone Case', 'إكسسوارات'], p6: ['Sports Smart Watch', 'ساعات'],
+    p7: ['Device Setup Service', 'خدمات'], p8: ['City Delivery', 'خدمات'],
+  };
+  products.forEach((p, i) => {
+    [p.nameEn, p.category] = EXTRA[p.id];
+    if (p.type === 'stock') { const d12 = '2000000000' + String(i + 1).padStart(2, '0'); p.barcode = d12 + eanCheckDigit(d12); }
+  });
   const target = { p1: 130, p2: 170, p3: 340, p4: 110, p5: 240, p6: 50 };
   const stock = Object.fromEntries(products.map((p) => [p.id, p.openQty]));
   const byId = Object.fromEntries(products.map((p) => [p.id, p]));
@@ -181,6 +193,23 @@ export function demoData(today) {
   add({ type: 'payment', date: addDays(today, -6) < start ? start : addDays(today, -6), party: null, account: 'draw', amount: 2000, money: 'cash', method: 'cash', notes: 'مسحوبات شخصية للمالك' });
   add({ type: 'quote', date: addDays(today, -1) < start ? start : addDays(today, -1), party: 'c1', vatRate: 15, inclusive: false, validUntil: addDays(today, 14),
     lines: [{ product: 'p6', desc: byId.p6.name, qty: 10, price: 250, disc: 7, tax: 'S' }, { product: 'p1', desc: byId.p1.name, qty: 15, price: 125, disc: 5, tax: 'S' }], notes: 'الأسعار تشمل التوصيل داخل الرياض' });
+
+  // مبيعات الكاشير اليوم: نقداً مع الباقي، ومدى، ومقسّمة (لتجربة تقفيل الصندوق)
+  for (let i = 0; i < 6; i++) {
+    const lines = [];
+    for (let k = between(1, 3); k > 0; k--) {
+      const p = pick(goods);
+      if (stock[p.id] < 1 || lines.some((l) => l.product === p.id)) continue;
+      stock[p.id] -= 1;
+      lines.push({ product: p.id, desc: p.name, qty: 1, price: p.price, disc: 0, tax: 'S' });
+    }
+    if (!lines.length) continue;
+    const d = { type: 'sale', date: today, party: null, vatRate: 15, inclusive: true, lines, notes: '', pos: true };
+    const t = total(d);
+    if (i % 3 === 0) { const got = Math.ceil(t / 50) * 50; add({ ...d, payments: [{ acc: 'cash', amount: t }], tendered: got, change: Math.round((got - t) * 100) / 100 }); }
+    else if (i % 3 === 1) add({ ...d, payments: [{ acc: 'wallet', amount: t }] });
+    else { const c = Math.round(t / 2); add({ ...d, payments: [{ acc: 'cash', amount: c }, { acc: 'wallet', amount: Math.round((t - c) * 100) / 100 }] }); }
+  }
 
   for (const p of products) delete p.supplier;
   // ترقيم تسلسلي حسب التاريخ كما يحدث في الاستخدام الفعلي

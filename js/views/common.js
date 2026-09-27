@@ -2,7 +2,7 @@
 import * as store from '../store.js';
 import {
   docNo, calcDoc, expenseAsDoc, moneyAccounts, currencyInfo, num, ymd, monthStart, monthEnd, addMonths, addDays,
-  quarterStart, fiscalYearStart, zatcaInvoiceQR, tafqeet, sortedAccounts, TAX_CATS, DOC_TYPES,
+  quarterStart, fiscalYearStart, zatcaInvoiceQR, tafqeet, sortedAccounts, paymentList, TAX_CATS, DOC_TYPES,
 } from '../core.js';
 import { html, raw, money, qty, fmtDate, hijri, modal, showErrors, $, printHTML, qrSVG, moneyText, field } from '../ui.js';
 import { go, withQuery } from '../nav.js';
@@ -165,14 +165,22 @@ export function taxOptions(sel) {
 }
 
 // ─── أوراق الطباعة ───
-function coBlock(s) {
+// عنوان بالعربي، ومعه الإنجليزي تحته في الفاتورة ثنائية اللغة
+const bilingual = (s = S()) => s.invoiceLang === 'bi';
+const lbl = (ar, en, bi) => (bi && en ? html`${ar}<i class="pp-en"><span dir="ltr">${en}</span></i>` : ar);
+// «الرقم الضريبي · VAT No.» مع عزل الإنجليزي حتى لا تنقلب النقطة
+const lbl2 = (ar, en, bi) => (bi ? html`${ar} · <span dir="ltr">${en}</span>` : ar);
+
+function coBlock(s, bi = false) {
   const contact = [s.phone && 'هاتف: ' + s.phone, s.email].filter(Boolean).join(' · ');
   return html`<div class="pp-co">${s.logo ? html`<img src="${s.logo}" alt="">` : ''}<div>
     <h2>${s.name || 'منشأتي'}</h2>
+    ${bi && s.nameEn ? html`<div class="pp-en-name"><span dir="ltr">${s.nameEn}</span></div>` : ''}
     ${s.address ? html`<div>${s.address}</div>` : ''}
+    ${bi && s.addressEn ? html`<div class="muted"><span dir="ltr">${s.addressEn}</span></div>` : ''}
     ${contact ? html`<div class="muted">${contact}</div>` : ''}
-    ${s.vat && s.vatNo ? html`<div>الرقم الضريبي: <b dir="ltr">${s.vatNo}</b></div>` : ''}
-    ${s.crNo ? html`<div>السجل التجاري: <b dir="ltr">${s.crNo}</b></div>` : ''}
+    ${s.vat && s.vatNo ? html`<div>${lbl2('الرقم الضريبي', 'VAT No.', bi)}: <b dir="ltr">${s.vatNo}</b></div>` : ''}
+    ${s.crNo ? html`<div>${lbl2('السجل التجاري', 'CR No.', bi)}: <b dir="ltr">${s.crNo}</b></div>` : ''}
   </div></div>`;
 }
 
@@ -197,43 +205,54 @@ export function docPaper(d, { size = 'a4' } = {}) {
   const [title, en] = paperTitle(d, party, s);
   const tax = !!s.vat || num(d.vatRate) > 0;
   const small = size === 'receipt';
+  const bi = bilingual(s);
+  const L = (ar, enLabel) => lbl(ar, enLabel, bi);
   const anyDisc = T.lines.some((l) => l.discount);
   const isSale = d.type === 'sale' || d.type === 'sreturn' || d.type === 'quote';
   const st = d.type === 'quote' ? null : store.getBooks().status.get(d.id);
   const ref = d.refId ? store.findDoc(d.refId) : null;
   const qr = s.country === 'SA' && s.vat && (d.type === 'sale' || d.type === 'sreturn') && d.no ? qrSVG(zatcaInvoiceQR(s, d, T), 120) : '';
-  const partyLabel = { sale: 'العميل', quote: 'مقدم إلى', sreturn: 'العميل', purchase: 'المورد', preturn: 'المورد' }[d.type];
-  const partyBox = party ? html`<div><h4>${partyLabel}</h4><div class="nm">${party.name}</div>
-      ${party.vatNo ? html`<div>الرقم الضريبي: <b dir="ltr">${party.vatNo}</b></div>` : ''}
-      ${party.crNo ? html`<div>السجل التجاري: <span dir="ltr">${party.crNo}</span></div>` : ''}
+  const partyLabel = { sale: ['العميل', 'Customer'], quote: ['مقدم إلى', 'Quoted to'], sreturn: ['العميل', 'Customer'], purchase: ['المورد', 'Supplier'], preturn: ['المورد', 'Supplier'] }[d.type];
+  const partyBox = party ? html`<div><h4>${L(...partyLabel)}</h4><div class="nm">${party.name}</div>
+      ${bi && party.nameEn ? html`<div class="pp-en-name"><span dir="ltr">${party.nameEn}</span></div>` : ''}
+      ${party.vatNo ? html`<div>${lbl2('الرقم الضريبي', 'VAT No.', bi)}: <b dir="ltr">${party.vatNo}</b></div>` : ''}
+      ${party.crNo ? html`<div>${lbl2('السجل التجاري', 'CR No.', bi)}: <span dir="ltr">${party.crNo}</span></div>` : ''}
       ${party.address ? html`<div>${party.address}</div>` : ''}
       ${party.phone ? html`<div class="muted"><span dir="ltr">${party.phone}</span></div>` : ''}</div>`
-    : html`<div><h4>${partyLabel}</h4><div class="nm">${isSale ? 'عميل نقدي' : 'مورد نقدي'}</div></div>`;
+    : html`<div><h4>${L(...partyLabel)}</h4><div class="nm">${isSale ? L('عميل نقدي', 'Cash customer') : L('مورد نقدي', 'Cash supplier')}</div></div>`;
 
   const lineRows = (d.lines || []).map((l, i) => {
-    const L = T.lines[i];
-    const name = l.desc || productName(l.product) || 'بند';
-    if (small) return html`<tr><td>${name}</td><td class="num">${qty(L.qty)}</td><td class="num">${money(L.price)}</td><td class="num">${money(L.total)}</td></tr>`;
-    return html`<tr><td class="c-n">${i + 1}</td><td>${name}</td><td class="num">${qty(L.qty)}</td><td class="num">${money(L.price)}</td>
-      ${anyDisc ? html`<td class="num">${L.discount ? money(L.discount) : '—'}</td>` : ''}
-      ${tax ? html`<td class="num c-net">${money(L.net)}</td><td class="num">${money(L.vat)} <small class="muted rate">${L.cat === 'S' ? L.rate + '%' : TAX_CATS[L.cat]}</small></td>` : ''}
-      <td class="num">${money(L.total)}</td></tr>`;
+    const X = T.lines[i];
+    const p = l.product ? store.findProduct(l.product) : null;
+    const nm = l.desc || (p && p.name) || 'بند';
+    const name = bi && p && p.nameEn && p.nameEn !== nm ? html`${nm}<i class="pp-en"><span dir="ltr">${p.nameEn}</span></i>` : nm;
+    if (small) return html`<tr><td>${name}</td><td class="num">${qty(X.qty)}</td><td class="num">${money(X.price)}</td><td class="num">${money(X.total)}</td></tr>`;
+    return html`<tr><td class="c-n">${i + 1}</td><td>${name}</td><td class="num">${qty(X.qty)}</td><td class="num">${money(X.price)}</td>
+      ${anyDisc ? html`<td class="num">${X.discount ? money(X.discount) : '—'}</td>` : ''}
+      ${tax ? html`<td class="num c-net">${money(X.net)}</td><td class="num">${money(X.vat)} <small class="muted rate">${X.cat === 'S' ? X.rate + '%' : TAX_CATS[X.cat]}</small></td>` : ''}
+      <td class="num">${money(X.total)}</td></tr>`;
   });
   const headRow = small
-    ? html`<tr><th>البيان</th><th class="num">الكمية</th><th class="num">السعر</th><th class="num">الإجمالي</th></tr>`
-    : html`<tr><th class="c-n">#</th><th>البيان</th><th class="num">الكمية</th><th class="num">سعر الوحدة</th>${anyDisc ? html`<th class="num">الخصم</th>` : ''}${tax ? html`<th class="num c-net">الخاضع للضريبة</th><th class="num">الضريبة</th>` : ''}<th class="num">الإجمالي</th></tr>`;
+    ? html`<tr><th>${L('البيان', 'Item')}</th><th class="num">${L('الكمية', 'Qty')}</th><th class="num">${L('السعر', 'Price')}</th><th class="num">${L('الإجمالي', 'Total')}</th></tr>`
+    : html`<tr><th class="c-n">#</th><th>${L('البيان', 'Description')}</th><th class="num">${L('الكمية', 'Qty')}</th><th class="num">${L('سعر الوحدة', 'Unit price')}</th>${anyDisc ? html`<th class="num">${L('الخصم', 'Discount')}</th>` : ''}${tax ? html`<th class="num c-net">${L('الخاضع للضريبة', 'Taxable amount')}</th><th class="num">${L('الضريبة', 'VAT')}</th>` : ''}<th class="num">${L('الإجمالي', 'Total')}</th></tr>`;
+
+  // الدفع من الكاشير: طرق الدفع والمبلغ المستلم والباقي، واسم الكاشير
+  const pays = paymentList(d).filter((p) => num(p.amount) > 0);
+  const showPays = d.type === 'sale' && (d.pos || pays.length > 1);
+  const cashier = d.pos && d.by ? store.findUser(d.by) : null;
 
   const note = [d.notes, isSale ? s.invoiceNote : ''].filter(Boolean).join('\n');
-  return html`<div class="paper ${small ? 'receipt' : ''}">
-    <div class="pp-head">${coBlock(s)}<div class="pp-title"><h1>${title}</h1><div class="en">${en}</div></div></div>
+  return html`<div class="paper ${small ? 'receipt' : ''} ${bi ? 'bi' : ''}">
+    <div class="pp-head">${coBlock(s, bi)}<div class="pp-title"><h1>${title}</h1><div class="en">${en}</div></div></div>
     <div class="pp-meta">
-      ${meta('الرقم', html`<span dir="ltr">${d.no ? docNo(d, s) : 'مسودة'}</span>`)}
-      ${meta('التاريخ', html`${fmtDate(d.date)}${d.time && d.type !== 'purchase' && d.type !== 'preturn' ? html` <span class="muted" dir="ltr">${d.time.slice(0, 5)}</span>` : ''}`)}
+      ${meta(L('الرقم', 'No.'), html`<span dir="ltr">${d.no ? docNo(d, s) : 'مسودة'}</span>`)}
+      ${meta(L('التاريخ', 'Date'), html`${fmtDate(d.date)}${d.time && d.type !== 'purchase' && d.type !== 'preturn' ? html` <span class="muted" dir="ltr">${d.time.slice(0, 5)}</span>` : ''}`)}
       ${s.showHijri && !small ? meta('التاريخ الهجري', hijri(d.date)) : ''}
-      ${d.dueDate && st && st.due > 0 ? meta('تاريخ الاستحقاق', fmtDate(d.dueDate)) : ''}
-      ${d.validUntil ? meta('صالح حتى', fmtDate(d.validUntil)) : ''}
-      ${d.ref ? meta(d.type === 'purchase' ? 'رقم فاتورة المورد' : 'المرجع', d.ref) : ''}
-      ${ref ? meta('مرجع الفاتورة الأصلية', html`<span dir="ltr">${docNo(ref, s)}</span> — ${fmtDate(ref.date)}`) : ''}
+      ${d.dueDate && st && st.due > 0 ? meta(L('تاريخ الاستحقاق', 'Due date'), fmtDate(d.dueDate)) : ''}
+      ${d.validUntil ? meta(L('صالح حتى', 'Valid until'), fmtDate(d.validUntil)) : ''}
+      ${d.ref ? meta(d.type === 'purchase' ? L('رقم فاتورة المورد', 'Supplier invoice') : L('المرجع', 'Reference'), d.ref) : ''}
+      ${ref ? meta(L('مرجع الفاتورة الأصلية', 'Original invoice'), html`<span dir="ltr">${docNo(ref, s)}</span> — ${fmtDate(ref.date)}`) : ''}
+      ${cashier ? meta(L('الكاشير', 'Cashier'), cashier.name) : ''}
     </div>
     <div class="pp-party">${partyBox}</div>
     <table class="pp-lines"><thead>${headRow}</thead><tbody>${lineRows}</tbody></table>
@@ -241,14 +260,16 @@ export function docPaper(d, { size = 'a4' } = {}) {
       <div>${qr ? html`<div class="pp-qr">${raw(qr)}<div class="muted small">رمز الاستجابة السريعة للفاتورة وفق متطلبات هيئة الزكاة والضريبة والجمارك</div></div>` : ''}
         ${note ? html`<div class="pp-note">${note}</div>` : ''}</div>
       <div><div class="pp-totals">
-        ${anyDisc ? html`<div><span>المجموع قبل الخصم</span>${money(T.gross)}</div><div><span>الخصم</span>${money(T.discount)}</div>` : ''}
-        ${tax ? html`<div><span>الإجمالي غير شامل الضريبة</span>${money(T.net)}</div><div><span>${s.taxLabel || 'الضريبة'}${num(d.vatRate) ? ` (${num(d.vatRate)}%)` : ''}</span>${money(T.vat)}</div>` : ''}
-        <div class="grand"><span>${tax ? 'الإجمالي شامل الضريبة' : 'الإجمالي'}</span><span>${money(T.total)} ${currencyInfo(s.currency).sym}</span></div>
-        ${st && st.paid > 0 && st.due > 0 ? html`<div><span>المدفوع</span>${money(st.paid)}</div><div><span>المتبقي</span>${money(st.due)}</div>` : ''}
+        ${anyDisc ? html`<div><span>${L('المجموع قبل الخصم', 'Subtotal')}</span>${money(T.gross)}</div><div><span>${L('الخصم', 'Discount')}</span>${money(T.discount)}</div>` : ''}
+        ${tax ? html`<div><span>${L('الإجمالي غير شامل الضريبة', 'Total excl. VAT')}</span>${money(T.net)}</div><div><span>${L(`${s.taxLabel || 'الضريبة'}${num(d.vatRate) ? ` (${num(d.vatRate)}%)` : ''}`, `VAT${num(d.vatRate) ? ` (${num(d.vatRate)}%)` : ''}`)}</span>${money(T.vat)}</div>` : ''}
+        <div class="grand"><span>${tax ? L('الإجمالي شامل الضريبة', 'Total incl. VAT') : L('الإجمالي', 'Total')}</span><span>${money(T.total)} ${currencyInfo(s.currency).sym}</span></div>
+        ${showPays ? html`${pays.map((p) => html`<div><span>${accName(p.acc)}</span>${money(p.amount)}</div>`)}
+          ${num(d.tendered) > 0 ? html`<div><span>${L('المبلغ المستلم', 'Tendered')}</span>${money(d.tendered)}</div><div><span>${L('الباقي للعميل', 'Change')}</span>${money(d.change || 0)}</div>` : ''}` : ''}
+        ${st && st.paid > 0 && st.due > 0 ? html`<div><span>${L('المدفوع', 'Paid')}</span>${money(st.paid)}</div><div><span>${L('المتبقي', 'Balance due')}</span>${money(st.due)}</div>` : ''}
       </div>
       <div class="pp-words">${tafqeet(T.total, s.currency)}</div></div>
     </div>
-    <div class="pp-foot"><span>${s.name || ''}</span><span>صادر من برنامج محاسبة احسبها</span></div>
+    <div class="pp-foot"><span>${s.name || ''}</span><span>${small ? (bi ? 'شكراً لزيارتكم · Thank you' : 'شكراً لزيارتكم') : 'صادر من برنامج محاسبة احسبها'}</span></div>
   </div>`;
 }
 
@@ -296,7 +317,7 @@ export function voucherPaper(d) {
 
 export const METHODS = { cash: 'نقداً', transfer: 'تحويل بنكي', card: 'بطاقة / مدى', cheque: 'شيك', wallet: 'محفظة إلكترونية', other: 'أخرى' };
 
-export function printPaper(content, { size = 'a4', title } = {}) { printHTML(content, { size, title }); }
+export function printPaper(content, { size = 'a4', title, page } = {}) { printHTML(content, { size, title, page }); }
 
 // طباعة تقرير بجدول
 export function printReport(title, sub, table) {
@@ -327,3 +348,30 @@ export function waLink(phone, text) {
 }
 
 export const csvName = (title) => `${title} - ${S().name || 'احسبها'} - ${today()}`;
+
+// ─── مسح الباركود بالكاميرا: onCode يرجّع true لإغلاق النافذة بعد أول رمز ───
+export function cameraDialog(onCode, { title = 'مسح الباركود بالكاميرا' } = {}) {
+  let stop = null;
+  return modal({
+    title,
+    body: html`<div class="cam-box"><video playsinline muted></video><div class="cam-line"></div></div>
+      <p class="muted small" data-cam-msg style="margin-top:10px">وجّه الكاميرا نحو الباركود…</p>
+      <div class="dlg-actions"><button type="button" class="btn btn-ghost" data-no>إغلاق</button></div>`,
+    onMount: async (dlg, done) => {
+      const msg = $('[data-cam-msg]', dlg);
+      const finish = (v) => { if (stop) stop(); stop = null; done(v); };
+      $('[data-no]', dlg).onclick = () => finish(null);
+      dlg.addEventListener('close', () => { if (stop) stop(); stop = null; });
+      if (!navigator.mediaDevices || !window.isSecureContext) { msg.textContent = 'الكاميرا تعمل فقط على رابط آمن (https).'; return; }
+      try {
+        const { startCameraScan } = await import('../barcode.js');
+        stop = await startCameraScan($('video', dlg), (code) => {
+          msg.textContent = '✓ ' + code;
+          if (onCode(code) === true) finish(code);
+        });
+      } catch (e) {
+        msg.textContent = e && e.name === 'NotAllowedError' ? 'اسمح للمتصفح باستخدام الكاميرا ثم أعد المحاولة.' : 'تعذّر تشغيل الكاميرا: ' + (e.message || e);
+      }
+    },
+  });
+}

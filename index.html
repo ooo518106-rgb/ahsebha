@@ -4,8 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>احسبها — برنامج محاسبة مجاني متكامل للمحلات والمتاجر</title>
-<meta name="description" content="برنامج محاسبة عربي مجاني: فواتير ضريبية مع رمز QR، مشتريات ومصروفات، مخزون بالتكلفة المتوسطة، سندات قبض وصرف، قيود تلقائية، ميزانية وقائمة دخل وإقرار ضريبي. يعمل من المتصفح وبدون تسجيل، وبياناتك تبقى على جهازك.">
-<meta name="keywords" content="برنامج محاسبة مجاني، فاتورة ضريبية، فاتورة إلكترونية، رمز QR، هيئة الزكاة، مخزون، قيود يومية، ميزانية، قائمة دخل، إقرار ضريبي">
+<meta name="description" content="برنامج محاسبة عربي مجاني: كاشير بالباركود، فواتير ضريبية مع رمز QR بالعربي والإنجليزي، مشتريات ومصروفات، مخزون بالتكلفة المتوسطة، سندات قبض وصرف، قيود تلقائية، ميزانية وقائمة دخل وإقرار ضريبي، واستيراد من Excel. يعمل من المتصفح وبدون تسجيل، وبياناتك تبقى على جهازك.">
+<meta name="keywords" content="برنامج محاسبة مجاني، برنامج كاشير، نقطة بيع، باركود، فاتورة ضريبية، فاتورة إلكترونية، رمز QR، هيئة الزكاة، مخزون، قيود يومية، ميزانية، قائمة دخل، إقرار ضريبي">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📒</text></svg>">
 <meta name="theme-color" content="#4f46e5">
 <meta name="google-site-verification" content="4qdTBLSKvfO3MlHI-cHfOOyLIlG5C3HS7xAbxH4m8GY" />
@@ -51,6 +51,7 @@
       <details class="quick" id="quick" hidden>
         <summary class="btn btn-primary btn-sm">➕ جديد</summary>
         <nav class="quick-menu">
+          <a href="#/pos">🖥️ بيع سريع (الكاشير)</a>
           <a href="#/sales/new">🧾 فاتورة مبيعات</a>
           <a href="#/expenses/new">💸 مصروف</a>
           <a href="#/receipts/new">📥 سند قبض</a>
@@ -61,6 +62,7 @@
           <a href="#/products/new">📦 منتج</a>
         </nav>
       </details>
+      <button class="btn btn-ghost btn-sm" id="lock-btn" title="قفل الشاشة" hidden>🔒</button>
       <button class="btn btn-ghost btn-sm theme-toggle">🌙 داكن</button>
     </header>
 

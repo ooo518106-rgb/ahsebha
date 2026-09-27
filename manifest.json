@@ -8,12 +8,50 @@
   "theme_color": "#4f46e5",
   "lang": "ar",
   "dir": "rtl",
-  "description": "برنامج محاسبة عربي مجاني: فواتير ضريبية، مخزون، سندات، قيود وتقارير مالية.",
+  "description": "برنامج محاسبة عربي مجاني: كاشير وباركود، فواتير ضريبية، مخزون، سندات، قيود وتقارير مالية.",
   "icons": [
     {
       "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'><rect width='192' height='192' rx='40' fill='%234f46e5'/><text x='96' y='128' font-size='96' text-anchor='middle'>📒</text></svg>",
       "sizes": "192x192",
       "type": "image/svg+xml"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "الكاشير",
+      "short_name": "الكاشير",
+      "url": "./#/pos",
+      "icons": [
+        {
+          "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'><rect width='192' height='192' rx='40' fill='%234f46e5'/><text x='96' y='128' font-size='96' text-anchor='middle'>📒</text></svg>",
+          "sizes": "192x192",
+          "type": "image/svg+xml"
+        }
+      ]
+    },
+    {
+      "name": "فاتورة مبيعات جديدة",
+      "short_name": "فاتورة",
+      "url": "./#/sales/new",
+      "icons": [
+        {
+          "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'><rect width='192' height='192' rx='40' fill='%234f46e5'/><text x='96' y='128' font-size='96' text-anchor='middle'>📒</text></svg>",
+          "sizes": "192x192",
+          "type": "image/svg+xml"
+        }
+      ]
+    },
+    {
+      "name": "مصروف جديد",
+      "short_name": "مصروف",
+      "url": "./#/expenses/new",
+      "icons": [
+        {
+          "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'><rect width='192' height='192' rx='40' fill='%234f46e5'/><text x='96' y='128' font-size='96' text-anchor='middle'>📒</text></svg>",
+          "sizes": "192x192",
+          "type": "image/svg+xml"
+        }
+      ]
     }
   ]
 }
