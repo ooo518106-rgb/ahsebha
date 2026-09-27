@@ -1,6 +1,6 @@
 // ═══ مستندات البنود: فواتير المبيعات، عروض الأسعار، المرتجعات، فواتير المشتريات ═══
 import * as store from '../store.js';
-import { calcDoc, docNo, DOC_TYPES, validateDoc, num, round, addDays } from '../core.js';
+import { calcDoc, docNo, DOC_TYPES, validateDoc, num, round, addDays, paymentList } from '../core.js';
 import { html, raw, money, fmtDate, toast, confirmBox, combo, showErrors, badge, empty, norm, $, $$, exportTable, moneyText, field } from '../ui.js';
 import { go, guard, setTitle, docHref, SEG } from '../nav.js';
 import {
@@ -78,7 +78,7 @@ export function list(type, { root, query, path }) {
         ${C.ref ? html`<td class="hide-sm nowrap" dir="ltr">${ref ? docNo(ref, s) : '—'}</td>` : ''}
         <td class="num">${money(t.total)}</td>
         ${hasPay ? html`<td class="num hide-sm">${money(st.paid)}</td><td class="num">${st.due ? money(st.due) : '—'}</td><td>${badge(st.state)}</td>` : ''}
-        ${C.ref ? html`<td class="num hide-sm">${num(d.paid) ? money(d.paid) : '—'}</td>` : ''}
+        ${C.ref ? html`<td class="num hide-sm">${st && st.refunded ? money(st.refunded) : '—'}</td>` : ''}
         ${type === 'quote' ? html`<td class="hide-sm">${d.validUntil ? fmtDate(d.validUntil) : ''}</td><td>${badge(d.convertedTo ? 'converted' : d.validUntil && d.validUntil < today() ? 'expired' : 'open')}</td>` : ''}
       </tr>`;
     });
@@ -149,10 +149,16 @@ export function form(type, { root, params, query }) {
   const hasPay = type !== 'quote';
   let pay = '';
   let paidAuto = true;
+  // الدفع المقسّم على أكثر من صندوق أو بنك (مثل نقد + مدى من الكاشير): pay = '*'
+  const split = {};
   if (hasPay) {
-    if (existing) {
-      pay = num(existing.paid) > 0 ? existing.payAcc : '';
-      paidAuto = round(num(existing.paid), dec()) === calcDoc(existing, dec()).total;
+    const given = existing ? paymentList(existing).filter((p) => num(p.amount) > 0) : [];
+    if (given.length > 1) {
+      pay = '*';
+      for (const p of given) split[p.acc] = round(num(split[p.acc]) + num(p.amount), dec());
+    } else if (existing) {
+      pay = given.length ? given[0].acc : '';
+      paidAuto = !given.length || round(num(given[0].amount), dec()) === calcDoc(existing, dec()).total;
     } else if (type === 'sale') pay = 'cash';
     else if (type === 'purchase') pay = d.party ? '' : 'cash';
     else if (C.ref) {
@@ -160,7 +166,8 @@ export function form(type, { root, params, query }) {
       pay = !d.party || (st && st.due <= 0) ? 'cash' : '';
     }
     if (!existing && pay && !moneyList().some((a) => a.id === pay)) pay = moneyList()[0]?.id || '';
-    d.paid = existing ? num(existing.paid) : 0;
+    const one = existing && pay !== '*' ? paymentList(existing).find((p) => num(p.amount) > 0) : null;
+    d.paid = one ? num(one.amount) : 0;
   }
 
   function lineFromProduct(p) {
@@ -204,6 +211,9 @@ export function form(type, { root, params, query }) {
             <div class="form-grid" style="margin-top:10px" data-paid-box><label class="fld"><span class="fld-l">${C.paidLabel}</span>
               <input class="inp" type="text" inputmode="decimal" data-num autocomplete="off" data-f="paid" data-paid></label>
               <div class="fld"><span class="fld-l">المتبقي</span><div class="kpi-v" style="font-size:1.1rem" data-rest></div></div></div>
+            <div style="margin-top:10px" data-split-box hidden><div class="form-grid">${moneyList().map((a) => html`<label class="fld"><span class="fld-l">${a.name}</span>
+              <input class="inp" type="text" inputmode="decimal" data-num autocomplete="off" data-split="${a.id}" placeholder="0"></label>`)}</div>
+              <div class="fld" style="margin-top:8px"><span class="fld-l">المتبقي ${C.kind === 'customer' ? 'على العميل' : 'للمورد'}</span><div class="kpi-v" style="font-size:1.1rem" data-split-rest></div></div></div>
             <small class="fld-e" data-err="paid" hidden></small></div>` : ''}
           <div class="card">${field('ملاحظات تظهر في المستند', html`<textarea class="inp" data-k="notes" rows="2">${d.notes || ''}</textarea>`)}</div>
         </div>
@@ -289,10 +299,19 @@ export function form(type, { root, params, query }) {
 
   function drawPay(total) {
     const seg = $('[data-pay]', root);
-    const opts = [...moneyList().map((a) => [a.id, (a.id === 'cash' ? '💵 ' : '🏦 ') + a.name]), ['', '⏳ ' + C.credit]];
+    const opts = [...moneyList().map((a) => [a.id, (a.id === 'cash' ? '💵 ' : '🏦 ') + a.name]), ...(moneyList().length > 1 ? [['*', '🔀 مقسّم']] : []), ['', '⏳ ' + C.credit]];
     seg.innerHTML = String(html`${opts.map(([v, t]) => html`<button type="button" data-pay-v="${v}" class="${v === pay ? 'on' : ''}">${t}</button>`)}`);
     const box = $('[data-paid-box]', root);
-    box.hidden = !pay;
+    box.hidden = !pay || pay === '*';
+    $('[data-split-box]', root).hidden = pay !== '*';
+    if (pay === '*') {
+      $$('[data-split]', root).forEach((el) => { if (document.activeElement !== el) el.value = split[el.dataset.split] || ''; });
+      const rest = round(total - Object.values(split).reduce((t, v) => t + num(v), 0), dec());
+      const el = $('[data-split-rest]', root);
+      el.innerHTML = String(money(rest, { sym: true }));
+      el.classList.toggle('neg', rest < 0);
+      return;
+    }
     const inp = $('[data-paid]', root);
     if (paidAuto) d.paid = pay ? total : 0;
     if (document.activeElement !== inp) inp.value = pay ? d.paid : '';
@@ -330,6 +349,7 @@ export function form(type, { root, params, query }) {
     const el = e.target;
     const k = el.dataset.k;
     if (el.matches('[data-paid]')) { d.paid = el.value; paidAuto = false; dirty(); drawPay(calc().total); return; }
+    if (el.matches('[data-split]')) { split[el.dataset.split] = el.value; dirty(); drawPay(calc().total); return; }
     if (!k) return;
     const row = el.closest('.line[data-i]');
     if (row) {
@@ -382,6 +402,7 @@ export function form(type, { root, params, query }) {
     } else if (t.closest('[data-pay-v]')) {
       pay = t.closest('[data-pay-v]').dataset.payV;
       paidAuto = true; dirty(); drawPay(calc().total);
+      if (pay === '*') $('[data-split]', root)?.focus();
     } else if (t.closest('[data-copy-ref]')) copyRef();
     else if (t.closest('[data-save]')) { e.preventDefault(); save(t.closest('[data-save]').dataset.save); }
   });
@@ -413,8 +434,20 @@ export function form(type, { root, params, query }) {
     };
     if (hasPay) {
       const total = calcDoc(doc, dec()).total;
-      doc.paid = pay ? (paidAuto ? total : round(num(d.paid), dec())) : 0;
-      doc.payAcc = pay || null;
+      if (pay === '*') {
+        doc.payments = Object.entries(split).map(([acc, v]) => ({ acc, amount: round(num(v), dec()) })).filter((p) => p.amount !== 0);
+        doc.paid = 0;
+        doc.payAcc = null;
+      } else {
+        delete doc.payments;
+        doc.paid = pay ? (paidAuto ? total : round(num(d.paid), dec())) : 0;
+        doc.payAcc = pay || null;
+      }
+      // مبلغ الكاشير المستلم والباقي لا يصحّان بعد تغيير الدفع أو الإجمالي
+      if (existing && (existing.tendered != null || existing.change != null)) {
+        const same = JSON.stringify(paymentList(existing).map((p) => [p.acc, num(p.amount)])) === JSON.stringify(paymentList(doc).map((p) => [p.acc, num(p.amount)]));
+        if (!same || calcDoc(existing, dec()).total !== total) { delete doc.tendered; delete doc.change; }
+      }
     }
     const errs = validateDoc(db, doc);
     if (!showErrors(root, errs)) { toast('راجع الحقول المظللة باللون الأحمر', 'err'); return; }
@@ -474,7 +507,7 @@ export function show(type, { root, params, query }) {
         <div class="kpi"><span class="kpi-l">المدفوع</span><span class="kpi-v">${money(st.paid, { sym: true })}</span></div>
         <div class="kpi"><span class="kpi-l">المتبقي</span><span class="kpi-v ${st.due > 0 ? 'neg' : ''}">${money(st.due, { sym: true })}</span>${d.dueDate && st.due > 0 ? html`<span class="kpi-s">يستحق ${fmtDate(d.dueDate)}</span>` : ''}</div>
         <div class="kpi"><span class="kpi-l">الحالة</span><span class="kpi-v">${badge(st.state)}</span></div>` : ''}
-      ${C.ref ? html`<div class="kpi"><span class="kpi-l">${C.paidLabel}</span><span class="kpi-v">${money(num(d.paid), { sym: true })}</span></div>
+      ${C.ref ? html`<div class="kpi"><span class="kpi-l">${C.paidLabel}</span><span class="kpi-v">${money(st ? st.refunded : 0, { sym: true })}</span></div>
         <div class="kpi"><span class="kpi-l">المتبقي كرصيد</span><span class="kpi-v">${money(st ? st.open : 0, { sym: true })}</span><span class="kpi-s">يُخصم من الفواتير القادمة</span></div>` : ''}
       ${type === 'quote' ? html`<div class="kpi"><span class="kpi-l">الحالة</span><span class="kpi-v">${badge(conv ? 'converted' : d.validUntil && d.validUntil < today() ? 'expired' : 'open')}</span>${conv ? html`<a class="kpi-s" href="${docHref(conv)}">الفاتورة ${docNo(conv, s)}</a>` : ''}</div>` : ''}
     </div>

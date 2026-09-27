@@ -1,7 +1,8 @@
 // ═══ برنامج محاسبة احسبها: الهيكل والتنقل ═══
 import * as store from './store.js';
 import { html, setSettings, toast, confirmBox } from './ui.js';
-import { SEG, parseHash, guard, setTitle } from './nav.js';
+import { SEG, parseHash, guard, setTitle, go } from './nav.js';
+import * as auth from './auth.js';
 import * as home from './views/home.js';
 import * as docs from './views/docs.js';
 import * as money from './views/money.js';
@@ -10,6 +11,10 @@ import * as products from './views/products.js';
 import * as parties from './views/parties.js';
 import * as reports from './views/reports.js';
 import * as settings from './views/settings.js';
+import * as pos from './views/pos.js';
+import * as importer from './views/importer.js';
+import * as collections from './views/collections.js';
+import * as users from './views/users.js';
 
 // ─── المسارات ───
 const routes = [];
@@ -41,6 +46,12 @@ on('daybook', ledger.daybook);
 on('reports', reports.index);
 on('reports/:name', reports.report);
 on('settings', settings.view);
+on('pos', pos.pos);
+on('pos/closing', pos.closing);
+on('labels', products.labels);
+on('import', importer.view);
+on('collections', collections.view);
+on('users', users.view);
 
 function match(path) {
   const parts = path.split('/').filter(Boolean);
@@ -55,11 +66,13 @@ function match(path) {
 // ─── القائمة الجانبية ───
 const NAV = [
   { ic: '🏠', t: 'الرئيسية', h: '' },
+  { ic: '🖥️', t: 'الكاشير (نقطة البيع)', h: 'pos' },
   { sec: 'المبيعات' },
   { ic: '🧾', t: 'فواتير المبيعات', h: 'sales' },
   { ic: '📝', t: 'عروض الأسعار', h: 'quotes' },
   { ic: '↩️', t: 'مرتجعات المبيعات', h: 'sales-returns' },
   { ic: '👥', t: 'العملاء', h: 'customers' },
+  { ic: '📞', t: 'التحصيل والتذكير', h: 'collections' },
   { sec: 'المشتريات والمصروفات' },
   { ic: '🛒', t: 'فواتير المشتريات', h: 'purchases' },
   { ic: '↪️', t: 'مرتجعات المشتريات', h: 'purchase-returns' },
@@ -71,13 +84,23 @@ const NAV = [
   { ic: '🔁', t: 'التحويلات', h: 'transfers' },
   { sec: 'المخزون' },
   { ic: '📦', t: 'المنتجات والخدمات', h: 'products' },
+  { ic: '🏷️', t: 'ملصقات الباركود', h: 'labels' },
   { ic: '⚖️', t: 'تسويات المخزون', h: 'adjustments' },
   { sec: 'المحاسبة والتقارير' },
   { ic: '📒', t: 'قيود اليومية', h: 'journal' },
   { ic: '🗂️', t: 'دليل الحسابات', h: 'accounts' },
   { ic: '📊', t: 'التقارير', h: 'reports' },
+  { sec: 'الإدارة' },
+  { ic: '📥', t: 'الاستيراد من Excel', h: 'import' },
+  { ic: '👤', t: 'المستخدمون', h: 'users' },
   { ic: '⚙️', t: 'الإعدادات', h: 'settings' },
 ];
+
+// عناصر القائمة المسموحة للمستخدم الحالي، بدون عناوين أقسام فارغة
+function navItems() {
+  const xs = NAV.filter((n) => n.sec || auth.can(auth.routePerm(n.h)));
+  return xs.filter((n, i) => !n.sec || (xs[i + 1] && !xs[i + 1].sec));
+}
 
 export function renderShell() {
   const db = store.getDb();
@@ -87,9 +110,15 @@ export function renderShell() {
   const foot = html`<div class="side-foot"><p class="muted small" style="padding:0 12px">🔒 بياناتك محفوظة على هذا الجهاز فقط. نزّل نسخة احتياطية من <a href="#/settings">الإعدادات</a> بشكل دوري.</p></div>`;
   side.innerHTML = String(db
     ? html`${brand}<div class="side-co" title="${db.settings.name}">🏢 ${db.settings.name || 'منشأتي'}</div>
-      <nav>${NAV.map((n) => (n.sec ? html`<div class="nav-sec">${n.sec}</div>` : html`<a class="nav-a" data-h="${n.h}" href="#/${n.h}"><span class="ic">${n.ic}</span>${n.t}</a>`))}</nav>${foot}`
+      <nav>${navItems().map((n) => (n.sec ? html`<div class="nav-sec">${n.sec}</div>` : html`<a class="nav-a" data-h="${n.h}" href="#/${n.h}"><span class="ic">${n.ic}</span>${n.t}</a>`))}</nav>${foot}`
     : html`${brand}<nav><a class="nav-a on" href="#/welcome"><span class="ic">👋</span>ابدأ هنا</a></nav>${foot}`);
-  document.getElementById('quick').hidden = !db;
+  const quick = document.getElementById('quick');
+  quick.querySelectorAll('.quick-menu a').forEach((a) => { a.hidden = !auth.can(auth.routePerm(a.getAttribute('href'))); });
+  quick.hidden = !db || !quick.querySelector('.quick-menu a:not([hidden])');
+  const u = auth.currentUser();
+  const lockBtn = document.getElementById('lock-btn');
+  lockBtn.hidden = !auth.usersEnabled();
+  lockBtn.innerHTML = String(html`🔒<span class="hide-sm">${u ? ' ' + u.name : ''}</span>`);
   markNav();
 }
 
@@ -104,8 +133,11 @@ const closeNav = () => document.getElementById('app').classList.remove('nav-open
 // ─── العرض ───
 let skipNext = false;
 let lastHash = location.hash;
+let stale = false;
 async function render() {
   if (skipNext) { skipNext = false; return; }
+  // البرنامج مقفل: لا تُعرض أي صفحة حتى يُدخل الرمز، وتبقى الصفحة الحالية كما هي تحت القفل
+  if (auth.isLocked()) { stale = true; return; }
   const { path, query } = parseHash();
   if (guard.dirty && location.hash !== lastHash) {
     const leave = await confirmBox('في تعديلات غير محفوظة على هذه الصفحة. تريد تركها؟', { ok: 'اترك التعديلات', danger: true, title: 'تعديلات غير محفوظة' });
@@ -113,7 +145,7 @@ async function render() {
   }
   guard.dirty = false;
   lastHash = location.hash;
-  document.querySelectorAll('dialog[open]').forEach((dlg) => dlg.close());
+  document.querySelectorAll('dialog[open]:not(#lock)').forEach((dlg) => dlg.close());
   document.getElementById('quick').open = false;
   closeNav();
 
@@ -127,6 +159,12 @@ async function render() {
   const db = store.getDb();
   let r = match(path);
   if (!db && path !== 'welcome') r = { fn: home.welcome, params: {} };
+  if (db && r && !auth.can(auth.routePerm(path))) {
+    if (!path) { go(auth.homePath()); return; }
+    setTitle('غير مسموح');
+    root.innerHTML = String(html`<div class="empty"><div class="empty-ic">🔒</div><h3>لا تملك صلاحية لهذه الصفحة</h3><p>اطلب من المالك تعديل صلاحياتك من صفحة المستخدمين.</p><p><a href="${auth.homePath()}">العودة</a></p></div>`);
+    return;
+  }
   if (!r) {
     setTitle('الصفحة غير موجودة');
     root.innerHTML = String(html`<div class="empty"><div class="empty-ic">🧭</div><h3>الصفحة غير موجودة</h3><p><a href="#/">العودة للرئيسية</a></p></div>`);
@@ -156,13 +194,21 @@ function toggleTheme() {
 async function boot() {
   themeButton();
   document.querySelector('.theme-toggle').onclick = toggleTheme;
+  document.getElementById('lock-btn').onclick = () => auth.lock();
   await store.load();
+  auth.init({
+    onChange: (kind) => {
+      if (kind === 'lock') return;
+      renderShell();
+      if (kind === 'switch' || stale) { stale = false; guard.dirty = false; rerender(); }
+    },
+  });
   renderShell();
   window.addEventListener('hashchange', render);
   window.addEventListener('beforeunload', (e) => { if (guard.dirty) { e.preventDefault(); e.returnValue = ''; } });
-  window.addEventListener('acc:shell', renderShell);
+  window.addEventListener('acc:shell', () => { auth.init(); renderShell(); });
   window.addEventListener('acc:save-failed', () => toast('تعذّر الحفظ على هذا الجهاز. صدّر نسخة احتياطية من الإعدادات فوراً', 'err'));
-  store.onExternalChange(() => { renderShell(); if (!guard.dirty) rerender(); toast('تحدّثت البيانات من نافذة أخرى', 'warn'); });
+  store.onExternalChange(() => { auth.init(); renderShell(); if (!guard.dirty) rerender(); toast('تحدّثت البيانات من نافذة أخرى', 'warn'); });
   document.getElementById('menu-btn').onclick = () => document.getElementById('app').classList.toggle('nav-open');
   document.getElementById('scrim').onclick = closeNav;
   document.addEventListener('click', (e) => {

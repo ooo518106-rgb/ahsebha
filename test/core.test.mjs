@@ -4,7 +4,7 @@ import {
   num, round, calcDoc, buildBooks, defaultAccounts, defaultSettings, trialBalance, balanceSheet, incomeStatement,
   vatReport, partyStatement, ledger, aging, stockReport, salesAnalysis, cashReport, dashboard, matchItems,
   zatcaTLV, zatcaInvoiceQR, base64, tafqeet, numberToWords, validateDoc, addMonths, monthEnd, fiscalYearStart,
-  nextAccountCode, sortedAccounts, docNo, validSaudiVat,
+  nextAccountCode, sortedAccounts, docNo, validSaudiVat, paymentList,
 } from '../js/core.js';
 
 let seq = 0;
@@ -285,4 +285,30 @@ test('أدوات مساعدة', () => {
   assert.equal(docNo({ type: 'sale', no: 7 }, { salePrefix: 'INV-' }), 'INV-0007');
   assert.equal(validSaudiVat('310122393500003'), true);
   assert.equal(validSaudiVat('210122393500003'), false);
+});
+
+test('الدفع المقسّم من الكاشير: نقداً وبطاقة، والآجل على العميل', () => {
+  seq = 0;
+  const db = makeDb();
+  db.accounts.push({ id: 'mada', code: '1107', name: 'مدى', type: 'asset', parent: 'g11', group: false, money: true });
+  db.parties.push({ id: 'c1', kind: 'customer', name: 'عميل' });
+  const split = doc({ type: 'sale', no: 1, date: '2026-04-01', vatRate: 15, inclusive: true, lines: [{ desc: 'بند', qty: 1, price: 230, tax: 'S' }],
+    payments: [{ acc: 'cash', amount: 100 }, { acc: 'mada', amount: 130 }] });
+  const partial = doc({ type: 'sale', no: 2, date: '2026-04-02', party: 'c1', vatRate: 15, inclusive: true, lines: [{ desc: 'بند', qty: 1, price: 115, tax: 'S' }],
+    payments: [{ acc: 'cash', amount: 15 }, { acc: 'mada', amount: 40 }] });
+  db.docs.push(split, partial);
+  const B = buildBooks(db);
+  assert.deepEqual(B.issues, []);
+  const bal = cashReport(db, B, {});
+  assert.equal(bal.rows.find((r) => r.account.id === 'cash').close, 115);
+  assert.equal(bal.rows.find((r) => r.account.id === 'mada').close, 170);
+  assert.equal(B.status.get(split.id).state, 'paid');
+  assert.equal(B.status.get(partial.id).due, 60);
+  assert.equal(B.partyBalance.get('c1'), 60);
+  assert.deepEqual(validateDoc(db, split), {});
+  assert.ok(validateDoc(db, { ...split, payments: [{ acc: 'cash', amount: 300 }] }).paid, 'أكبر من الإجمالي');
+  assert.ok(validateDoc(db, { ...split, payments: [{ acc: 'sales', amount: 230 }] }).payAcc, 'حساب غير نقدي');
+  assert.ok(validateDoc(db, { ...split, payments: [{ acc: 'cash', amount: 100 }] }).party, 'بلا عميل يجب الدفع كاملاً');
+  assert.deepEqual(paymentList({ paid: 5, payAcc: 'cash' }), [{ acc: 'cash', amount: 5 }]);
+  assert.deepEqual(paymentList({}), []);
 });

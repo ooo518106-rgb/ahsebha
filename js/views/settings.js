@@ -5,6 +5,7 @@ import { html, raw, fmtDate, toast, confirmBox, $, showErrors, field, MONTHS, at
 import { go, guard, setTitle } from '../nav.js';
 import { head, S } from './common.js';
 import { downloadBackup, restoreFile, loadDemo } from './home.js';
+import { can } from '../auth.js';
 
 export function view({ root }) {
   setTitle('الإعدادات');
@@ -21,6 +22,8 @@ export function view({ root }) {
           <div class="span2">${field('اسم المنشأة', inp('name'))}<small class="fld-e" data-err="name" hidden></small></div>
           ${field('السجل التجاري', inp('crNo', 'dir="ltr"'))}
           <div class="span2">${field('العنوان', inp('address'))}</div>
+          ${field('اسم المنشأة بالإنجليزي', inp('nameEn', 'dir="ltr"'), { hint: 'للفاتورة ثنائية اللغة' })}
+          ${field('العنوان بالإنجليزي', inp('addressEn', 'dir="ltr"'))}
           ${field('الهاتف', inp('phone', 'dir="ltr" inputmode="tel"'))}
           ${field('البريد الإلكتروني', inp('email', 'dir="ltr" type="email"'))}
           <div class="fld span2"><span class="fld-l">الشعار</span><div class="inline">
@@ -47,6 +50,7 @@ export function view({ root }) {
         <div class="form-grid">
           ${field('بادئة رقم فاتورة المبيعات', inp('salePrefix', 'dir="ltr"'), { hint: 'مثال: INV- فتظهر INV-0001' })}
           ${field('حجم الطباعة', html`<select class="inp" name="printSize">${opt('a4', s.printSize, 'ورقة A4')}${opt('receipt', s.printSize, 'إيصال حراري 80 مم (للمبيعات)')}</select>`)}
+          ${field('لغة الفاتورة', html`<select class="inp" name="invoiceLang">${opt('ar', s.invoiceLang || 'ar', 'عربي')}${opt('bi', s.invoiceLang, 'عربي وإنجليزي (ثنائية اللغة)')}</select>`, { hint: 'الثنائية تُظهر العناوين وأسماء المنتجات بالإنجليزي أيضاً' })}
           <label class="check" style="align-self:end;min-height:40px"><input type="checkbox" name="showHijri" ${s.showHijri ? raw('checked') : ''}> إظهار التاريخ الهجري</label>
           <div class="span-all">${field('ملاحظة أسفل الفاتورة', html`<textarea class="inp" name="invoiceNote" rows="2" placeholder="مثال: الاستبدال خلال 7 أيام، أو بيانات الحساب البنكي للتحويل">${s.invoiceNote || ''}</textarea>`)}</div>
         </div></div>
@@ -61,14 +65,19 @@ export function view({ root }) {
       <div class="form-actions sticky-actions"><button class="btn btn-primary">💾 حفظ الإعدادات</button></div>
     </form>
 
+    <div class="grid g2" style="margin-top:14px">
+      <a class="tile" href="#/users"><span class="ic">👤</span><span>المستخدمون ورموز الدخول<small class="muted" style="display:block;font-weight:600">مالك، محاسب، كاشير، وقفل تلقائي</small></span></a>
+      <a class="tile" href="#/import"><span class="ic">📥</span><span>الاستيراد من Excel<small class="muted" style="display:block;font-weight:600">المنتجات والعملاء والموردون دفعة واحدة</small></span></a>
+    </div>
+
     <div class="card" style="margin-top:14px"><div class="card-h"><h3>💾 النسخ الاحتياطي</h3><span class="muted small">${s.lastBackupAt ? 'آخر نسخة: ' + fmtDate(s.lastBackupAt.slice(0, 10)) : 'لم تنزّل نسخة بعد'}</span></div>
       <p class="muted small" style="margin-bottom:12px">بياناتك محفوظة في هذا المتصفح على هذا الجهاز فقط. نزّل نسخة احتياطية أسبوعياً على الأقل، واحفظها في مكان آمن (بريدك أو Google Drive). يمكنك استعادتها على أي جهاز.</p>
       <div class="actions"><button class="btn btn-primary" data-backup>⬇️ تنزيل نسخة احتياطية</button>
-        <label class="btn btn-ghost">📂 استعادة من ملف<input type="file" accept=".json,application/json" data-restore hidden></label></div>
+        ${can('admin') ? html`<label class="btn btn-ghost">📂 استعادة من ملف<input type="file" accept=".json,application/json" data-restore hidden></label>` : ''}</div>
       <p class="muted small" style="margin-top:10px" data-storage></p></div>
 
-    <div class="card" style="margin-top:14px;border-color:var(--neg)"><div class="card-h"><h3>⚠️ منطقة الخطر</h3></div>
-      <div class="actions"><button class="btn btn-ghost" data-demo>🧪 استبدال البيانات ببيانات تجريبية</button><button class="btn btn-danger" data-wipe>🗑️ حذف كل البيانات</button></div></div>`);
+    ${can('admin') ? html`<div class="card" style="margin-top:14px;border-color:var(--neg)"><div class="card-h"><h3>⚠️ منطقة الخطر</h3></div>
+      <div class="actions"><button class="btn btn-ghost" data-demo>🧪 استبدال البيانات ببيانات تجريبية</button><button class="btn btn-danger" data-wipe>🗑️ حذف كل البيانات</button></div></div>` : ''}`);
 
   const form = $('[data-form]', root);
   const vatBox = $('[data-vat-box]', root);
@@ -123,6 +132,7 @@ export function view({ root }) {
     if (!showErrors(form, errs)) return;
     store.saveSettings({
       name: v.name.trim(), crNo: (v.crNo || '').trim(), address: (v.address || '').trim(), phone: (v.phone || '').trim(), email: (v.email || '').trim(), logo,
+      nameEn: (v.nameEn || '').trim(), addressEn: (v.addressEn || '').trim(), invoiceLang: v.invoiceLang === 'bi' ? 'bi' : 'ar',
       country: v.country, currency: v.currency, vat: form.vat.checked, vatNo, vatRate: form.vat.checked ? num(v.vatRate) : 0,
       taxLabel: (v.taxLabel || '').trim() || 'الضريبة', inclusive: form.inclusive.checked,
       salePrefix: (v.salePrefix ?? 'INV-').trim(), printSize: v.printSize, showHijri: form.showHijri.checked, invoiceNote: (v.invoiceNote || '').trim(),
@@ -139,17 +149,19 @@ export function view({ root }) {
     const h = e.target.closest('.card').querySelector('.card-h .muted');
     if (h) h.textContent = 'آخر نسخة: ' + fmtDate(new Date().toISOString().slice(0, 10));
   };
-  $('[data-restore]', root).onchange = (e) => restoreFile(e.target.files[0]);
-  $('[data-demo]', root).onclick = () => loadDemo();
-  $('[data-wipe]', root).onclick = async () => {
-    if (!(await confirmBox('سيتم حذف كل بيانات المنشأة من هذا الجهاز نهائياً: الفواتير والعملاء والمنتجات والقيود. لا يمكن التراجع إلا من نسخة احتياطية.', { ok: 'حذف كل شيء', danger: true, title: 'حذف كل البيانات' }))) return;
-    if (!(await confirmBox('تأكيد أخير: هل نزّلت نسخة احتياطية؟ سيُحذف كل شيء الآن.', { ok: 'نعم، احذف', danger: true, title: 'تأكيد الحذف' }))) return;
-    await store.wipe();
-    guard.dirty = false;
-    window.dispatchEvent(new Event('acc:shell'));
-    toast('تم حذف كل البيانات');
-    go('#/welcome');
-  };
+  if (can('admin')) {
+    $('[data-restore]', root).onchange = (e) => restoreFile(e.target.files[0]);
+    $('[data-demo]', root).onclick = () => loadDemo();
+    $('[data-wipe]', root).onclick = async () => {
+      if (!(await confirmBox('سيتم حذف كل بيانات المنشأة من هذا الجهاز نهائياً: الفواتير والعملاء والمنتجات والقيود. لا يمكن التراجع إلا من نسخة احتياطية.', { ok: 'حذف كل شيء', danger: true, title: 'حذف كل البيانات' }))) return;
+      if (!(await confirmBox('تأكيد أخير: هل نزّلت نسخة احتياطية؟ سيُحذف كل شيء الآن.', { ok: 'نعم، احذف', danger: true, title: 'تأكيد الحذف' }))) return;
+      await store.wipe();
+      guard.dirty = false;
+      window.dispatchEvent(new Event('acc:shell'));
+      toast('تم حذف كل البيانات');
+      go('#/welcome');
+    };
+  }
 
   if (navigator.storage && navigator.storage.estimate) {
     navigator.storage.estimate().then((e) => {

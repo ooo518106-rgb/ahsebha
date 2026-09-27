@@ -253,6 +253,12 @@ export function calcDoc(doc, dec = 2) {
   return out;
 }
 
+// طرق الدفع المسجلة على المستند: قائمة payments، أو الحقلان القديمان paid/payAcc
+export function paymentList(d) {
+  if (Array.isArray(d.payments) && d.payments.length) return d.payments;
+  return num(d.paid) || d.payAcc ? [{ acc: d.payAcc, amount: d.paid }] : [];
+}
+
 // المصروف بند واحد، فيُحسب بنفس قواعد الفاتورة
 export const expenseAsDoc = (d) => ({ vatRate: d.vatRate, inclusive: d.inclusive, lines: [{ qty: 1, price: d.amount, tax: d.tax }] });
 
@@ -365,10 +371,18 @@ export function buildBooks(db) {
   }
 
   const partyOf = (d, kind) => { const p = parties.get(d.party); return p && p.kind === kind ? p.id : null; };
+  // الدفعات عند الإصدار: من الكاشير قد تكون بأكثر من طريقة (payments)، وإلا paid/payAcc
   const payOf = (d, total) => {
-    const paid = Math.min(R(num(d.paid)), total);
-    const a = accounts.get(d.payAcc);
-    return paid > 0 && a && !a.group ? { acc: a.id, paid } : { acc: null, paid: 0 };
+    const list = [];
+    let left = total;
+    for (const p of paymentList(d)) {
+      const a = accounts.get(p.acc);
+      const amt = Math.min(R(num(p.amount)), R(left));
+      if (!(amt > 0) || !a || a.group) continue;
+      list.push({ acc: a.id, amount: amt });
+      left = R(left - amt);
+    }
+    return { list, paid: R(total - left) };
   };
 
   // ── الأرصدة الافتتاحية: قيد واحد بتاريخ بداية التشغيل، والفرق في رأس المال ──
@@ -404,11 +418,11 @@ export function buildBooks(db) {
     const pid = partyOf(d, 'customer');
     const pay = payOf(d, T.total);
     begin(d);
+    pay.list.forEach((p) => add(p.acc, p.amount, 'dr'));
     if (pid) {
       add('ar', T.total, 'dr', { party: pid, key: d.id });
-      if (pay.acc) { add(pay.acc, pay.paid, 'dr'); add('ar', pay.paid, 'cr', { party: pid, key: d.id + ':p', link: d.id }); }
+      if (pay.paid) add('ar', pay.paid, 'cr', { party: pid, key: d.id + ':p', link: d.id });
     } else {
-      if (pay.acc) add(pay.acc, pay.paid, 'dr');
       const rest = R(T.total - pay.paid);
       if (rest) { add('ar', rest, 'dr'); issues.push({ doc: d.id, msg: 'فاتورة آجلة بلا عميل' }); }
     }
@@ -432,11 +446,11 @@ export function buildBooks(db) {
     begin(d);
     add('sret', T.net, 'dr');
     add('vout', T.vat, 'dr');
+    pay.list.forEach((p) => add(p.acc, p.amount, 'cr'));
     if (pid) {
       add('ar', T.total, 'cr', { party: pid, key: d.id, link: d.refId || null });
-      if (pay.acc) { add('ar', pay.paid, 'dr', { party: pid, key: d.id + ':p', link: d.id }); add(pay.acc, pay.paid, 'cr'); }
+      if (pay.paid) add('ar', pay.paid, 'dr', { party: pid, key: d.id + ':p', link: d.id });
     } else {
-      if (pay.acc) add(pay.acc, pay.paid, 'cr');
       const rest = R(T.total - pay.paid);
       if (rest) { add('ar', rest, 'cr'); issues.push({ doc: d.id, msg: 'مرتجع بلا عميل ولم يُرد مبلغه' }); }
     }
@@ -474,11 +488,11 @@ export function buildBooks(db) {
       } else add('cogs', L.net, 'dr');
     });
     add('vin', T.vat, 'dr');
+    pay.list.forEach((p) => add(p.acc, p.amount, 'cr'));
     if (pid) {
       add('ap', T.total, 'cr', { party: pid, key: d.id });
-      if (pay.acc) { add('ap', pay.paid, 'dr', { party: pid, key: d.id + ':p', link: d.id }); add(pay.acc, pay.paid, 'cr'); }
+      if (pay.paid) add('ap', pay.paid, 'dr', { party: pid, key: d.id + ':p', link: d.id });
     } else {
-      if (pay.acc) add(pay.acc, pay.paid, 'cr');
       const rest = R(T.total - pay.paid);
       if (rest) { add('ap', rest, 'cr'); issues.push({ doc: d.id, msg: 'فاتورة مشتريات آجلة بلا مورد' }); }
     }
@@ -490,11 +504,11 @@ export function buildBooks(db) {
     const pid = partyOf(d, 'supplier');
     const pay = payOf(d, T.total);
     begin(d);
+    pay.list.forEach((p) => add(p.acc, p.amount, 'dr'));
     if (pid) {
       add('ap', T.total, 'dr', { party: pid, key: d.id, link: d.refId || null });
-      if (pay.acc) { add(pay.acc, pay.paid, 'dr'); add('ap', pay.paid, 'cr', { party: pid, key: d.id + ':p', link: d.id }); }
+      if (pay.paid) add('ap', pay.paid, 'cr', { party: pid, key: d.id + ':p', link: d.id });
     } else {
-      if (pay.acc) add(pay.acc, pay.paid, 'dr');
       const rest = R(T.total - pay.paid);
       if (rest) { add('ap', rest, 'dr'); issues.push({ doc: d.id, msg: 'مرتجع مشتريات بلا مورد ولم يُسترد مبلغه' }); }
     }
@@ -520,10 +534,11 @@ export function buildBooks(db) {
     add('vin', T.vat, 'dr');
     if (pid) {
       add('ap', T.total, 'cr', { party: pid, key: d.id });
-      if (pay.acc) { add('ap', pay.paid, 'dr', { party: pid, key: d.id + ':p', link: d.id }); add(pay.acc, pay.paid, 'cr'); }
+      if (pay.paid) { add('ap', pay.paid, 'dr', { party: pid, key: d.id + ':p', link: d.id }); pay.list.forEach((p) => add(p.acc, p.amount, 'cr')); }
     } else {
-      add(pay.acc || 'cash', T.total, 'cr');
-      if (!pay.acc || pay.paid !== T.total) issues.push({ doc: d.id, msg: 'مصروف بلا مورد ولم يُحدد مصدر الدفع كاملاً' });
+      pay.list.forEach((p) => add(p.acc, p.amount, 'cr'));
+      const rest = R(T.total - pay.paid);
+      if (rest) { add('cash', rest, 'cr'); issues.push({ doc: d.id, msg: 'مصروف بلا مورد ولم يُحدد مصدر الدفع كاملاً' }); }
     }
     commit();
   }
@@ -1008,11 +1023,16 @@ export function validateDoc(db, d) {
   if (!isDate(d.date)) e.date = 'اختر تاريخاً صحيحاً';
   const dec = currencyInfo(db.settings?.currency).dec;
   const payRules = (total, kind) => {
-    const paid = num(d.paid);
-    if (paid < 0) e.paid = 'المبلغ لا يكون سالباً';
-    else if (round(paid, dec) > total) e.paid = 'المبلغ المدفوع أكبر من الإجمالي';
-    if (paid > 0 && !isMoney(d.payAcc)) e.payAcc = 'اختر الصندوق أو البنك';
-    if (!d.party && round(paid, dec) !== total) {
+    let paid = 0;
+    for (const p of paymentList(d)) {
+      const a = num(p.amount);
+      if (a < 0) e.paid = 'المبلغ لا يكون سالباً';
+      if (a > 0 && !isMoney(p.acc)) e.payAcc = 'اختر الصندوق أو البنك';
+      paid += Math.max(0, a);
+    }
+    paid = round(paid, dec);
+    if (!e.paid && paid > total) e.paid = 'المبلغ المدفوع أكبر من الإجمالي';
+    if (!d.party && paid !== total) {
       e.party = kind === 'customer' ? 'اختر العميل، أو سجّل المبلغ كاملاً كمدفوع' : 'اختر المورد، أو سجّل المبلغ كاملاً كمدفوع';
     }
   };

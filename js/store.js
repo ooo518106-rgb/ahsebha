@@ -14,7 +14,7 @@ let backend = 'idb';
 let failed = false;
 const listeners = new Set();
 const tabId = newId();
-const channel = typeof BroadcastChannel !== 'undefined' ? new BroadcastChannel(APP_ID) : null;
+const channel = typeof window !== 'undefined' && typeof BroadcastChannel !== 'undefined' ? new BroadcastChannel(APP_ID) : null;
 
 export function newId() {
   const a = new Uint8Array(6);
@@ -130,6 +130,8 @@ export function normalize(d) {
     products: arr(d.products),
     docs: arr(d.docs).filter((x) => typeof x.type === 'string'),
     seq: isObj(d.seq) ? { ...d.seq } : {},
+    users: arr(d.users).filter((u) => typeof u.name === 'string' && isObj(u.pin)),
+    recovery: isObj(d.recovery) ? d.recovery : null,
   };
   if (d.demo) out.demo = true;
   const ids = new Set(out.accounts.map((a) => a.id));
@@ -178,16 +180,22 @@ export function saveSettings(patch) { mutate((d) => Object.assign(d.settings, pa
 const pad2 = (n) => String(n).padStart(2, '0');
 const timeNow = () => { const d = new Date(); return `${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`; };
 
+// المستخدم الحالي يُسجَّل على المستندات (من أنشأها ومن عدّلها)
+let actor = null;
+export const setActor = (id) => { actor = id || null; };
+
 export function saveDoc(doc) {
   mutate((d) => {
     const i = doc.id ? d.docs.findIndex((x) => x.id === doc.id) : -1;
     if (i >= 0) {
       doc.updatedAt = now();
+      if (actor) doc.editedBy = actor;
       d.docs[i] = doc;
       return;
     }
     doc.id = doc.id || newId();
     doc.createdAt = now();
+    if (actor) doc.by = actor;
     doc.no = d.seq[doc.type] || 1;
     d.seq[doc.type] = doc.no + 1;
     if (!doc.time) doc.time = timeNow();
@@ -260,7 +268,7 @@ export function saveAccount(a) {
 }
 export function accountUsage(id) {
   const used = (x) => x.account === id || x.payAcc === id || x.money === id || x.from === id || x.to === id
-    || (x.lines || []).some((l) => l.account === id);
+    || (x.lines || []).some((l) => l.account === id) || (x.payments || []).some((p) => p.acc === id);
   return db.docs.filter(used).length;
 }
 export function deleteAccount(id) {
@@ -271,6 +279,35 @@ export function deleteAccount(id) {
   if (accountUsage(id)) throw new Error('لا يمكن الحذف: الحساب مستخدم في مستندات');
   mutate((d) => { d.accounts = d.accounts.filter((x) => x.id !== id); });
 }
+
+// ─── الاستيراد: إضافة وتحديث دفعة واحدة ───
+// items: [{ id?, ...الحقول }]؛ بوجود id يُحدَّث السجل، وإلا يُضاف جديداً
+export function importRecords(kind, items) {
+  const key = kind === 'products' ? 'products' : 'parties';
+  let added = 0, updated = 0;
+  mutate((d) => {
+    const index = new Map(d[key].map((x, i) => [x.id, i]));
+    for (const it of items) {
+      if (it.id && index.has(it.id)) { const i = index.get(it.id); d[key][i] = { ...d[key][i], ...it }; updated++; }
+      else { const x = { ...it, id: newId(), createdAt: now() }; index.set(x.id, d[key].push(x) - 1); added++; }
+    }
+  });
+  return { added, updated };
+}
+
+// ─── المستخدمون ───
+export const findUser = (id) => (db && id ? db.users.find((x) => x.id === id) : null);
+export function saveUser(u) {
+  mutate((d) => {
+    const i = u.id ? d.users.findIndex((x) => x.id === u.id) : -1;
+    if (i >= 0) d.users[i] = { ...d.users[i], ...u };
+    else { u.id = u.id || 'u' + newId(); u.createdAt = now(); d.users.push(u); }
+  });
+  return u;
+}
+export function deleteUser(id) { mutate((d) => { d.users = d.users.filter((x) => x.id !== id); }); }
+export function setRecovery(secret) { mutate((d) => { d.recovery = secret; }); }
+export function clearUsers() { mutate((d) => { d.users = []; d.recovery = null; }); }
 
 // ─── النسخ الاحتياطي ───
 export function backupJSON() {

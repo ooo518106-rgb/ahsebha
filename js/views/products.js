@@ -3,7 +3,8 @@ import * as store from '../store.js';
 import { docNo, DOC_TYPES, num, round, validateDoc } from '../core.js';
 import { html, raw, money, qty, fmtDate, toast, confirmBox, combo, showErrors, empty, norm, $, $$, exportTable, field, attr } from '../ui.js';
 import { go, guard, setTitle, docHref } from '../nav.js';
-import { head, bindRows, today, S, dec, taxLabel, taxOptions, productItems, periodOf, periodBar, bindPeriod, inPeriod, entryTable, csvName, printPaper } from './common.js';
+import { head, bindRows, today, S, dec, taxLabel, taxOptions, productItems, periodOf, periodBar, bindPeriod, inPeriod, entryTable, csvName, printPaper, cameraDialog } from './common.js';
+import { makeStoreBarcode, isEan13, code128Supported, barcodeSVG } from '../barcode.js';
 
 const clone = (x) => JSON.parse(JSON.stringify(x));
 const stockOf = (id) => store.getBooks().stock.get(id) || { qty: 0, value: 0 };
@@ -16,7 +17,7 @@ export function productList({ root, query }) {
   const state = { q: query.q || '', f: query.f || '' };
   const all = db.products.slice().sort((a, b) => a.name.localeCompare(b.name, 'ar'));
   root.innerHTML = String(html`
-    ${head('المنتجات والخدمات', { sub: `${all.length} صنف`, actions: html`<a class="btn btn-ghost" href="#/adjustments/new">⚖️ جرد / تسوية</a><a class="btn btn-primary" href="#/products/new">➕ منتج جديد</a>` })}
+    ${head('المنتجات والخدمات', { sub: `${all.length} صنف`, actions: html`<a class="btn btn-ghost" href="#/import?type=products">📥 استيراد Excel</a><a class="btn btn-ghost" href="#/labels">🏷️ ملصقات باركود</a><a class="btn btn-ghost" href="#/adjustments/new">⚖️ جرد / تسوية</a><a class="btn btn-primary" href="#/products/new">➕ منتج جديد</a>` })}
     <div class="toolbar"><input class="inp grow" type="search" data-q placeholder="بحث بالاسم أو الرمز" value="${state.q}">
       <select class="inp" data-f><option value="">كل الأصناف</option><option value="stock">المنتجات المخزنية</option><option value="service">الخدمات</option><option value="low">قاربت على النفاد</option><option value="off">الموقوفة</option></select>
       <button class="btn btn-ghost btn-sm" data-csv>⬇️ Excel</button></div>
@@ -25,7 +26,7 @@ export function productList({ root, query }) {
   function draw() {
     const q = norm(state.q.trim());
     const rows = all.filter((p) => {
-      if (q && !norm(`${p.name} ${p.sku || ''} ${p.barcode || ''}`).includes(q)) return false;
+      if (q && !norm(`${p.name} ${p.nameEn || ''} ${p.sku || ''} ${p.barcode || ''} ${p.category || ''}`).includes(q)) return false;
       const s = stockOf(p.id);
       if (state.f === 'stock') return p.type === 'stock';
       if (state.f === 'service') return p.type === 'service';
@@ -40,10 +41,10 @@ export function productList({ root, query }) {
     }
     const value = rows.reduce((t, p) => t + (p.type === 'stock' ? stockOf(p.id).value : 0), 0);
     out.innerHTML = String(html`<div class="sum-bar"><span>العدد: <b>${rows.length}</b></span><span>قيمة المخزون بالتكلفة: <b>${money(value, { sym: true })}</b></span></div>
-      ${rows.length ? html`<div class="tbl-wrap"><table class="tbl" data-table><thead><tr><th>الصنف</th><th class="hide-sm">الرمز</th><th class="num">سعر البيع</th><th class="num hide-sm">متوسط التكلفة</th><th class="num">الكمية</th><th class="num hide-sm">القيمة</th></tr></thead>
+      ${rows.length ? html`<div class="tbl-wrap"><table class="tbl" data-table><thead><tr><th>الصنف</th><th class="hide-sm">الباركود / الرمز</th><th class="num">سعر البيع</th><th class="num hide-sm">متوسط التكلفة</th><th class="num">الكمية</th><th class="num hide-sm">القيمة</th></tr></thead>
       <tbody>${rows.map((p) => { const s = stockOf(p.id); const low = p.type === 'stock' && num(p.reorder) > 0 && s.qty <= num(p.reorder);
         return html`<tr data-href="#/products/${p.id}"><td><b>${p.name}</b>${p.type === 'service' ? html` <span class="badge badge-info">خدمة</span>` : ''}${p.active === false ? html` <span class="badge badge-muted">موقوف</span>` : ''}</td>
-          <td class="hide-sm code">${p.sku || ''}</td><td class="num">${money(p.price)}</td><td class="num hide-sm">${p.type === 'stock' ? money(avgCost(p)) : '—'}</td>
+          <td class="hide-sm code" dir="ltr">${p.barcode || p.sku || ''}</td><td class="num">${money(p.price)}</td><td class="num hide-sm">${p.type === 'stock' ? money(avgCost(p)) : '—'}</td>
           <td class="num">${p.type === 'stock' ? html`<span class="${s.qty < 0 ? 'neg' : low ? 'neg' : ''}">${qty(s.qty)}</span>${low ? html` <span class="badge badge-bad">نفاد</span>` : ''}` : '—'}</td>
           <td class="num hide-sm">${p.type === 'stock' ? money(s.value) : '—'}</td></tr>`; })}</tbody></table></div>`
       : html`<div class="empty"><p>لا توجد نتائج مطابقة.</p></div>`}`);
@@ -57,11 +58,12 @@ export function productList({ root, query }) {
 }
 
 // ═══ نموذج المنتج ═══
-export function productForm({ root, params }) {
+export function productForm({ root, params, query = {} }) {
   const s = S();
   const existing = params.id ? store.findProduct(params.id) : null;
   if (params.id && !existing) { root.innerHTML = String(empty('🔎', 'المنتج غير موجود')); return; }
-  const p = existing ? { ...existing } : { name: '', sku: '', type: 'stock', unit: '', price: '', cost: '', tax: 'S', openQty: '', openCost: '', reorder: '', notes: '', active: true };
+  const p = existing ? { ...existing } : { name: '', nameEn: '', sku: '', barcode: String(query.barcode || '').trim(), category: '', type: 'stock', unit: '', price: '', cost: '', tax: 'S', openQty: '', openCost: '', reorder: '', notes: '', active: true };
+  const cats = [...new Set(store.getDb().products.map((x) => x.category).filter(Boolean))];
   const title = existing ? `تعديل: ${existing.name}` : 'منتج أو خدمة جديدة';
   setTitle(title);
   const inp = (k, attrs = '') => html`<input class="inp" data-k="${k}" data-f="${k}" ${raw(attrs)} value="${p[k] ?? ''}">`;
@@ -70,8 +72,13 @@ export function productForm({ root, params }) {
     <form novalidate data-form>
       <div class="card"><div class="form-grid">
         <div class="span2">${field('الاسم', inp('name', 'autofocus'))}<small class="fld-e" data-err="name" hidden></small></div>
+        ${field('الاسم بالإنجليزي', inp('nameEn', 'dir="ltr"'), { hint: 'اختياري، للفاتورة الثنائية اللغة' })}
         ${field('النوع', html`<select class="inp" data-k="type"><option value="stock" ${p.type === 'stock' ? raw('selected') : ''}>منتج مخزني (تُتابع كميته)</option><option value="service" ${p.type === 'service' ? raw('selected') : ''}>خدمة (بدون مخزون)</option></select>`)}
-        ${field('الرمز / الباركود', inp('sku', 'dir="ltr"'))}
+        ${field('التصنيف', html`<input class="inp" data-k="category" list="cat-list" value="${p.category || ''}" placeholder="مثال: إكسسوارات"><datalist id="cat-list">${cats.map((c) => html`<option value="${c}">`)}</datalist>`, { hint: 'لترتيب المنتجات في شاشة الكاشير' })}
+        <div class="fld"><span class="fld-l">الباركود</span><div class="inline"><input class="inp" data-k="barcode" data-f="barcode" dir="ltr" value="${p.barcode || ''}" placeholder="امسح أو اكتب الرقم">
+          <button type="button" class="btn btn-ghost btn-sm" data-gen title="توليد باركود داخلي">✨ توليد</button><button type="button" class="btn btn-ghost btn-sm" data-cam title="مسح بالكاميرا">📷</button></div>
+          <small class="fld-e" data-err="barcode" hidden></small></div>
+        ${field('الرمز الداخلي (SKU)', inp('sku', 'dir="ltr"'))}
         ${field('وحدة القياس', inp('unit', 'placeholder="حبة، كرتون، كيلو…"'))}
         ${field('سعر البيع', inp('price', numAttrs), { hint: s.inclusive ? `شامل ${taxLabel()} حسب الإعدادات` : '' })}
         ${field('سعر الشراء (التكلفة)', inp('cost', numAttrs), { hint: 'يُقترح في فواتير الشراء' })}
@@ -97,18 +104,29 @@ export function productForm({ root, params }) {
     if (k === 'cost' && !num(p.openCost) && num(p.openQty)) { p.openCost = p.cost; const oc = $('[data-k="openCost"]', root); if (oc) oc.value = p.cost; }
     guard.dirty = true;
   });
+  $('[data-gen]', root).onclick = () => {
+    const taken = new Set(store.getDb().products.map((x) => x.barcode).filter(Boolean));
+    p.barcode = makeStoreBarcode(taken);
+    $('[data-k="barcode"]', root).value = p.barcode;
+    guard.dirty = true;
+  };
+  $('[data-cam]', root).onclick = () => cameraDialog((code) => { p.barcode = code; $('[data-k="barcode"]', root).value = code; guard.dirty = true; return true; });
   const save = (again) => {
     p.name = String(p.name || '').trim();
+    p.barcode = String(p.barcode || '').trim();
     const errs = {};
     if (!p.name) errs.name = 'اكتب اسم المنتج';
     else if (store.getDb().products.some((x) => x.id !== p.id && norm(x.name) === norm(p.name))) errs.name = 'يوجد منتج بنفس الاسم';
+    if (p.barcode && !isEan13(p.barcode) && !code128Supported(p.barcode)) errs.barcode = 'الباركود أرقام وحروف لاتينية فقط';
+    else if (p.barcode && store.getDb().products.some((x) => x.id !== p.id && x.barcode === p.barcode)) errs.barcode = 'الباركود مستخدم لمنتج آخر';
     if (num(p.openQty) && !num(p.openCost) && !num(p.cost)) errs.openCost = 'اكتب تكلفة الوحدة للكمية الافتتاحية';
     if (!showErrors(root, errs)) return;
-    const out = { ...p, price: num(p.price), cost: num(p.cost), openQty: p.type === 'stock' ? num(p.openQty) : 0, openCost: num(p.openCost) || num(p.cost), reorder: num(p.reorder), sku: String(p.sku || '').trim(), unit: String(p.unit || '').trim(), notes: String(p.notes || '').trim(), tax: p.tax || 'S' };
+    const out = { ...p, price: num(p.price), cost: num(p.cost), openQty: p.type === 'stock' ? num(p.openQty) : 0, openCost: num(p.openCost) || num(p.cost), reorder: num(p.reorder), sku: String(p.sku || '').trim(), unit: String(p.unit || '').trim(), notes: String(p.notes || '').trim(), tax: p.tax || 'S',
+      nameEn: String(p.nameEn || '').trim(), category: String(p.category || '').trim() };
     const saved = store.saveProduct(out);
     guard.dirty = false;
     toast('تم الحفظ ✓');
-    go(again ? '#/products/new' : '#/products/' + saved.id);
+    go(again ? '#/products/new' : query.back === 'pos' ? '#/pos' : '#/products/' + saved.id);
   };
   $('[data-form]', root).onsubmit = (e) => { e.preventDefault(); save(false); };
   const ag = $('[data-again]', root);
@@ -142,10 +160,12 @@ export function productShow({ root, params, query, path }) {
   const moveName = (m) => (m.type === 'opening' ? 'رصيد أول المدة' : DOC_TYPES[m.type]?.name || '');
 
   root.innerHTML = String(html`
-    ${head(p.name, { sub: [p.type === 'stock' ? 'منتج مخزني' : 'خدمة', p.sku, p.unit].filter(Boolean).join(' · '),
+    ${head(p.name, { sub: [p.type === 'stock' ? 'منتج مخزني' : 'خدمة', p.category, p.sku, p.unit].filter(Boolean).join(' · '),
       actions: html`<a class="btn btn-primary" href="#/sales/new?product=${p.id}">🧾 بيع</a>
+        <a class="btn btn-ghost" href="#/labels?ids=${p.id}">🏷️ ملصقات</a>
         ${p.type === 'stock' ? html`<a class="btn btn-ghost" href="#/purchases/new?product=${p.id}">🛒 شراء</a><a class="btn btn-ghost" href="#/adjustments/new?product=${p.id}">⚖️ تسوية</a>` : ''}
         <a class="btn btn-ghost" href="#/products/${p.id}/edit">✏️ تعديل</a><button class="btn btn-text-danger" data-del>🗑️ حذف</button>` })}
+    ${p.barcode ? html`<div class="bc" style="margin-bottom:14px">${raw(barcodeSVG(p.barcode))}</div>` : ''}
     <div class="grid g4" style="margin-bottom:14px">
       ${p.type === 'stock' ? html`<div class="kpi"><span class="kpi-l">الكمية المتوفرة</span><span class="kpi-v ${st.qty < 0 || (num(p.reorder) && st.qty <= num(p.reorder)) ? 'neg' : ''}">${qty(st.qty)} <small class="cur">${p.unit || ''}</small></span>${num(p.reorder) ? html`<span class="kpi-s">حد الطلب ${num(p.reorder)}</span>` : ''}</div>
         <div class="kpi"><span class="kpi-l">متوسط التكلفة</span><span class="kpi-v">${money(avgCost(p), { sym: true })}</span></div>
@@ -300,4 +320,65 @@ export function show(type, { root, params }) {
     toast('تم الحذف');
     go('#/adjustments');
   };
+}
+
+// ═══ ملصقات الباركود ═══
+const LABEL_SIZES = {
+  a4: { name: 'ورقة A4 (24 ملصقاً 70×37 مم)', page: '@page { size: A4; margin: 8mm 0 0 0; }', cls: 'lbl-a4' },
+  r50: { name: 'رول ملصقات 50×25 مم', page: '@page { size: 50mm 25mm; margin: 0; }', cls: 'lbl-roll lbl-50' },
+  r38: { name: 'رول ملصقات 38×25 مم', page: '@page { size: 38mm 25mm; margin: 0; }', cls: 'lbl-roll lbl-38' },
+};
+export function labels({ root, query }) {
+  setTitle('ملصقات الباركود');
+  const db = store.getDb();
+  const s = S();
+  const wanted = new Set(String(query.ids || '').split(',').filter(Boolean));
+  const items = db.products.filter((p) => p.active !== false).map((p) => ({ p, n: wanted.has(p.id) ? 1 : 0 }));
+  const opts = { size: localStorage.getItem('ahsebha-label-size') || 'a4', name: true, price: true };
+  root.innerHTML = String(html`${head('ملصقات الباركود', { sub: 'اختر المنتجات وعدد الملصقات لكل منها، ثم اطبع', actions: html`<a class="btn btn-ghost" href="#/products">📦 المنتجات</a>` })}
+    <div class="card"><div class="form-grid">
+      ${field('حجم الملصق', html`<select class="inp" data-size>${Object.entries(LABEL_SIZES).map(([k, v]) => html`<option value="${k}" ${k === opts.size ? raw('selected') : ''}>${v.name}</option>`)}</select>`)}
+      <label class="check" style="align-self:end;min-height:40px"><input type="checkbox" data-opt="name" checked> اسم المنتج</label>
+      <label class="check" style="align-self:end;min-height:40px"><input type="checkbox" data-opt="price" checked> السعر</label>
+    </div></div>
+    <div class="toolbar" style="margin-top:14px"><input class="inp grow" type="search" data-q placeholder="بحث"><button class="btn btn-ghost btn-sm" data-stock>عدد الملصقات = الكمية المتوفرة</button><button class="btn btn-ghost btn-sm" data-clear>تصفير</button></div>
+    <div class="tbl-wrap"><table class="tbl"><thead><tr><th>المنتج</th><th class="hide-sm">الباركود</th><th class="num">السعر</th><th class="num" style="width:120px">عدد الملصقات</th></tr></thead><tbody data-rows></tbody></table></div>
+    <p class="note note-info" style="margin-top:12px" data-missing hidden></p>
+    <div class="form-actions sticky-actions"><button class="btn btn-primary" data-print>🖨️ طباعة الملصقات</button><span class="muted small" data-count></span></div>`);
+  const tbody = $('[data-rows]', root);
+  const draw = () => {
+    const q = norm($('[data-q]', root).value.trim());
+    tbody.innerHTML = String(html`${items.filter((it) => !q || norm(`${it.p.name} ${it.p.barcode || ''} ${it.p.sku || ''}`).includes(q)).map((it) => html`<tr>
+      <td>${it.p.name}</td><td class="hide-sm code" dir="ltr">${it.p.barcode || it.p.sku || html`<span class="muted">— سيُولَّد</span>`}</td><td class="num">${money(it.p.price)}</td>
+      <td class="num"><input class="inp" style="width:90px" type="text" inputmode="numeric" data-num data-id="${it.p.id}" value="${it.n || ''}" placeholder="0"></td></tr>`)}`);
+    count();
+  };
+  const count = () => {
+    const total = items.reduce((t, it) => t + it.n, 0);
+    $('[data-count]', root).textContent = total ? `${total} ملصق` : '';
+    const missing = items.filter((it) => it.n && !it.p.barcode && !(it.p.sku && code128Supported(it.p.sku))).length;
+    const m = $('[data-missing]', root);
+    m.hidden = !missing;
+    m.textContent = missing ? `${missing} منتج بدون باركود: سيُولَّد لها باركود داخلي ويُحفظ في بطاقتها عند الطباعة.` : '';
+  };
+  tbody.addEventListener('input', (e) => { const it = items.find((x) => x.p.id === e.target.dataset.id); if (it) { it.n = Math.max(0, Math.floor(num(e.target.value))); count(); } });
+  $('[data-q]', root).oninput = draw;
+  $('[data-stock]', root).onclick = () => { const B = store.getBooks(); for (const it of items) it.n = it.p.type === 'stock' ? Math.max(0, Math.floor(B.stock.get(it.p.id)?.qty || 0)) : 0; draw(); };
+  $('[data-clear]', root).onclick = () => { for (const it of items) it.n = 0; draw(); };
+  $('[data-size]', root).onchange = (e) => { opts.size = e.target.value; try { localStorage.setItem('ahsebha-label-size', opts.size); } catch (err) { /* اختياري */ } };
+  root.addEventListener('change', (e) => { if (e.target.dataset.opt) opts[e.target.dataset.opt] = e.target.checked; });
+  $('[data-print]', root).onclick = () => {
+    const chosen = items.filter((it) => it.n > 0);
+    if (!chosen.length) { toast('اكتب عدد الملصقات لمنتج واحد على الأقل', 'err'); return; }
+    const taken = new Set(db.products.map((x) => x.barcode).filter(Boolean));
+    for (const it of chosen) {
+      if (!it.p.barcode && !(it.p.sku && code128Supported(it.p.sku))) { const code = makeStoreBarcode(taken); taken.add(code); store.saveProduct({ id: it.p.id, barcode: code }); it.p = store.findProduct(it.p.id); }
+    }
+    const sz = LABEL_SIZES[opts.size];
+    const one = (p) => html`<div class="lbl">${opts.name ? html`<div class="lbl-n">${p.name}</div>` : ''}<div class="lbl-b">${raw(barcodeSVG(p.barcode || p.sku, { height: 34 }))}</div>${opts.price ? html`<div class="lbl-p">${money(p.price)} ${s.vat && s.inclusive ? 'شامل الضريبة' : ''}</div>` : ''}</div>`;
+    const all = chosen.flatMap((it) => Array.from({ length: it.n }, () => one(it.p)));
+    printPaper(html`<div class="labels ${sz.cls}">${all}</div>`, { title: 'ملصقات باركود', page: sz.page });
+    draw();
+  };
+  draw();
 }

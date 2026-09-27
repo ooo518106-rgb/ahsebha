@@ -68,6 +68,7 @@ export function form(kind, { root, params }) {
   root.innerHTML = String(html`${head(title, { actions: html`<a class="btn btn-ghost" href="${existing ? '#/' + W.seg + '/' + existing.id : '#/' + W.seg}">إلغاء</a>` })}
     <form novalidate data-form><div class="card"><div class="form-grid">
       <div class="span2">${f('الاسم', 'name', 'autofocus')}<small class="fld-e" data-err="name" hidden></small></div>
+      ${f('الاسم بالإنجليزي', 'nameEn', 'dir="ltr"', { hint: 'اختياري، للفاتورة ثنائية اللغة' })}
       ${f('الجوال', 'phone', 'inputmode="tel" dir="ltr"', { hint: 'للتواصل وإرسال الفواتير عبر واتساب' })}
       ${f('البريد الإلكتروني', 'email', 'type="email" dir="ltr"')}
       <div>${f('الرقم الضريبي', 'vatNo', 'inputmode="numeric" dir="ltr"', { hint: kind === 'customer' ? 'وجوده يجعل الفاتورة «فاتورة ضريبية» بدل «مبسطة»' : '' })}<small class="fld-e" data-err="vatNo" hidden></small></div>
@@ -89,7 +90,7 @@ export function form(kind, { root, params }) {
     if (p.vatNo && s.country === 'SA' && !validSaudiVat(p.vatNo)) errs.vatNo = 'الرقم الضريبي السعودي 15 رقماً يبدأ وينتهي بالرقم 3';
     if (!showErrors(root, errs)) return;
     p.opening = num(p.opening);
-    for (const k of ['phone', 'email', 'crNo', 'address', 'notes']) p[k] = String(p[k] || '').trim();
+    for (const k of ['nameEn', 'phone', 'email', 'crNo', 'address', 'notes']) p[k] = String(p[k] || '').trim();
     const saved = store.saveParty(p);
     guard.dirty = false;
     toast('تم الحفظ ✓');
