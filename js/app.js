@@ -84,7 +84,7 @@ export function renderShell() {
   setSettings(db && db.settings);
   const side = document.getElementById('side');
   const brand = html`<a class="side-brand" href="#/"><span class="brand-badge">📒</span><span>احسبها<span class="brand-sub">برنامج المحاسبة</span></span></a>`;
-  const foot = html`<div class="side-foot"><a class="nav-a" href="../index.html"><span class="ic">🧮</span>أدوات احسبها المجانية</a></div>`;
+  const foot = html`<div class="side-foot"><p class="muted small" style="padding:0 12px">🔒 بياناتك محفوظة على هذا الجهاز فقط. نزّل نسخة احتياطية من <a href="#/settings">الإعدادات</a> بشكل دوري.</p></div>`;
   side.innerHTML = String(db
     ? html`${brand}<div class="side-co" title="${db.settings.name}">🏢 ${db.settings.name || 'منشأتي'}</div>
       <nav>${NAV.map((n) => (n.sec ? html`<div class="nav-sec">${n.sec}</div>` : html`<a class="nav-a" data-h="${n.h}" href="#/${n.h}"><span class="ic">${n.ic}</span>${n.t}</a>`))}</nav>${foot}`
@@ -141,7 +141,21 @@ async function render() {
 }
 export const rerender = () => { lastHash = location.hash; render(); };
 
+// ─── الوضع الداكن (القيمة الأولى تُضبط في رأس الصفحة) ───
+function themeButton() {
+  const btn = document.querySelector('.theme-toggle');
+  if (btn) btn.textContent = document.documentElement.getAttribute('data-theme') === 'dark' ? '☀️ فاتح' : '🌙 داكن';
+}
+function toggleTheme() {
+  const next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+  document.documentElement.setAttribute('data-theme', next);
+  try { localStorage.setItem('theme', next); } catch (e) { /* يبقى للجلسة الحالية فقط */ }
+  themeButton();
+}
+
 async function boot() {
+  themeButton();
+  document.querySelector('.theme-toggle').onclick = toggleTheme;
   await store.load();
   renderShell();
   window.addEventListener('hashchange', render);

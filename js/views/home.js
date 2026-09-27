@@ -38,7 +38,8 @@ export function welcome({ root }) {
       <div class="form-actions"><button class="btn btn-primary">إنشاء المنشأة والبدء</button></div>
     </form>
     <div class="features">${FEATURES.map(([ic, t2, d]) => html`<div class="feature"><span class="ic">${ic}</span><b>${t2}</b><p>${d}</p></div>`)}</div>
-    <p class="note note-info">البرنامج مجاني ويعمل من المتصفح على الجوال والكمبيوتر. بياناتك تُحفظ على هذا الجهاز فقط، فاحرص على تنزيل نسخة احتياطية بشكل دوري من الإعدادات.</p>
+    <p class="note note-info">البرنامج مجاني ويعمل من المتصفح على الجوال والكمبيوتر. بياناتك تُحفظ على هذا الجهاز فقط ولا تُرسل لأي خادم، فاحرص على تنزيل نسخة احتياطية بشكل دوري من الإعدادات.</p>
+    <p class="muted small" style="margin-top:10px;text-align:center">الخصوصية: نستخدم Google Analytics لإحصاءات الزيارات فقط، أما فواتيرك وأرقامك فلا تغادر جهازك.</p>
   </section>`);
 
   const form = $('[data-setup]', root);
