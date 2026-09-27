@@ -3,14 +3,14 @@ import * as store from '../store.js';
 import { docNo, daysBetween, DOC_TYPES } from '../core.js';
 import { html, money, moneyText, fmtDate, toast, modal, $, norm, empty } from '../ui.js';
 import { setTitle } from '../nav.js';
-import { head, S, today, waLink } from './common.js';
+import { head, S, today, waLink, docOf } from './common.js';
 
 export const DEFAULT_REMINDER = 'مرحباً {الاسم}،\nنودّ تذكيركم بأن الرصيد المستحق لدى {المنشأة} هو {المبلغ}{المتأخر}.\n{الفواتير}\nشاكرين تعاونكم، ويسعدنا إرسال كشف الحساب عند الطلب.';
 const TAGS = ['{الاسم}', '{المبلغ}', '{المتأخر}', '{الفواتير}', '{المنشأة}'];
 
 // صفوف العملاء المدينين مع المتأخر وأقدم استحقاق
 export function receivables(db, B, asOf) {
-  const docs = new Map(db.docs.map((d) => [d.id, d]));
+  const docs = { get: (id) => docOf(id, B) };
   const rows = [];
   for (const p of db.parties) {
     if (p.kind !== 'customer') continue;

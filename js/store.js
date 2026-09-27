@@ -1,5 +1,5 @@
 // ═══ التخزين: كل البيانات على جهاز المستخدم (IndexedDB، وبديله localStorage) ═══
-import { SCHEMA, defaultAccounts, defaultSettings, buildBooks } from './core.js';
+import { SCHEMA, defaultAccounts, defaultSettings, buildBooks, validateDoc, isLockedDate, docAmount, currencyInfo, ymd, addDays, addMonths, monthStart, monthEnd, daysBetween, isDate } from './core.js';
 
 const APP_ID = 'ahsebha-accounting';
 const IDB_NAME = 'ahsebha-accounting';
@@ -8,7 +8,7 @@ const LS_KEY = 'ahsebha-accounting';
 
 let db = null;
 let rev = 0;
-let cache = { rev: -1, books: null };
+let cache = { rev: -1, day: '', books: null };
 let timer = null;
 let backend = 'idb';
 let failed = false;
@@ -29,7 +29,8 @@ const arr = (x) => (Array.isArray(x) ? x.filter((y) => isObj(y) && okId(y)) : []
 
 export const getDb = () => db;
 export function getBooks() {
-  if (cache.rev !== rev) cache = { rev, books: buildBooks(db) };
+  const day = ymd(new Date());
+  if (cache.rev !== rev || cache.day !== day) cache = { rev, day, books: buildBooks(db, { today: day }) };
   return cache.books;
 }
 export const onExternalChange = (fn) => listeners.add(fn);
@@ -91,6 +92,7 @@ async function write() {
   }
 }
 function schedule() {
+  if (typeof window === 'undefined') return; // الاختبارات في Node: بلا حفظ
   clearTimeout(timer);
   timer = setTimeout(write, 200);
 }
@@ -132,6 +134,9 @@ export function normalize(d) {
     seq: isObj(d.seq) ? { ...d.seq } : {},
     users: arr(d.users).filter((u) => typeof u.name === 'string' && isObj(u.pin)),
     recovery: isObj(d.recovery) ? d.recovery : null,
+    assets: arr(d.assets).filter((a) => typeof a.name === 'string'),
+    recurring: arr(d.recurring).filter((r) => isObj(r.src) && typeof r.src.type === 'string'),
+    audit: arr(d.audit).slice(-AUDIT_MAX),
   };
   if (d.demo) out.demo = true;
   const ids = new Set(out.accounts.map((a) => a.id));
@@ -175,6 +180,30 @@ export async function wipe() {
   if (channel) channel.postMessage({ type: 'saved', from: tabId });
 }
 export function saveSettings(patch) { mutate((d) => Object.assign(d.settings, patch)); }
+// قفل الفترات يُسجَّل في سجل التعديلات (من قفل ومن فتح)
+export function setLockDate(date) {
+  mutate((d) => {
+    const before = d.settings.lockDate || '';
+    d.settings.lockDate = date || '';
+    d.audit.push({ id: newId(), at: now(), by: actor, act: 'lock', type: 'settings', doc: '', no: 0, date: date || '', amount: 0, from: before });
+    if (d.audit.length > AUDIT_MAX) d.audit.splice(0, d.audit.length - AUDIT_MAX);
+  });
+}
+
+// ─── سجل التعديلات: من أضاف أو عدّل أو حذف، ومتى، ونسخة المستند قبل التغيير ───
+const AUDIT_MAX = 1500;
+function audit(d, act, doc, before) {
+  const dec = currencyInfo(d.settings.currency).dec;
+  d.audit.push({ id: newId(), at: now(), by: actor, act, type: doc.type, doc: doc.id, no: doc.no, date: doc.date, amount: docAmount(doc, dec), ...(before ? { before } : {}) });
+  if (d.audit.length > AUDIT_MAX) d.audit.splice(0, d.audit.length - AUDIT_MAX);
+}
+const snapshot = (x) => JSON.parse(JSON.stringify(x));
+
+// الفترة المقفلة: الحماية الأخيرة بعد التحقق في الشاشات
+function assertOpen(doc) {
+  if (doc && isLockedDate(db.settings, doc.date)) throw new Error(`الفترة مقفلة حتى ${db.settings.lockDate}. لا يمكن إضافة أو تعديل أو حذف مستند بتاريخ ${doc.date}`);
+}
+export const isLockedDoc = (doc) => !!(db && doc && isLockedDate(db.settings, doc.date));
 
 // ─── المستندات ───
 const pad2 = (n) => String(n).padStart(2, '0');
@@ -185,11 +214,15 @@ let actor = null;
 export const setActor = (id) => { actor = id || null; };
 
 export function saveDoc(doc) {
+  const old = doc.id ? db.docs.find((x) => x.id === doc.id) : null;
+  assertOpen(old);
+  assertOpen(doc);
   mutate((d) => {
     const i = doc.id ? d.docs.findIndex((x) => x.id === doc.id) : -1;
     if (i >= 0) {
       doc.updatedAt = now();
       if (actor) doc.editedBy = actor;
+      audit(d, 'update', doc, snapshot(d.docs[i]));
       d.docs[i] = doc;
       return;
     }
@@ -200,13 +233,16 @@ export function saveDoc(doc) {
     d.seq[doc.type] = doc.no + 1;
     if (!doc.time) doc.time = timeNow();
     d.docs.push(doc);
+    audit(d, 'create', doc);
   });
   return doc;
 }
 
 export function deleteDoc(id) {
+  assertOpen(db.docs.find((x) => x.id === id));
   mutate((d) => {
     const doc = d.docs.find((x) => x.id === id);
+    if (doc) audit(d, 'delete', doc, snapshot(doc));
     d.docs = d.docs.filter((x) => x.id !== id);
     if (doc && d.seq[doc.type] === doc.no + 1) d.seq[doc.type] = doc.no;
     for (const x of d.docs) {
@@ -218,8 +254,14 @@ export function deleteDoc(id) {
   });
 }
 
-export function patchDoc(id, patch) {
-  mutate((d) => { const x = d.docs.find((y) => y.id === id); if (x) Object.assign(x, patch); });
+export function patchDoc(id, patch, { log = false } = {}) {
+  mutate((d) => {
+    const x = d.docs.find((y) => y.id === id);
+    if (!x) return;
+    const before = log ? snapshot(x) : null;
+    Object.assign(x, patch);
+    if (log) audit(d, 'update', x, before);
+  });
 }
 
 export const findDoc = (id) => (db ? db.docs.find((x) => x.id === id) : null);
@@ -277,6 +319,7 @@ export function deleteAccount(id) {
   if (a.sys) throw new Error('هذا حساب أساسي في البرنامج ولا يمكن حذفه');
   if (db.accounts.some((x) => x.parent === id)) throw new Error('احذف الحسابات الفرعية أولاً');
   if (accountUsage(id)) throw new Error('لا يمكن الحذف: الحساب مستخدم في مستندات');
+  if (db.assets.some((x) => x.account === id || (x.disposed && x.disposed.money === id))) throw new Error('لا يمكن الحذف: الحساب مستخدم في سجل الأصول');
   mutate((d) => { d.accounts = d.accounts.filter((x) => x.id !== id); });
 }
 
@@ -294,6 +337,71 @@ export function importRecords(kind, items) {
   });
   return { added, updated };
 }
+
+// ─── الأصول الثابتة ───
+export const findAsset = (id) => (db ? db.assets.find((x) => x.id === id) : null);
+export function saveAsset(a) {
+  mutate((d) => {
+    const i = a.id ? d.assets.findIndex((x) => x.id === a.id) : -1;
+    if (i >= 0) d.assets[i] = { ...d.assets[i], ...a };
+    else { a.id = a.id || 'as' + newId(); a.createdAt = now(); a.no = d.assets.reduce((m, x) => Math.max(m, x.no || 0), 0) + 1; d.assets.push(a); }
+  });
+  return a;
+}
+export function deleteAsset(id) { mutate((d) => { d.assets = d.assets.filter((x) => x.id !== id); }); }
+
+// ─── المستندات المتكررة ───
+// r: { name, src (قالب المستند), freq: week|month|quarter|year, next, until, day, dueDays, active, count, last }
+export function nextRun(date, freq, day) {
+  if (freq === 'week') return addDays(date, 7);
+  const months = freq === 'quarter' ? 3 : freq === 'year' ? 12 : 1;
+  const m = addMonths(monthStart(date), months);
+  const last = Number(monthEnd(m).slice(8));
+  return m.slice(0, 8) + String(Math.min(Number(day) || Number(date.slice(8)), last)).padStart(2, '0');
+}
+const DROP = ['id', 'no', 'createdAt', 'updatedAt', 'time', 'by', 'editedBy', 'convertedTo', 'fromQuote', 'refId', 'link', 'tendered', 'change', 'pos', 'recurring', 'cleared', 'bounced'];
+export function templateOf(doc) {
+  const t = snapshot(doc);
+  for (const k of DROP) delete t[k];
+  return t;
+}
+export const findRecurring = (id) => (db ? db.recurring.find((x) => x.id === id) : null);
+export function saveRecurring(r) {
+  mutate((d) => {
+    const i = r.id ? d.recurring.findIndex((x) => x.id === r.id) : -1;
+    if (i >= 0) d.recurring[i] = { ...d.recurring[i], ...r };
+    else { r.id = 'rc' + newId(); r.createdAt = now(); r.count = 0; d.recurring.push(r); }
+  });
+  return r;
+}
+export function deleteRecurring(id) { mutate((d) => { d.recurring = d.recurring.filter((x) => x.id !== id); }); }
+// تعديل في مكانه (نفس الكائن) حتى تبقى الحلقة تقرأ القيم الجديدة
+function patchRecurring(r, patch) { mutate(() => { Object.assign(r, patch); }); }
+
+// ينشئ المستندات المستحقة حتى اليوم (عند فتح البرنامج)؛ يتوقف القالب عند أول خطأ ويُظهره
+export function runRecurring(today = ymd(new Date()), { only } = {}) {
+  const out = { created: [], errors: [] };
+  if (!db) return out;
+  for (const r of db.recurring) {
+    if (r.active === false || (only && r.id !== only)) continue;
+    let n = 0;
+    while (isDate(r.next) && r.next <= today && (!r.until || r.next <= r.until) && n++ < 60) {
+      const doc = { ...snapshot(r.src), date: r.next, recurring: r.id };
+      if (r.dueDays != null && r.dueDays !== '') doc.dueDate = addDays(r.next, Number(r.dueDays));
+      if (doc.validUntil) doc.validUntil = addDays(r.next, 15);
+      const errs = validateDoc(db, doc);
+      const msg = Object.values(errs)[0];
+      if (msg) { patchRecurring(r, { error: msg }); out.errors.push({ r, msg }); break; }
+      saveDoc(doc);
+      out.created.push(doc);
+      patchRecurring(r, { count: (r.count || 0) + 1, last: r.next, next: nextRun(r.next, r.freq, r.day), error: '' });
+    }
+    if (r.until && isDate(r.next) && r.next > r.until && r.active !== false) patchRecurring(r, { active: false });
+  }
+  return out;
+}
+export const recurringDue = (today = ymd(new Date())) => (db ? db.recurring.filter((r) => r.active !== false && isDate(r.next) && r.next <= today).length : 0);
+export const daysUntil = (date) => daysBetween(ymd(new Date()), date);
 
 // ─── المستخدمون ───
 export const findUser = (id) => (db && id ? db.users.find((x) => x.id === id) : null);

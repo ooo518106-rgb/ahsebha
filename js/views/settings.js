@@ -70,6 +70,11 @@ export function view({ root }) {
       <a class="tile" href="#/import"><span class="ic">📥</span><span>الاستيراد من Excel<small class="muted" style="display:block;font-weight:600">المنتجات والعملاء والموردون دفعة واحدة</small></span></a>
     </div>
 
+    <div class="card" style="margin-top:14px"><div class="card-h"><h3>🔒 قفل الفترات المحاسبية</h3><span class="muted small">${s.lockDate ? 'مقفلة حتى ' + fmtDate(s.lockDate) : 'لا توجد فترة مقفلة'}</span></div>
+      <p class="muted small" style="margin-bottom:10px">بعد إقفال شهر أو سنة (أو تقديم الإقرار الضريبي) اقفلها، فلا يمكن إضافة أو تعديل أو حذف أي مستند بتاريخ داخلها. كل التعديلات تُسجَّل في <a href="#/audit">سجل التعديلات</a>.</p>
+      ${can('admin') ? html`<div class="inline" style="flex-wrap:wrap"><input class="inp" type="date" data-lock value="${s.lockDate || ''}" style="max-width:200px"><button class="btn btn-primary btn-sm" data-lock-save>قفل حتى هذا التاريخ</button>${s.lockDate ? html`<button class="btn btn-ghost btn-sm" data-lock-clear>فتح كل الفترات</button>` : ''}</div>`
+        : html`<p class="small">تغيير القفل للمالك فقط.</p>`}</div>
+
     <div class="card" style="margin-top:14px"><div class="card-h"><h3>💾 النسخ الاحتياطي</h3><span class="muted small">${s.lastBackupAt ? 'آخر نسخة: ' + fmtDate(s.lastBackupAt.slice(0, 10)) : 'لم تنزّل نسخة بعد'}</span></div>
       <p class="muted small" style="margin-bottom:12px">بياناتك محفوظة في هذا المتصفح على هذا الجهاز فقط. نزّل نسخة احتياطية أسبوعياً على الأقل، واحفظها في مكان آمن (بريدك أو Google Drive). يمكنك استعادتها على أي جهاز.</p>
       <div class="actions"><button class="btn btn-primary" data-backup>⬇️ تنزيل نسخة احتياطية</button>
@@ -150,6 +155,22 @@ export function view({ root }) {
     if (h) h.textContent = 'آخر نسخة: ' + fmtDate(new Date().toISOString().slice(0, 10));
   };
   if (can('admin')) {
+    $('[data-lock-save]', root).onclick = async () => {
+      const v = $('[data-lock]', root).value;
+      if (!isDate(v)) { toast('اختر تاريخ القفل', 'err'); return; }
+      if (v > new Date().toISOString().slice(0, 10)) { toast('لا يمكن قفل فترة لم تنتهِ بعد', 'err'); return; }
+      if (!(await confirmBox(`قفل كل المستندات حتى ${fmtDate(v)}؟ لن يمكن إضافة أو تعديل أو حذف مستند بتاريخ داخل هذه الفترة.`, { ok: 'قفل الفترة', title: 'قفل الفترة' }))) return;
+      store.setLockDate(v);
+      toast('تم قفل الفترة ✓');
+      go('#/settings');
+    };
+    const clr = $('[data-lock-clear]', root);
+    if (clr) clr.onclick = async () => {
+      if (!(await confirmBox('فتح كل الفترات المقفلة للتعديل؟', { ok: 'فتح الفترات', danger: true }))) return;
+      store.setLockDate('');
+      toast('تم فتح الفترات');
+      go('#/settings');
+    };
     $('[data-restore]', root).onchange = (e) => restoreFile(e.target.files[0]);
     $('[data-demo]', root).onclick = () => loadDemo();
     $('[data-wipe]', root).onclick = async () => {

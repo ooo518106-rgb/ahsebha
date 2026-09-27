@@ -8,8 +8,9 @@ import { html, raw, money, fmtDate, toast, confirmBox, combo, showErrors, empty,
 import { go, guard, setTitle, docHref, refresh } from '../nav.js';
 import {
   head, bindRows, today, S, dec, partyName, accName, periodOf, periodBar, bindPeriod, periodLabel, inPeriod,
-  accountItems, partyItems, entryTable, printReport, printPaper, csvName,
+  accountItems, partyItems, entryTable, printReport, printPaper, csvName, docOf, docLocked, lockedNote, lockedPage,
 } from './common.js';
+import { repeatDialog } from './recurring.js';
 
 const clone = (x) => JSON.parse(JSON.stringify(x));
 const natural = (a, v) => (a && !isDebitNature(a.type) ? -v : v);
@@ -122,8 +123,8 @@ export function accountShow({ root, params, query, path }) {
   const L = ledger(db, B, a.id, per);
   let limit = 500;
   const desc = (r) => {
-    const d = store.findDoc(r.doc);
-    const parts = [r.doc === 'opening' ? 'قيد افتتاحي' : DOC_TYPES[r.type]?.name, r.party ? partyName(r.party) : '', r.memo, d && d.type !== 'journal' ? d.notes : ''];
+    const d = docOf(r.doc, B);
+    const parts = [r.doc === 'opening' ? 'قيد افتتاحي' : DOC_TYPES[r.type]?.name, r.party ? partyName(r.party) : '', r.memo, d && d.type !== 'journal' && d.type !== 'depreciation' ? d.notes : ''];
     return parts.filter(Boolean).join(' — ');
   };
   root.innerHTML = String(html`
@@ -140,7 +141,7 @@ export function accountShow({ root, params, query, path }) {
   function draw() {
     $('[data-out]', root).innerHTML = String(L.rows.length || L.opening ? html`<div class="tbl-wrap"><table class="tbl" data-table><thead><tr><th>التاريخ</th><th>المستند</th><th class="hide-sm">البيان</th><th class="num">مدين</th><th class="num">دائن</th><th class="num">الرصيد</th></tr></thead><tbody>
       <tr class="grp"><td colspan="3">رصيد أول الفترة</td><td></td><td></td><td class="num">${money(L.opening)}</td></tr>
-      ${L.rows.slice(0, limit).map((r) => { const d = store.findDoc(r.doc); return html`<tr ${d ? attr('data-href', docHref(d)) : ''}><td class="nowrap">${fmtDate(r.date)}</td><td class="nowrap" dir="ltr">${d ? docNo(d, s) : 'افتتاحي'}</td>
+      ${L.rows.slice(0, limit).map((r) => { const d = docOf(r.doc, B); return html`<tr ${d ? attr('data-href', docHref(d)) : ''}><td class="nowrap">${fmtDate(r.date)}</td><td class="nowrap" dir="ltr">${d ? docNo(d, s) : 'افتتاحي'}</td>
         <td class="hide-sm">${desc(r)}${a.group ? html` <span class="muted small">(${accName(r.acc)})</span>` : ''}</td><td class="num">${r.dr ? money(r.dr) : ''}</td><td class="num">${r.cr ? money(r.cr) : ''}</td><td class="num"><b>${money(r.balance)}</b></td></tr>`; })}
     </tbody><tfoot><tr><td colspan="3">المجموع والرصيد الختامي</td><td class="num">${money(L.dr)}</td><td class="num">${money(L.cr)}</td><td class="num">${money(L.closing)}</td></tr></tfoot></table></div>
     ${L.rows.length > limit ? html`<p style="text-align:center;margin-top:12px"><button class="btn btn-ghost" data-more>عرض المزيد (${L.rows.length - limit})</button></p>` : ''}`
@@ -180,6 +181,7 @@ export function form(type, { root, params }) {
   const s = S();
   const existing = params.id ? store.findDoc(params.id) : null;
   if (params.id && (!existing || existing.type !== 'journal')) { root.innerHTML = String(empty('🔎', 'المستند غير موجود')); return; }
+  if (existing && docLocked(existing)) { setTitle('قيد يومية'); root.innerHTML = String(lockedPage(existing)); return; }
   const d = existing ? clone(existing) : { type: 'journal', date: today(), notes: '', lines: [emptyLine(), emptyLine()] };
   const title = existing ? `تعديل قيد ${docNo(existing, s)}` : 'قيد يومية يدوي';
   setTitle(title);
@@ -269,14 +271,17 @@ export function show(type, { root, params, query }) {
   setTitle('قيد يومية ' + no);
   const entry = B.entries.get(d.id);
   root.innerHTML = String(html`
-    ${head('قيد يومية ' + no, { sub: `${fmtDate(d.date)}${d.notes ? ' · ' + d.notes : ''}`, actions: html`<button class="btn btn-primary" data-print>🖨️ طباعة</button><a class="btn btn-ghost" href="#/journal/${d.id}/edit">✏️ تعديل</a><a class="btn btn-ghost" href="#/journal/new">➕ قيد جديد</a><button class="btn btn-text-danger" data-del>🗑️ حذف</button>` })}
+    ${head('قيد يومية ' + no, { sub: `${fmtDate(d.date)}${d.notes ? ' · ' + d.notes : ''}`, actions: html`<button class="btn btn-primary" data-print>🖨️ طباعة</button><button class="btn btn-ghost" data-repeat>♻️ تكرار</button>${docLocked(d) ? '' : html`<a class="btn btn-ghost" href="#/journal/${d.id}/edit">✏️ تعديل</a>`}<a class="btn btn-ghost" href="#/journal/new">➕ قيد جديد</a>${docLocked(d) ? '' : html`<button class="btn btn-text-danger" data-del>🗑️ حذف</button>`}` })}
+    ${docLocked(d) ? lockedNote(d) : ''}
     <div data-entry>${entryTable(entry)}</div>`);
   const doPrint = () => printPaper(html`<div class="paper pp-report"><div class="pp-head"><div><h2 style="font-size:18px;font-weight:900">${s.name || ''}</h2></div><div class="pp-title"><h1>قيد يومية</h1><div class="en" dir="ltr">${no}</div></div></div>
     <div class="pp-meta"><div><span>التاريخ</span><b>${fmtDate(d.date)}</b></div><div><span>البيان</span><b>${d.notes || '—'}</b></div></div>${raw($('[data-entry]', root).innerHTML)}
     <div class="pp-sign"><div>أعدّه</div><div>راجعه</div><div>اعتمده</div></div></div>`, { title: no });
   $('[data-print]', root).onclick = doPrint;
   if (query.print) setTimeout(doPrint, 300);
-  $('[data-del]', root).onclick = async () => {
+  $('[data-repeat]', root).onclick = () => repeatDialog(d);
+  const del = $('[data-del]', root);
+  if (del) del.onclick = async () => {
     if (!(await confirmBox(`حذف القيد ${no}؟`, { ok: 'حذف', danger: true }))) return;
     store.deleteDoc(d.id);
     toast('تم الحذف');
@@ -301,9 +306,9 @@ export function daybook({ root, query, path }) {
     <div data-out></div>`);
   function draw() {
     $('[data-out]', root).innerHTML = String(entries.length ? html`<div class="tbl-wrap"><table class="tbl" data-table><thead><tr><th>التاريخ</th><th>المستند</th><th>الحساب</th><th class="num">مدين</th><th class="num">دائن</th></tr></thead><tbody>
-      ${entries.slice(0, limit).map((e) => { const d = e.doc; const href = d.type === 'opening' ? '#/accounts' : docHref(d);
-        return html`<tr class="grp" data-href="${href}"><td class="nowrap">${fmtDate(e.date)}</td><td colspan="4">${d.type === 'opening' ? 'القيد الافتتاحي' : `${DOC_TYPES[d.type].name} ${docNo(d, s)}`}${d.party ? ' — ' + partyName(d.party) : ''}${d.notes ? ' — ' + d.notes : ''}</td></tr>
-          ${e.lines.map((l) => html`<tr class="sub-row"><td></td><td></td><td class="${l.cr ? 'ind-1' : ''}">${l.cr ? 'إلى ' : 'من '}${accName(l.acc)}${l.party ? ' — ' + partyName(l.party) : ''}</td><td class="num">${l.dr ? money(l.dr) : ''}</td><td class="num">${l.cr ? money(l.cr) : ''}</td></tr>`)}`; })}
+      ${entries.slice(0, limit).map((e) => { const d = e.doc; const href = docHref(d);
+        return html`<tr class="grp" data-href="${href}"><td class="nowrap">${fmtDate(e.date)}</td><td colspan="4">${d.type === 'opening' ? 'القيد الافتتاحي' : `${DOC_TYPES[d.type]?.name || ''} ${docNo(d, s)}`}${d.party ? ' — ' + partyName(d.party) : ''}${d.notes ? ' — ' + d.notes : ''}</td></tr>
+          ${e.lines.map((l) => html`<tr class="sub-row"><td></td><td></td><td class="${l.cr ? 'ind-1' : ''}">${l.cr ? 'إلى ' : 'من '}${accName(l.acc)}${l.party ? ' — ' + partyName(l.party) : ''}${l.memo && e.doc.type === 'depreciation' ? html` <span class="muted small">(${l.memo})</span>` : ''}</td><td class="num">${l.dr ? money(l.dr) : ''}</td><td class="num">${l.cr ? money(l.cr) : ''}</td></tr>`)}`; })}
     </tbody></table></div>${entries.length > limit ? html`<p style="text-align:center;margin-top:12px"><button class="btn btn-ghost" data-more>عرض المزيد (${entries.length - limit})</button></p>` : ''}`
       : empty('📖', 'لا توجد قيود في هذه الفترة'));
   }

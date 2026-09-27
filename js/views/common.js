@@ -2,10 +2,10 @@
 import * as store from '../store.js';
 import {
   docNo, calcDoc, expenseAsDoc, moneyAccounts, currencyInfo, num, ymd, monthStart, monthEnd, addMonths, addDays,
-  quarterStart, fiscalYearStart, zatcaInvoiceQR, tafqeet, sortedAccounts, paymentList, TAX_CATS, DOC_TYPES,
+  quarterStart, fiscalYearStart, zatcaInvoiceQR, tafqeet, sortedAccounts, paymentList, TAX_CATS, DOC_TYPES, NO_POSTING, isPdc,
 } from '../core.js';
 import { html, raw, money, qty, fmtDate, hijri, modal, showErrors, $, printHTML, qrSVG, moneyText, field } from '../ui.js';
-import { go, withQuery } from '../nav.js';
+import { go, withQuery, docHref as docHrefOf } from '../nav.js';
 
 export const today = () => ymd(new Date());
 export const S = () => store.getDb().settings;
@@ -24,6 +24,14 @@ export function bindRows(root) {
     go(tr.dataset.href);
   });
 }
+
+// مستند القيد: مستند محفوظ، أو قيد يولّده البرنامج (افتتاحي، إهلاك، تحصيل شيك)
+export const docOf = (id, B = store.getBooks()) => store.findDoc(id) || B.entries.get(id)?.doc || null;
+
+// الفترة المقفلة: ملاحظة بدل أزرار التعديل والحذف
+export const docLocked = (d) => store.isLockedDoc(d);
+export const lockedNote = (d) => html`<p class="note note-warn" style="margin-bottom:12px">🔒 هذا المستند في فترة مقفلة (حتى ${fmtDate(S().lockDate)})، فلا يمكن تعديله أو حذفه. للتصحيح سجّل مستنداً بتاريخ لاحق${d.type === 'sale' ? ' مثل إشعار دائن' : ''}.</p>`;
+export const lockedPage = (d) => html`<div class="empty"><div class="empty-ic">🔒</div><h3>المستند في فترة مقفلة</h3><p>الفترة مقفلة حتى ${fmtDate(S().lockDate)}. يمكن للمالك تغيير تاريخ القفل من الإعدادات.</p><p><a class="btn btn-ghost" href="${docHrefOf(d)}">العودة للمستند</a></p></div>`;
 
 export const partyName = (id, fallback = '') => store.findParty(id)?.name || fallback;
 export const accName = (id) => store.findAccount(id)?.name || 'حساب محذوف';
@@ -98,7 +106,7 @@ export function productItems(priceKey = 'price') {
     return store.getDb().products.filter((p) => p.active !== false).map((p) => {
       const s = B.stock.get(p.id);
       const stock = p.type === 'stock' ? ` · متوفر ${Number((s ? s.qty : 0).toFixed(3))}` : ' · خدمة';
-      return { value: p.id, label: p.name, sub: moneyText(p[priceKey] || 0, { sym: false }) + stock, search: `${p.sku || ''} ${p.barcode || ''}` };
+      return { value: p.id, label: p.name, sub: moneyText(p[priceKey] || 0, { sym: false }) + stock, search: `${p.sku || ''} ${p.barcode || ''} ${(p.units || []).map((u) => u.barcode || '').join(' ')}` };
     });
   };
 }
@@ -190,6 +198,8 @@ export function paperTitle(d, party, s = S()) {
   if (d.type === 'sale') return tax ? (b2b ? ['فاتورة ضريبية', 'Tax Invoice'] : ['فاتورة ضريبية مبسطة', 'Simplified Tax Invoice']) : ['فاتورة', 'Invoice'];
   if (d.type === 'sreturn') return tax ? [b2b ? 'إشعار دائن' : 'إشعار دائن مبسط', 'Credit Note'] : ['إشعار مرتجع مبيعات', 'Sales Return'];
   if (d.type === 'quote') return ['عرض سعر', 'Quotation'];
+  if (d.type === 'sorder') return ['أمر بيع', 'Sales Order'];
+  if (d.type === 'porder') return ['أمر شراء', 'Purchase Order'];
   if (d.type === 'purchase') return ['فاتورة مشتريات', 'Purchase Invoice'];
   if (d.type === 'preturn') return ['إشعار مدين — مرتجع مشتريات', 'Debit Note'];
   return [DOC_TYPES[d.type]?.name || '', ''];
@@ -208,11 +218,11 @@ export function docPaper(d, { size = 'a4' } = {}) {
   const bi = bilingual(s);
   const L = (ar, enLabel) => lbl(ar, enLabel, bi);
   const anyDisc = T.lines.some((l) => l.discount);
-  const isSale = d.type === 'sale' || d.type === 'sreturn' || d.type === 'quote';
-  const st = d.type === 'quote' ? null : store.getBooks().status.get(d.id);
+  const isSale = d.type === 'sale' || d.type === 'sreturn' || d.type === 'quote' || d.type === 'sorder';
+  const st = NO_POSTING.includes(d.type) ? null : store.getBooks().status.get(d.id);
   const ref = d.refId ? store.findDoc(d.refId) : null;
   const qr = s.country === 'SA' && s.vat && (d.type === 'sale' || d.type === 'sreturn') && d.no ? qrSVG(zatcaInvoiceQR(s, d, T), 120) : '';
-  const partyLabel = { sale: ['العميل', 'Customer'], quote: ['مقدم إلى', 'Quoted to'], sreturn: ['العميل', 'Customer'], purchase: ['المورد', 'Supplier'], preturn: ['المورد', 'Supplier'] }[d.type];
+  const partyLabel = { sale: ['العميل', 'Customer'], quote: ['مقدم إلى', 'Quoted to'], sreturn: ['العميل', 'Customer'], purchase: ['المورد', 'Supplier'], preturn: ['المورد', 'Supplier'], sorder: ['العميل', 'Customer'], porder: ['إلى المورد', 'Supplier'] }[d.type];
   const partyBox = party ? html`<div><h4>${L(...partyLabel)}</h4><div class="nm">${party.name}</div>
       ${bi && party.nameEn ? html`<div class="pp-en-name"><span dir="ltr">${party.nameEn}</span></div>` : ''}
       ${party.vatNo ? html`<div>${lbl2('الرقم الضريبي', 'VAT No.', bi)}: <b dir="ltr">${party.vatNo}</b></div>` : ''}
@@ -226,8 +236,9 @@ export function docPaper(d, { size = 'a4' } = {}) {
     const p = l.product ? store.findProduct(l.product) : null;
     const nm = l.desc || (p && p.name) || 'بند';
     const name = bi && p && p.nameEn && p.nameEn !== nm ? html`${nm}<i class="pp-en"><span dir="ltr">${p.nameEn}</span></i>` : nm;
-    if (small) return html`<tr><td>${name}</td><td class="num">${qty(X.qty)}</td><td class="num">${money(X.price)}</td><td class="num">${money(X.total)}</td></tr>`;
-    return html`<tr><td class="c-n">${i + 1}</td><td>${name}</td><td class="num">${qty(X.qty)}</td><td class="num">${money(X.price)}</td>
+    const q = html`${qty(X.qty)}${l.unit ? html` <small class="muted">${l.unit}</small>` : ''}`;
+    if (small) return html`<tr><td>${name}</td><td class="num">${q}</td><td class="num">${money(X.price)}</td><td class="num">${money(X.total)}</td></tr>`;
+    return html`<tr><td class="c-n">${i + 1}</td><td>${name}</td><td class="num">${q}</td><td class="num">${money(X.price)}</td>
       ${anyDisc ? html`<td class="num">${X.discount ? money(X.discount) : '—'}</td>` : ''}
       ${tax ? html`<td class="num c-net">${money(X.net)}</td><td class="num">${money(X.vat)} <small class="muted rate">${X.cat === 'S' ? X.rate + '%' : TAX_CATS[X.cat]}</small></td>` : ''}
       <td class="num">${money(X.total)}</td></tr>`;
@@ -250,6 +261,7 @@ export function docPaper(d, { size = 'a4' } = {}) {
       ${s.showHijri && !small ? meta('التاريخ الهجري', hijri(d.date)) : ''}
       ${d.dueDate && st && st.due > 0 ? meta(L('تاريخ الاستحقاق', 'Due date'), fmtDate(d.dueDate)) : ''}
       ${d.validUntil ? meta(L('صالح حتى', 'Valid until'), fmtDate(d.validUntil)) : ''}
+      ${d.deliveryDate ? meta(L('تاريخ التسليم', 'Delivery date'), fmtDate(d.deliveryDate)) : ''}
       ${d.ref ? meta(d.type === 'purchase' ? L('رقم فاتورة المورد', 'Supplier invoice') : L('المرجع', 'Reference'), d.ref) : ''}
       ${ref ? meta(L('مرجع الفاتورة الأصلية', 'Original invoice'), html`<span dir="ltr">${docNo(ref, s)}</span> — ${fmtDate(ref.date)}`) : ''}
       ${cashier ? meta(L('الكاشير', 'Cashier'), cashier.name) : ''}
@@ -273,6 +285,28 @@ export function docPaper(d, { size = 'a4' } = {}) {
   </div>`;
 }
 
+// سند تسليم: الأصناف والكميات بدون أسعار، مع توقيع المستلم
+export function deliveryPaper(d) {
+  const s = S();
+  const bi = bilingual(s);
+  const L = (ar, en) => lbl(ar, en, bi);
+  const party = store.findParty(d.party);
+  return html`<div class="paper">
+    <div class="pp-head">${coBlock(s, bi)}<div class="pp-title"><h1>سند تسليم</h1><div class="en">Delivery Note</div></div></div>
+    <div class="pp-meta">
+      ${meta(L('المرجع', 'Reference'), html`<span dir="ltr">${d.no ? docNo(d, s) : 'مسودة'}</span>`)}
+      ${meta(L('التاريخ', 'Date'), fmtDate(d.deliveryDate || d.date))}
+    </div>
+    <div class="pp-party"><div><h4>${L('العميل', 'Customer')}</h4><div class="nm">${party ? party.name : 'عميل نقدي'}</div>
+      ${party && party.address ? html`<div>${party.address}</div>` : ''}${party && party.phone ? html`<div class="muted"><span dir="ltr">${party.phone}</span></div>` : ''}</div></div>
+    <table class="pp-lines"><thead><tr><th class="c-n">#</th><th>${L('الصنف', 'Item')}</th><th class="num">${L('الكمية', 'Qty')}</th><th>${L('ملاحظات', 'Notes')}</th></tr></thead>
+      <tbody>${(d.lines || []).map((l, i) => html`<tr><td class="c-n">${i + 1}</td><td>${l.desc || productName(l.product) || 'بند'}</td><td class="num">${qty(l.qty)}${l.unit ? ' ' + l.unit : ''}</td><td></td></tr>`)}</tbody></table>
+    ${d.notes ? html`<div class="pp-note">${d.notes}</div>` : ''}
+    <div class="pp-sign"><div>${L('المُسلِّم', 'Delivered by')}</div><div>${L('اسم المستلم', 'Received by')}</div><div>${L('التوقيع والتاريخ', 'Signature & date')}</div></div>
+    <div class="pp-foot"><span>${s.name || ''}</span><span>استلمت البضاعة أعلاه بحالة سليمة</span></div>
+  </div>`;
+}
+
 // ورقة سند قبض / صرف / مصروف / تحويل
 export function voucherPaper(d) {
   const s = S();
@@ -289,6 +323,8 @@ export function voucherPaper(d) {
     rows.push([d.type === 'receipt' ? 'أودع في' : 'صُرف من', accName(d.money)]);
     if (d.method) rows.push(['طريقة الدفع', METHODS[d.method] || d.method]);
     if (d.chequeNo) rows.push(['رقم الشيك / المرجع', d.chequeNo]);
+    if (d.chequeBank) rows.push(['البنك المسحوب عليه', d.chequeBank]);
+    if (isPdc(d)) rows.push(['تاريخ استحقاق الشيك', fmtDate(d.chequeDue)]);
   } else if (d.type === 'expense') {
     title = 'سند صرف مصروف';
     const T = calcDoc(expenseAsDoc(d), dec());

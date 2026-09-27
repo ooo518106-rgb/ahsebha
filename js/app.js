@@ -15,6 +15,10 @@ import * as pos from './views/pos.js';
 import * as importer from './views/importer.js';
 import * as collections from './views/collections.js';
 import * as users from './views/users.js';
+import * as assets from './views/assets.js';
+import * as cheques from './views/cheques.js';
+import * as recurring from './views/recurring.js';
+import * as auditView from './views/audit.js';
 
 // ─── المسارات ───
 const routes = [];
@@ -22,7 +26,7 @@ const on = (pattern, fn) => routes.push({ parts: pattern.split('/').filter(Boole
 
 on('', home.dashboard);
 on('welcome', home.welcome);
-const MODULE = { sale: docs, quote: docs, sreturn: docs, purchase: docs, preturn: docs, expense: money, receipt: money, payment: money, transfer: money, journal: ledger, adjust: products };
+const MODULE = { sale: docs, quote: docs, sreturn: docs, purchase: docs, preturn: docs, sorder: docs, porder: docs, expense: money, receipt: money, payment: money, transfer: money, journal: ledger, adjust: products };
 for (const [type, seg] of Object.entries(SEG)) {
   const m = MODULE[type];
   on(seg, (c) => m.list(type, c));
@@ -52,6 +56,13 @@ on('labels', products.labels);
 on('import', importer.view);
 on('collections', collections.view);
 on('users', users.view);
+on('assets', assets.list);
+on('assets/new', assets.form);
+on('assets/:id/edit', assets.form);
+on('assets/:id', assets.show);
+on('cheques', cheques.view);
+on('recurring', recurring.view);
+on('audit', auditView.view);
 
 function match(path) {
   const parts = path.split('/').filter(Boolean);
@@ -70,11 +81,13 @@ const NAV = [
   { sec: 'المبيعات' },
   { ic: '🧾', t: 'فواتير المبيعات', h: 'sales' },
   { ic: '📝', t: 'عروض الأسعار', h: 'quotes' },
+  { ic: '📋', t: 'أوامر البيع', h: 'sales-orders' },
   { ic: '↩️', t: 'مرتجعات المبيعات', h: 'sales-returns' },
   { ic: '👥', t: 'العملاء', h: 'customers' },
   { ic: '📞', t: 'التحصيل والتذكير', h: 'collections' },
   { sec: 'المشتريات والمصروفات' },
   { ic: '🛒', t: 'فواتير المشتريات', h: 'purchases' },
+  { ic: '📋', t: 'أوامر الشراء', h: 'purchase-orders' },
   { ic: '↪️', t: 'مرتجعات المشتريات', h: 'purchase-returns' },
   { ic: '🏭', t: 'الموردون', h: 'suppliers' },
   { ic: '💸', t: 'المصروفات', h: 'expenses' },
@@ -82,6 +95,7 @@ const NAV = [
   { ic: '📥', t: 'سندات القبض', h: 'receipts' },
   { ic: '📤', t: 'سندات الصرف', h: 'payments' },
   { ic: '🔁', t: 'التحويلات', h: 'transfers' },
+  { ic: '🧾', t: 'الشيكات', h: 'cheques' },
   { sec: 'المخزون' },
   { ic: '📦', t: 'المنتجات والخدمات', h: 'products' },
   { ic: '🏷️', t: 'ملصقات الباركود', h: 'labels' },
@@ -89,7 +103,10 @@ const NAV = [
   { sec: 'المحاسبة والتقارير' },
   { ic: '📒', t: 'قيود اليومية', h: 'journal' },
   { ic: '🗂️', t: 'دليل الحسابات', h: 'accounts' },
+  { ic: '🏢', t: 'الأصول الثابتة', h: 'assets' },
+  { ic: '♻️', t: 'المستندات المتكررة', h: 'recurring' },
   { ic: '📊', t: 'التقارير', h: 'reports' },
+  { ic: '🕘', t: 'سجل التعديلات', h: 'audit' },
   { sec: 'الإدارة' },
   { ic: '📥', t: 'الاستيراد من Excel', h: 'import' },
   { ic: '👤', t: 'المستخدمون', h: 'users' },
@@ -191,6 +208,16 @@ function toggleTheme() {
   themeButton();
 }
 
+// المستندات المتكررة المستحقة تُنشأ عند فتح البرنامج
+function generateRecurring() {
+  if (!store.getDb()) return;
+  try {
+    const res = store.runRecurring();
+    if (res.created.length) toast(`تم إنشاء ${res.created.length} مستند متكرر مستحق ♻️`);
+    if (res.errors.length) toast(`تعذّر إنشاء مستند متكرر: ${res.errors[0].msg}`, 'warn');
+  } catch (e) { console.error(e); }
+}
+
 async function boot() {
   themeButton();
   document.querySelector('.theme-toggle').onclick = toggleTheme;
@@ -204,6 +231,7 @@ async function boot() {
     },
   });
   renderShell();
+  generateRecurring();
   window.addEventListener('hashchange', render);
   window.addEventListener('beforeunload', (e) => { if (guard.dirty) { e.preventDefault(); e.returnValue = ''; } });
   window.addEventListener('acc:shell', () => { auth.init(); renderShell(); });

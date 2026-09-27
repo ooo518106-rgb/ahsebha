@@ -4,9 +4,17 @@
 export const SEG = {
   sale: 'sales', quote: 'quotes', sreturn: 'sales-returns', purchase: 'purchases', preturn: 'purchase-returns',
   expense: 'expenses', receipt: 'receipts', payment: 'payments', transfer: 'transfers', journal: 'journal', adjust: 'adjustments',
+  sorder: 'sales-orders', porder: 'purchase-orders',
 };
 
-export const docHref = (d) => (d && SEG[d.type] ? `#/${SEG[d.type]}/${d.id}` : '#/');
+// القيود المشتقة (الإهلاك، تحصيل الشيكات) تفتح مصدرها
+export function docHref(d) {
+  if (!d) return '#/';
+  if (d.type === 'opening') return '#/accounts';
+  if (d.href) return d.href;
+  if (d.src) return docHref(d.src);
+  return SEG[d.type] ? `#/${SEG[d.type]}/${d.id}` : '#/';
+}
 export const partyHref = (p) => (p ? `#/${p.kind === 'supplier' ? 'suppliers' : 'customers'}/${p.id}` : '#/');
 
 export function go(path) {

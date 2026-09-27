@@ -262,12 +262,14 @@ export function field(label, control, { hint, err, cls = '' } = {}) {
 
 export function showErrors(root, errors) {
   $$('.has-err', root).forEach((e) => e.classList.remove('has-err'));
-  $$('[data-err]', root).forEach((e) => { e.hidden = true; e.textContent = ''; });
+  $$('[data-err], .fld-e[data-auto]', root).forEach((e) => { e.hidden = true; e.textContent = ''; });
   let first = null;
   for (const [k, msg] of Object.entries(errors || {})) {
-    const box = root.querySelector(`[data-err="${k}"]`);
-    if (box) { box.hidden = false; box.textContent = msg; }
     const ctl = root.querySelector(`[data-f="${k}"]`);
+    // مكان الرسالة: عنصر data-err، وإلا سطر الخطأ داخل نفس الحقل
+    let box = root.querySelector(`[data-err="${k}"]`);
+    if (!box && ctl) { box = ctl.closest('.fld')?.querySelector('.fld-e'); if (box) box.dataset.auto = '1'; }
+    if (box) { box.hidden = false; box.textContent = msg; }
     if (ctl) { ctl.classList.add('has-err'); first = first || ctl; }
     else if (box) first = first || box;
   }

@@ -2,7 +2,7 @@
 import * as store from '../store.js';
 import {
   trialBalance, incomeStatement, balanceSheet, vatReport, aging, AGING_BUCKETS, salesAnalysis, cashReport, stockReport,
-  docNo, DOC_TYPES, num, round,
+  docNo, DOC_TYPES, num, round, zakatEstimate, ZAKAT_RATE, fiscalYearStart, addMonths, addDays,
 } from '../core.js';
 import { html, raw, money, qty, fmtDate, toast, confirmBox, empty, $, exportTable, attr } from '../ui.js';
 import { go, setTitle, docHref, withQuery } from '../nav.js';
@@ -15,6 +15,7 @@ const REPORTS = [
   { id: 'trial', icon: '🧮', t: 'ميزان المراجعة', d: 'أرصدة وحركات كل الحسابات والتحقق من التوازن' },
   { sec: 'الضريبة' },
   { id: 'vat', icon: '🧾', t: 'إقرار الضريبة', d: 'ضريبة المبيعات والمشتريات وصافي المستحق للفترة' },
+  { id: 'zakat', icon: '🌙', t: 'تقدير الزكاة', d: 'تقدير تقريبي للزكاة بطريقة صافي الأصول المتداولة' },
   { sec: 'المبيعات والذمم' },
   { id: 'sales', icon: '🏆', t: 'تحليل المبيعات والأرباح', d: 'الأكثر مبيعاً وربحاً حسب المنتج والعميل' },
   { id: 'aging-ar', icon: '⏳', t: 'أعمار ديون العملاء', d: 'المستحقات حسب مدة التأخير' },
@@ -42,7 +43,7 @@ export function report(ctx) {
   const r = REPORTS.find((x) => x.id === ctx.params.name);
   if (!r) { setTitle('التقارير'); ctx.root.innerHTML = String(empty('🔎', 'التقرير غير موجود', '', html`<a class="btn btn-ghost" href="#/reports">كل التقارير</a>`)); return; }
   setTitle(r.t);
-  const fn = { income, balance, trial, vat, sales, 'aging-ar': (c) => agingView(c, 'customer'), 'aging-ap': (c) => agingView(c, 'supplier'), cash, stock, expenses }[r.id];
+  const fn = { income, balance, trial, vat, zakat, sales, 'aging-ar': (c) => agingView(c, 'customer'), 'aging-ap': (c) => agingView(c, 'supplier'), cash, stock, expenses }[r.id];
   fn(ctx, r);
 }
 
@@ -58,6 +59,33 @@ function frame({ root, path, query }, r, { per, asOf, fixed, body, note }) {
   bindRows(root);
   $('[data-print]', root).onclick = () => { const t = $('[data-table]', root); if (t) printReport(r.t, sub, t); };
   $('[data-csv]', root).onclick = () => { const t = $('[data-table]', root); if (t) exportTable(t, csvName(r.t)); };
+}
+
+// ── تقدير الزكاة ──
+function zakat(ctx, r) {
+  const db = store.getDb();
+  const s = S();
+  const t = today();
+  // الافتراضي: نهاية السنة المالية الحالية أو اليوم أيهما أسبق
+  const fyEnd = addDays(addMonths(fiscalYearStart(t, num(s.fiscalStartMonth) || 1), 12), -1);
+  const asOf = ctx.query.to || (fyEnd < t ? fyEnd : t);
+  const cal = ctx.query.cal === 'gregorian' ? 'gregorian' : 'hijri';
+  const Z = zakatEstimate(db, store.getBooks(), { to: asOf, calendar: cal });
+  const body = html`<div class="seg" style="margin-bottom:12px">${[['hijri', 'سنة هجرية (2.5%)'], ['gregorian', `سنة ميلادية (${ZAKAT_RATE.gregorian}%)`]].map(([k, l]) => html`<a class="btn btn-sm ${k === cal ? 'btn-primary' : 'btn-ghost'}" href="${withQuery(ctx.path, { ...ctx.query, cal: k === 'hijri' ? '' : k })}">${l}</a>`)}</div>
+    <div class="grid g3" style="margin-bottom:14px">
+      <div class="kpi"><span class="kpi-l">الوعاء الزكوي التقديري</span><span class="kpi-v">${money(Z.base, { sym: true })}</span></div>
+      <div class="kpi"><span class="kpi-l">النسبة</span><span class="kpi-v" dir="ltr">${Z.rate}%</span></div>
+      <div class="kpi"><span class="kpi-l">الزكاة التقديرية</span><span class="kpi-v pos">${money(Z.zakat, { sym: true })}</span></div></div>
+    <div class="tbl-wrap"><table class="tbl" data-table><tbody>
+      <tr class="grp"><td colspan="2">الأصول الزكوية (المتداولة)</td></tr>
+      ${Z.assets.map((x) => html`<tr><td class="ind-1">${x.name}</td><td class="num">${money(x.amount)}</td></tr>`)}
+      <tr class="strong"><td>مجموع الأصول الزكوية</td><td class="num">${money(Z.totalAssets)}</td></tr>
+      <tr class="grp"><td colspan="2">يُخصم: الالتزامات المستحقة</td></tr>
+      ${Z.liabilities.map((x) => html`<tr><td class="ind-1">${x.name}</td><td class="num">${money(-x.amount, { paren: true })}</td></tr>`)}
+      <tr class="strong"><td>الوعاء الزكوي</td><td class="num">${money(Z.base)}</td></tr>
+      <tr class="strong"><td>الزكاة المستحقة (${Z.rate}%)</td><td class="num">${money(Z.zakat)}</td></tr>
+    </tbody></table></div>`;
+  frame(ctx, r, { asOf, body, note: 'تقدير تقريبي للاسترشاد فقط: الذمم تُحسب كلها وكأنها قابلة للتحصيل، والمخزون بالتكلفة. الإقرار الزكوي الرسمي له قواعد وتعديلات خاصة، فراجع محاسباً قانونياً أو مستشاراً زكوياً قبل التقديم.' });
 }
 
 const pct = (v, base) => (base ? html`<span class="muted small" dir="ltr">${(Math.round((v / base) * 1000) / 10).toLocaleString('en-US')}%</span>` : '');

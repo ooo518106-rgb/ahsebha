@@ -19,7 +19,8 @@ export function demoData(today) {
   });
 
   const accounts = defaultAccounts();
-  const opening = { cash: 8000, bank: 45000, furn: 15000, equip: 9500 };
+  // الأثاث والأجهزة القديمة تدخل من سجل الأصول (بتكلفتها ومجمع إهلاكها) وليس كرصيد افتتاحي للحساب
+  const opening = { cash: 8000, bank: 45000 };
   for (const [k, v] of Object.entries(opening)) accounts.find((a) => a.id === k).opening = v;
   accounts.push({ id: 'wallet', code: '1107', name: 'مدى وتابي (تسويات البطاقات)', type: 'asset', parent: 'g11', group: false, money: true });
 
@@ -55,6 +56,8 @@ export function demoData(today) {
     [p.nameEn, p.category] = EXTRA[p.id];
     if (p.type === 'stock') { const d12 = '2000000000' + String(i + 1).padStart(2, '0'); p.barcode = d12 + eanCheckDigit(d12); }
   });
+  // الكيبل يُباع بالحبة أو بالعلبة (10 حبات)
+  products.find((p) => p.id === 'p3').units = [{ name: 'علبة', factor: 10, price: 250, barcode: '200000000099' + eanCheckDigit('200000000099') }];
   const target = { p1: 130, p2: 170, p3: 340, p4: 110, p5: 240, p6: 50 };
   const stock = Object.fromEntries(products.map((p) => [p.id, p.openQty]));
   const byId = Object.fromEntries(products.map((p) => [p.id, p]));
@@ -211,10 +214,30 @@ export function demoData(today) {
     else { const c = Math.round(t / 2); add({ ...d, payments: [{ acc: 'cash', amount: c }, { acc: 'wallet', amount: Math.round((t - c) * 100) / 100 }] }); }
   }
 
+  // شيكات مؤجلة: واحد حُصّل، وواحد تحت التحصيل يستحق قريباً
+  const chqDate = (n) => { const d = addDays(today, n); return d < start ? start : d; };
+  add({ type: 'receipt', date: chqDate(-40), party: 'c2', amount: 2000, money: 'bank', method: 'cheque', chequeNo: '104521', chequeBank: 'البنك الأهلي', pdc: true, chequeDue: chqDate(-20), cleared: chqDate(-19), notes: 'شيك مؤجل' });
+  add({ type: 'receipt', date: chqDate(-3), party: 'c1', amount: 3000, money: 'bank', method: 'cheque', chequeNo: '778810', chequeBank: 'مصرف الراجحي', pdc: true, chequeDue: addDays(today, 5), notes: 'شيك مؤجل الدفع' });
+  // أمر بيع مفتوح وأمر شراء مفتوح
+  add({ type: 'sorder', date: chqDate(-2), party: 'c2', vatRate: 15, inclusive: false, deliveryDate: addDays(today, 4), lines: [{ product: 'p4', desc: byId.p4.name, qty: 12, price: 99, disc: 0, tax: 'S' }, { product: 'p3', desc: byId.p3.name, qty: 5, price: 250, disc: 0, tax: 'S', unit: 'علبة', factor: 10 }], notes: 'التسليم لفرع جدة' });
+  add({ type: 'porder', date: chqDate(-1), party: 's2', vatRate: 15, inclusive: false, deliveryDate: addDays(today, 10), lines: [{ product: 'p5', desc: byId.p5.name, qty: 100, price: 12, disc: 0, tax: 'S' }, { product: 'p3', desc: byId.p3.name, qty: 150, price: 8, disc: 0, tax: 'S' }], notes: '' });
+  // جهاز جديد اشتُري خلال الفترة ويُهلك على 3 سنوات
+  const buyDate = addDays(addMonths(start, 2), 4) <= today ? addDays(addMonths(start, 2), 4) : start;
+  const printer = add({ type: 'expense', date: buyDate, account: 'equip', amount: 1800, tax: 'S', inclusive: false, vatRate: 15, party: null, payee: 'مكتبة جرير', paid: 2070, payAcc: 'bank', ref: '', notes: 'طابعة ملصقات وقارئ باركود' });
+  const assets = [
+    { id: 'as1', no: 1, name: 'ديكور وأثاث المعرض', account: 'furn', date: addMonths(start, -14), cost: 15000, salvage: 0, life: 84, priorDep: 2500, notes: '' },
+    { id: 'as2', no: 2, name: 'أجهزة كمبيوتر ونقاط بيع', account: 'equip', date: addMonths(start, -6), cost: 9500, salvage: 500, life: 48, priorDep: 1125, notes: '' },
+    { id: 'as3', no: 3, name: 'طابعة ملصقات وقارئ باركود', account: 'equip', date: printer.date, cost: 1800, salvage: 0, life: 36, priorDep: 0, notes: '' },
+  ];
+  // الإيجار الشهري يتكرر تلقائياً من الشهر القادم
+  const rent = docs.filter((d) => d.type === 'expense' && d.account === 'e_rent').pop();
+  const nextMonth = addMonths(monthStart(today), 1);
+  const recurring = rent ? [{ id: 'rc1', name: 'إيجار المعرض الشهري', src: { type: 'expense', account: 'e_rent', amount: rent.amount, tax: rent.tax, inclusive: rent.inclusive, vatRate: rent.vatRate, party: null, payee: rent.payee, paid: rent.paid, payAcc: rent.payAcc, ref: '', notes: rent.notes }, freq: 'month', day: 1, next: nextMonth, until: '', active: true, count: 0 }] : [];
+
   for (const p of products) delete p.supplier;
   // ترقيم تسلسلي حسب التاريخ كما يحدث في الاستخدام الفعلي
   docs.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   const seq = {};
   for (const d of docs) d.no = seq[d.type] = (seq[d.type] || 0) + 1;
-  return { settings, accounts, parties, products, docs };
+  return { settings, accounts, parties, products, docs, assets, recurring };
 }

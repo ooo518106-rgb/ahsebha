@@ -20,7 +20,8 @@ const PERMS = {
 const SEG_PERM = {
   pos: 'pos', sales: 'sell', quotes: 'sell', 'sales-returns': 'sell', receipts: 'sell', customers: 'sell',
   purchases: 'buy', 'purchase-returns': 'buy', suppliers: 'buy', expenses: 'buy', payments: 'buy', transfers: 'buy',
-  journal: 'buy', daybook: 'buy', adjustments: 'buy',
+  journal: 'buy', daybook: 'buy', adjustments: 'buy', 'sales-orders': 'sell', 'purchase-orders': 'buy',
+  assets: 'buy', cheques: 'buy', recurring: 'buy', audit: 'reports',
   products: 'products', labels: 'products', import: 'products',
   accounts: 'reports', reports: 'reports', collections: 'reports', '': 'reports',
   settings: 'settings', users: 'admin', welcome: null,
