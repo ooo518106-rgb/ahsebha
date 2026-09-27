@@ -1,6 +1,6 @@
 // ═══ الكاشير (نقطة البيع) وتقفيل الصندوق اليومي ═══
 import * as store from '../store.js';
-import { calcDoc, validateDoc, num, round, docNo, moneyAccounts, balances, paymentList, nextAccountCode } from '../core.js';
+import { calcDoc, validateDoc, num, round, docNo, moneyAccounts, balances, paymentList, nextAccountCode, lineFactor } from '../core.js';
 import { html, raw, money, moneyText, toast, confirmBox, modal, combo, $, $$, norm, field, fmtDate } from '../ui.js';
 import { go, setTitle, docHref, withQuery } from '../nav.js';
 import { S, dec, today, partyItems, quickParty, docPaper, printPaper, cameraDialog, partyName, accName } from './common.js';
@@ -56,9 +56,19 @@ export function pos({ root }) {
 
   const scan = $('[data-scan]', root);
   const grid = $('[data-grid]', root);
+  // البحث بالباركود أو الرمز، بما فيها باركود الوحدات (الكرتون مثلاً)
+  const byCode = (code) => {
+    const lc = code.toLowerCase();
+    for (const x of products) {
+      if ((x.barcode && x.barcode === code) || (x.sku && x.sku.toLowerCase() === lc)) return { p: x, unit: null };
+      const u = (x.units || []).find((y) => y.barcode && y.barcode === code);
+      if (u) return { p: x, unit: u };
+    }
+    return null;
+  };
   const stockLeft = (p) => {
     if (p.type !== 'stock') return null;
-    const inCart = cart.lines.filter((l) => l.product === p.id).reduce((t, l) => t + num(l.qty), 0);
+    const inCart = cart.lines.filter((l) => l.product === p.id).reduce((t, l) => t + num(l.qty) * lineFactor(l), 0);
     return round((B.stock.get(p.id)?.qty || 0) - inCart, 3);
   };
 
@@ -77,7 +87,7 @@ export function pos({ root }) {
     const T = calc();
     const box = $('[data-lines]', root);
     box.innerHTML = cart.lines.length ? String(html`${cart.lines.map((l, i) => html`<div class="pos-line" data-i="${i}">
-        <button class="pl-name" data-edit="${i}">${l.desc}${num(l.disc) ? html` <small class="badge badge-info">خصم ${num(l.disc)}%</small>` : ''}<small class="muted">${money(l.price)} × ${num(l.qty)}</small></button>
+        <button class="pl-name" data-edit="${i}">${l.desc}${l.unit ? html` <small class="badge badge-muted">${l.unit}</small>` : ''}${num(l.disc) ? html` <small class="badge badge-info">خصم ${num(l.disc)}%</small>` : ''}<small class="muted">${money(l.price)} × ${num(l.qty)}</small></button>
         <div class="pl-qty"><button data-dec="${i}" aria-label="إنقاص">−</button><span>${num(l.qty)}</span><button data-inc="${i}" aria-label="زيادة">+</button></div>
         <b class="pl-tot">${money(T.lines[i].total)}</b>
         <button class="icon-btn" data-del="${i}" aria-label="حذف">✕</button></div>`)}`)
@@ -95,10 +105,13 @@ export function pos({ root }) {
     $('[data-held]', root).disabled = !held.length;
   }
 
-  function add(p, qty = 1) {
-    const i = cart.lines.findIndex((l) => l.product === p.id && num(l.price) === num(p.price) && !num(l.disc));
+  function add(p, qty = 1, unit = null) {
+    const f = unit ? num(unit.factor) : 1;
+    const price = unit ? (unit.price !== '' && unit.price != null ? num(unit.price) : round(num(p.price) * f, dec())) : num(p.price);
+    const uname = unit ? unit.name : '';
+    const i = cart.lines.findIndex((l) => l.product === p.id && (l.unit || '') === uname && num(l.price) === price && !num(l.disc));
     if (i >= 0) cart.lines[i].qty = round(num(cart.lines[i].qty) + qty, 3);
-    else cart.lines.push({ product: p.id, desc: p.name, qty, price: num(p.price), disc: 0, tax: p.tax || 'S' });
+    else cart.lines.push({ product: p.id, desc: p.name, qty, price, disc: 0, tax: p.tax || 'S', ...(unit ? { unit: uname, factor: f } : {}) });
     const left = stockLeft(p);
     if (left != null && left < 0) toast(`تنبيه: الكمية المتوفرة من «${p.name}» لا تكفي`, 'warn');
     drawCart(); drawGrid();
@@ -113,14 +126,14 @@ export function pos({ root }) {
     const m = raw0.match(/^(\d+(?:\.\d+)?)\*(.+)$/);
     const qty = m ? num(m[1]) : 1;
     const code = (m ? m[2] : raw0).trim();
-    const lc = code.toLowerCase();
-    let p = products.find((x) => (x.barcode && x.barcode === code) || (x.sku && x.sku.toLowerCase() === lc));
+    const hit = byCode(code);
+    let p = hit ? hit.p : null;
     if (!p) {
       const q = norm(code);
       const hits = products.filter((x) => norm(`${x.name} ${x.nameEn || ''}`).includes(q));
       if (hits.length === 1) p = hits[0];
     }
-    if (p) { add(p, qty > 0 ? qty : 1); scan.value = ''; drawGrid(); }
+    if (p) { add(p, qty > 0 ? qty : 1, hit ? hit.unit : null); scan.value = ''; drawGrid(); }
     else notFound(code);
   }
   function notFound(code) {
@@ -169,7 +182,7 @@ export function pos({ root }) {
     if (!result) { scan.focus(); return; }
     const doc = {
       type: 'sale', date: today(), party: cart.party || null, vatRate: s.vat ? num(s.vatRate) : 0, inclusive: !!s.inclusive,
-      lines: cart.lines.map((l) => ({ product: l.product, desc: l.desc, qty: num(l.qty), price: num(l.price), disc: num(l.disc), tax: l.tax || 'S' })),
+      lines: cart.lines.map((l) => ({ product: l.product, desc: l.desc, qty: num(l.qty), price: num(l.price), disc: num(l.disc), tax: l.tax || 'S', ...(l.unit ? { unit: l.unit, factor: num(l.factor) } : {}) })),
       notes: '', payments: result.payments.filter((p) => p.amount > 0), pos: true,
     };
     if (result.tendered) { doc.tendered = result.tendered; doc.change = round(result.tendered - (result.payments.find((p) => p.acc === accs.cash.id)?.amount || 0), dec()); }
@@ -325,7 +338,7 @@ export function pos({ root }) {
     if (t.closest('[data-hold]')) hold();
     else if (t.closest('[data-held]')) showHeld();
     else if (t.closest('[data-clear]')) { if (cart.lines.length) confirmBox('إلغاء الفاتورة الحالية؟', { ok: 'إلغاء الفاتورة', danger: true }).then((ok) => { if (ok) { cart = newCart(); $('[data-party]', root).value = ''; drawCart(); drawGrid(); } }); }
-    else if (t.closest('[data-cam]')) cameraDialog((code) => { const p = products.find((x) => x.barcode === code || x.sku === code); if (p) add(p); else toast('باركود غير معروف: ' + code, 'err'); return false; }, { title: 'مسح المنتجات بالكاميرا' });
+    else if (t.closest('[data-cam]')) cameraDialog((code) => { const h = byCode(code); if (h) add(h.p, 1, h.unit); else toast('باركود غير معروف: ' + code, 'err'); return false; }, { title: 'مسح المنتجات بالكاميرا' });
     else if (t.closest('[data-settings]')) settingsDialog();
     else if (t.closest('[data-go-cart]')) $('[data-cart-panel]', root).scrollIntoView({ behavior: 'smooth' });
   });

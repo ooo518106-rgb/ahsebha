@@ -1,6 +1,6 @@
 // ═══ الترحيب وإعداد المنشأة، ولوحة التحكم ═══
 import * as store from '../store.js';
-import { COUNTRIES, dashboard as summarize, docNo, stockReport, ymd, monthStart, validSaudiVat, isDate } from '../core.js';
+import { COUNTRIES, dashboard as summarize, docNo, stockReport, ymd, monthStart, validSaudiVat, isDate, isPdc, addDays } from '../core.js';
 import { html, money, fmtDate, hijri, toast, confirmBox, empty, $, showErrors, field, monthName, badge } from '../ui.js';
 import { go, setTitle, docHref } from '../nav.js';
 import { today, S, partyName, docStatus } from './common.js';
@@ -114,6 +114,9 @@ export function dashboard({ root }) {
     ['إصدار أول فاتورة', sales.length > 0, '#/sales/new'],
   ];
   const showSteps = !db.demo && steps.some((x) => !x[1]);
+  // شيكات مؤجلة تستحق خلال أسبوع أو تأخرت، وتكرار تعطل
+  const chqs = db.docs.filter((d) => isPdc(d) && !isDate(d.cleared) && !isDate(d.bounced) && d.chequeDue <= addDays(t, 7)).sort((a, b) => a.chequeDue.localeCompare(b.chequeDue));
+  const recErr = db.recurring.filter((r) => r.active !== false && r.error);
   const kpi = (label, value, href, sub, cls = '') => html`<a class="kpi" href="${href}"><span class="kpi-l">${label}</span><span class="kpi-v ${cls}">${value}</span>${sub ? html`<span class="kpi-s">${sub}</span>` : ''}</a>`;
   const monthLabel = `${monthName(t)} ${t.slice(0, 4)}`;
 
@@ -140,7 +143,9 @@ export function dashboard({ root }) {
         ${sales.length ? html`<div class="list-mini">${sales.slice(0, 6).map((d) => { const st = docStatus(d, B); return html`<a href="${docHref(d)}"><span><b dir="ltr">${docNo(d, s)}</b> · ${partyName(d.party, 'عميل نقدي')} <span class="meta">${fmtDate(d.date)}</span></span><span>${money(B.totals.get(d.id)?.total || 0)} ${badge(st.state)}</span></a>`; })}</div>`
           : empty('🧾', 'لا توجد فواتير بعد', '', html`<a class="btn btn-primary btn-sm" href="#/sales/new">أنشئ أول فاتورة</a>`)}</div>
       <div class="card"><div class="card-h"><h3>تنبيهات</h3></div>
-        ${D.overdue.length || D.low.length ? html`<div class="list-mini">
+        ${D.overdue.length || D.low.length || chqs.length || recErr.length ? html`<div class="list-mini">
+          ${chqs.slice(0, 5).map((d) => html`<a href="#/cheques${d.type === 'payment' ? '?tab=out' : ''}"><span>🧾 شيك ${d.type === 'receipt' ? 'وارد' : 'صادر'} ${d.chequeNo || ''} · ${partyName(d.party, '')} ${d.chequeDue < t ? html`<span class="neg">متأخر</span>` : html`<span class="meta">يستحق ${fmtDate(d.chequeDue)}</span>`}</span><span>${money(d.amount)}</span></a>`)}
+          ${recErr.slice(0, 3).map((r) => html`<a href="#/recurring"><span>♻️ تعذّر إنشاء «${r.name}»</span><span class="meta">${r.error}</span></a>`)}
           ${D.overdue.slice(0, 5).map((d) => html`<a href="${docHref(d)}"><span>⏰ فاتورة متأخرة <b dir="ltr">${docNo(d, s)}</b> · ${partyName(d.party)}</span><span class="neg">${money(B.status.get(d.id).due)}</span></a>`)}
           ${D.low.slice(0, 5).map((r) => html`<a href="#/products/${r.product.id}"><span>📦 ${r.product.name} قارب على النفاد</span><span class="meta">المتوفر ${Number(r.qty.toFixed(3))}</span></a>`)}
         </div>` : html`<p class="muted small">لا توجد تنبيهات. كل شيء على ما يرام ✅</p>`}</div>

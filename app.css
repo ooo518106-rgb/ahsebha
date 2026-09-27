@@ -259,6 +259,14 @@ textarea.inp { min-height: 76px; resize: vertical; line-height: 1.6; }
 .bc { background: #fff; padding: 6px; border-radius: 8px; display: inline-block; }
 .bc svg { width: 220px; height: 64px; display: block; }
 
+/* الوحدات المتعددة */
+.line .unit-sel { margin-top: 4px; min-height: 30px; padding: 3px 6px; font-size: .8rem; }
+.unit-rows { border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+.unit-row { display: grid; grid-template-columns: minmax(110px, 1.3fr) minmax(70px, .7fr) minmax(90px, .9fr) minmax(130px, 1.2fr) 36px; gap: 8px; align-items: center; padding: 8px 10px; border-bottom: 1px solid var(--border); }
+.unit-row:last-child { border-bottom: 0; }
+.unit-row .inp { min-height: 36px; padding: 6px 9px; }
+@media (max-width: 560px) { .unit-row { grid-template-columns: 1fr 1fr 36px; } .unit-row.line-h { display: none; } .unit-row [data-uk="price"], .unit-row [data-uk="barcode"] { grid-column: span 1; } }
+
 /* ─── الكاشير (نقطة البيع) ─── */
 .pos-screen { display: grid; grid-template-columns: minmax(0, 1fr) minmax(300px, 380px); gap: 14px; align-items: start; }
 .pos-products { min-width: 0; }

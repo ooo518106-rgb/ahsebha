@@ -89,6 +89,7 @@ export const monthStart = (s) => String(s).slice(0, 8) + '01';
 export function monthEnd(s) { const [y, m] = split(s); return fromUTC(Date.UTC(y, m, 0)); }
 export function quarterStart(s) { const [y, m] = split(s); return `${y}-${pad(Math.floor((m - 1) / 3) * 3 + 1)}-01`; }
 export function fiscalYearStart(s, month = 1) { const [y, m] = split(s); return `${m >= month ? y : y - 1}-${pad(month)}-01`; }
+export function monthsBetween(a, b) { const [y1, m1] = split(a); const [y2, m2] = split(b); return (y2 - y1) * 12 + (m2 - m1); }
 export function daysBetween(a, b) {
   const [y1, m1, d1] = split(a); const [y2, m2, d2] = split(b);
   return Math.round((Date.UTC(y2, m2 - 1, d2) - Date.UTC(y1, m1 - 1, d1)) / 864e5);
@@ -115,10 +116,12 @@ export function defaultAccounts() {
     acc('inv', '1104', 'المخزون', 'asset', 'g11', S),
     acc('vin', '1105', 'ضريبة المشتريات (مدخلات)', 'asset', 'g11', S),
     acc('prepaid', '1106', 'مصروفات مدفوعة مقدماً', 'asset', 'g11'),
+    acc('chq_in', '1150', 'شيكات تحت التحصيل', 'asset', 'g11', S),
     grp('g12', '12', 'الأصول الثابتة', 'asset', 'g1'),
     acc('furn', '1201', 'الأثاث والتجهيزات', 'asset', 'g12'),
     acc('equip', '1202', 'الأجهزة والمعدات', 'asset', 'g12'),
     acc('cars', '1203', 'السيارات', 'asset', 'g12'),
+    acc('accdep', '1290', 'مجمع إهلاك الأصول الثابتة', 'asset', 'g12', S),
     grp('g2', '2', 'الخصوم', 'liability'),
     grp('g21', '21', 'الخصوم المتداولة', 'liability', 'g2'),
     acc('ap', '2101', 'الموردون', 'liability', 'g21', S),
@@ -126,6 +129,7 @@ export function defaultAccounts() {
     acc('vdue', '2103', 'ضريبة مستحقة للهيئة', 'liability', 'g21', S),
     acc('wages', '2104', 'رواتب مستحقة', 'liability', 'g21'),
     acc('loans', '2105', 'القروض والتمويل', 'liability', 'g21'),
+    acc('chq_out', '2150', 'شيكات مؤجلة الدفع', 'liability', 'g21', S),
     grp('g3', '3', 'حقوق الملكية', 'equity'),
     acc('cap', '3101', 'رأس المال', 'equity', 'g3', S),
     acc('draw', '3102', 'جاري المالك (المسحوبات)', 'equity', 'g3', S),
@@ -134,6 +138,7 @@ export function defaultAccounts() {
     acc('sales', '4101', 'المبيعات', 'revenue', 'g4', S),
     acc('sret', '4102', 'مردودات المبيعات', 'revenue', 'g4', S),
     acc('oinc', '4103', 'إيرادات أخرى', 'revenue', 'g4'),
+    acc('assetgl', '4190', 'أرباح (خسائر) بيع الأصول', 'revenue', 'g4', S),
     grp('g5', '5', 'المصروفات', 'expense'),
     grp('g51', '51', 'تكلفة المبيعات', 'expense', 'g5'),
     acc('cogs', '5101', 'تكلفة البضاعة المباعة', 'expense', 'g51', S),
@@ -151,6 +156,7 @@ export function defaultAccounts() {
     acc('e_gov', '5210', 'الرسوم الحكومية', 'expense', 'g52'),
     acc('e_office', '5211', 'مستلزمات مكتبية ونظافة', 'expense', 'g52'),
     acc('e_misc', '5212', 'مصروفات متنوعة', 'expense', 'g52'),
+    acc('e_dep', '5290', 'مصروف الإهلاك', 'expense', 'g52', S),
   ];
 }
 
@@ -193,8 +199,9 @@ export function descendantIds(db, id) {
 export function nextAccountCode(db, parentId) {
   const parent = (db.accounts || []).find((a) => a.id === parentId);
   const base = parent ? String(parent.code) : '';
-  const codes = (db.accounts || []).filter((a) => a.parent === parentId).map((a) => Number(a.code)).filter(Number.isFinite);
-  if (codes.length) return String(Math.max(...codes) + 1);
+  // أول رمز غير مستخدم بعد أصغر رمز بين الإخوة (حسابات النظام مثل 1150 لا تقفز بالترقيم)
+  const codes = new Set((db.accounts || []).filter((a) => a.parent === parentId).map((a) => Number(a.code)).filter(Number.isFinite));
+  if (codes.size) { let c = Math.min(...codes); while (codes.has(c)) c++; return String(c); }
   return base + (base.length >= 2 ? '01' : '1');
 }
 
@@ -213,7 +220,35 @@ export const DOC_TYPES = {
   transfer: { name: 'تحويل بين الحسابات', plural: 'التحويلات', prefix: 'TR-' },
   journal: { name: 'قيد يومية', plural: 'قيود اليومية', prefix: 'JV-' },
   adjust: { name: 'تسوية مخزون', plural: 'تسويات المخزون', prefix: 'ADJ-' },
+  sorder: { name: 'أمر بيع', plural: 'أوامر البيع', prefix: 'SO-', party: 'customer', lines: true, order: true },
+  porder: { name: 'أمر شراء', plural: 'أوامر الشراء', prefix: 'PO-', party: 'supplier', lines: true, order: true },
+  // قيود يولّدها البرنامج من سجلات أخرى (لا تُحفظ كمستندات)
+  depreciation: { name: 'إهلاك الأصول', plural: 'قيود الإهلاك', prefix: 'DEP-', virtual: true },
+  disposal: { name: 'استبعاد أصل', plural: 'استبعاد الأصول', prefix: 'DSP-', virtual: true },
+  chqclear: { name: 'تحصيل شيك', plural: 'تحصيل الشيكات', prefix: 'CHQ-', virtual: true },
+  chqbounce: { name: 'شيك مرتجع', plural: 'الشيكات المرتجعة', prefix: 'BNC-', virtual: true },
 };
+// مستندات بلا قيد: عروض الأسعار والأوامر
+export const NO_POSTING = ['quote', 'sorder', 'porder'];
+
+// معامل الوحدة في البند: الكرتون = 12 حبة مثلاً؛ المخزون دائماً بالوحدة الأساسية
+export const lineFactor = (l) => (num(l && l.factor) > 0 ? num(l.factor) : 1);
+
+// الشيك المؤجل: سند بشيك تاريخ استحقاقه لاحق، يمر عبر حساب الشيكات حتى يُحصَّل
+export const isPdc = (d) => (d.type === 'receipt' || d.type === 'payment') && d.method === 'cheque' && !!d.pdc;
+
+// مبلغ المستند لسجل التعديلات والملخصات
+export function docAmount(d, dec = 2) {
+  if (!d) return 0;
+  if (DOC_TYPES[d.type]?.lines) return calcDoc(d, dec).total;
+  if (d.type === 'expense') return calcDoc(expenseAsDoc(d), dec).total;
+  if (d.type === 'journal') return round((d.lines || []).reduce((t, l) => t + num(l.dr), 0), dec);
+  if (d.type === 'adjust') return 0;
+  return round(num(d.amount), dec);
+}
+
+// الفترة المقفلة: لا إضافة ولا تعديل ولا حذف لمستند تاريخه حتى تاريخ القفل
+export const isLockedDate = (settings, date) => !!(settings && isDate(settings.lockDate) && isDate(date) && date <= settings.lockDate);
 
 export function docNo(d, S = {}) {
   if (!d) return '';
@@ -271,14 +306,59 @@ export function docOrder(a, b) {
     || String(a.id).localeCompare(String(b.id));
 }
 
+// ═══ الأصول الثابتة: جدول الإهلاك بالقسط الثابت شهرياً ═══
+// الأصل القائم قبل بداية التشغيل: يدخل القيد الافتتاحي بتكلفته ومجمع إهلاكه السابق، ويُكمل إهلاك باقي عمره
+export function assetSchedule(a, { startDate = '', dec = 2 } = {}) {
+  const R = (x) => round(x, dec);
+  const cost = R(num(a.cost));
+  const salvage = Math.min(R(num(a.salvage)), cost);
+  const life = Math.max(1, Math.round(num(a.life)) || 1);
+  const out = { rows: [], monthly: 0, prior: 0, preStart: false };
+  if (!isDate(a.date) || !(cost > 0)) return out;
+  let first = monthStart(a.date);
+  let used = 0;
+  if (isDate(startDate) && a.date < startDate) {
+    out.preStart = true;
+    first = monthStart(startDate);
+    used = Math.max(0, monthsBetween(monthStart(a.date), first));
+    out.prior = Math.min(R(Math.max(0, num(a.priorDep))), R(cost - salvage));
+  }
+  const months = Math.max(0, life - used);
+  const remaining = R(cost - salvage - out.prior);
+  if (!months || !(remaining > 0)) return out;
+  out.monthly = R(remaining / months);
+  let accum = out.prior, left = remaining;
+  for (let i = 0; i < months; i++) {
+    const m = addMonths(first, i);
+    const amount = i === months - 1 ? left : Math.min(out.monthly, left);
+    left = R(left - amount); accum = R(accum + amount);
+    out.rows.push({ month: m.slice(0, 7), date: monthEnd(m), amount, acc: accum, nbv: R(cost - accum) });
+  }
+  return out;
+}
+
+// الإهلاك المتراكم لأصل حتى تاريخ (مع مراعاة الاستبعاد)
+export function assetAccum(a, sched, asOf) {
+  const cut = a.disposed && isDate(a.disposed.date) ? a.disposed.date : null;
+  let accum = sched.prior;
+  for (const r of sched.rows) {
+    if (r.date > asOf || (cut && r.date >= cut)) break;
+    accum = r.acc;
+  }
+  return accum;
+}
+
 // ═══ بناء الدفاتر: القيود، المخزون، أرصدة العملاء والموردين ═══
-export function buildBooks(db) {
+export function buildBooks(db, opts = {}) {
+  const today = opts.today || ymd(new Date());
   const S = db.settings || {};
   const dec = currencyInfo(S.currency).dec;
   const R = (x) => round(x, dec);
   const accounts = accountMap(db);
   const products = new Map((db.products || []).map((p) => [p.id, p]));
   const parties = new Map((db.parties || []).map((p) => [p.id, p]));
+  const assets = (db.assets || []).filter((a) => a && a.id && accounts.has(a.account));
+  const schedules = new Map(assets.map((a) => [a.id, assetSchedule(a, { startDate: S.startDate, dec })]));
 
   const postings = [];
   const entries = new Map();
@@ -407,6 +487,13 @@ export function buildBooks(db) {
       stockIn(p, q, val, d, -1);
       add('inv', val, 'dr', { memo: 'مخزون أول المدة' });
     }
+    // الأصول الثابتة القائمة قبل بداية التشغيل: التكلفة ومجمع الإهلاك السابق
+    for (const a of assets) {
+      const sc = schedules.get(a.id);
+      if (!sc.preStart) continue;
+      add(a.account, num(a.cost), 'dr', { memo: a.name });
+      add('accdep', sc.prior, 'cr', { memo: 'مجمع إهلاك ' + a.name });
+    }
     const dr = cur.lines.reduce((s, l) => s + l.dr, 0);
     const cr = cur.lines.reduce((s, l) => s + l.cr, 0);
     add('cap', dr - cr, 'cr', { memo: 'رأس المال الافتتاحي' });
@@ -431,7 +518,7 @@ export function buildBooks(db) {
     const costs = (d.lines || []).map((l, i) => {
       const p = products.get(l.product);
       if (!p || p.type !== 'stock' || !(num(l.qty) > 0)) return null;
-      const c = stockOut(p, num(l.qty), d, i);
+      const c = stockOut(p, qround(num(l.qty) * lineFactor(l)), d, i);
       add('cogs', c.cost, 'dr'); add('inv', c.cost, 'cr');
       return c;
     });
@@ -459,7 +546,7 @@ export function buildBooks(db) {
     const refCosts = ref ? lineCosts.get(ref.id) || [] : [];
     const costs = (d.lines || []).map((l, i) => {
       const p = products.get(l.product);
-      const q = num(l.qty);
+      const q = qround(num(l.qty) * lineFactor(l));
       if (!p || p.type !== 'stock' || !(q > 0)) return null;
       const j = ref ? (ref.lines || []).findIndex((x, k) => x.product === l.product && refCosts[k]) : -1;
       const unit = j >= 0 ? refCosts[j].unit : unitOf(st(p.id), p);
@@ -483,7 +570,7 @@ export function buildBooks(db) {
       const p = products.get(l.product);
       if (p && p.type === 'stock' && L.qty > 0) {
         add('inv', L.net, 'dr');
-        const variance = stockIn(p, L.qty, L.net, d, i);
+        const variance = stockIn(p, qround(L.qty * lineFactor(l)), L.net, d, i);
         if (variance) { add('cogs', variance, 'dr'); add('inv', variance, 'cr'); }
       } else add('cogs', L.net, 'dr');
     });
@@ -517,7 +604,7 @@ export function buildBooks(db) {
       const p = products.get(l.product);
       if (p && p.type === 'stock' && L.qty > 0) {
         add('inv', L.net, 'cr');
-        const residue = stockOutAt(p, L.qty, L.net, d, i);
+        const residue = stockOutAt(p, qround(L.qty * lineFactor(l)), L.net, d, i);
         if (residue) { add('cogs', residue, 'dr'); add('inv', residue, 'cr'); }
       } else add('cogs', L.net, 'cr');
     });
@@ -549,13 +636,56 @@ export function buildBooks(db) {
     return { acc: d.account, party: null };
   }
 
+  // الشيك المؤجل يمر عبر «شيكات تحت التحصيل» (للقبض) أو «شيكات مؤجلة الدفع» (للصرف)
+  const holdOf = (d) => (d.type === 'receipt' ? 'chq_in' : 'chq_out');
   function postVoucher(d) {
     const amt = R(num(d.amount));
     const c = counterOf(d);
     const o = c.party ? { party: c.party, key: d.id, link: d.link || null } : {};
+    const via = isPdc(d) ? holdOf(d) : d.money;
     begin(d);
-    if (d.type === 'receipt') { add(d.money, amt, 'dr'); add(c.acc, amt, 'cr', o); }
-    else { add(c.acc, amt, 'dr', o); add(d.money, amt, 'cr'); }
+    if (d.type === 'receipt') { add(via, amt, 'dr'); add(c.acc, amt, 'cr', o); }
+    else { add(c.acc, amt, 'dr', o); add(via, amt, 'cr'); }
+    commit();
+  }
+  // تحصيل الشيك: ينتقل المبلغ إلى البنك في تاريخ التحصيل
+  function postChequeClear(v) {
+    const d = v.src;
+    const amt = R(num(d.amount));
+    begin(v);
+    if (d.type === 'receipt') { add(d.money, amt, 'dr'); add(holdOf(d), amt, 'cr'); }
+    else { add(holdOf(d), amt, 'dr'); add(d.money, amt, 'cr'); }
+    commit();
+  }
+  // الشيك المرتجع: يعود المبلغ ديناً على الطرف (أو على الحساب المقابل)
+  function postChequeBounce(v) {
+    const d = v.src;
+    const amt = R(num(d.amount));
+    const c = counterOf(d);
+    const o = c.party ? { party: c.party, key: v.id, memo: 'شيك مرتجع رقم ' + (d.chequeNo || '') } : { memo: 'شيك مرتجع' };
+    begin(v);
+    if (d.type === 'receipt') { add(c.acc, amt, 'dr', o); add(holdOf(d), amt, 'cr'); }
+    else { add(holdOf(d), amt, 'dr'); add(c.acc, amt, 'cr', o); }
+    commit();
+  }
+
+  // الإهلاك الشهري لكل الأصول في قيد واحد بنهاية الشهر
+  function postDepreciation(v) {
+    begin(v);
+    for (const it of v.items) { add('e_dep', it.amount, 'dr', { memo: it.asset.name }); add('accdep', it.amount, 'cr', { memo: it.asset.name }); }
+    commit();
+  }
+  // استبعاد أصل (بيع أو إتلاف): إلغاء التكلفة ومجمع الإهلاك، والفرق ربح أو خسارة
+  function postDisposal(v) {
+    const a = v.asset;
+    const cost = R(num(a.cost));
+    const accum = assetAccum(a, schedules.get(a.id), v.date);
+    const proceeds = R(Math.max(0, num(a.disposed.proceeds)));
+    begin(v);
+    add('accdep', accum, 'dr', { memo: a.name });
+    if (proceeds) add(accounts.has(a.disposed.money) ? a.disposed.money : 'cash', proceeds, 'dr');
+    add(a.account, cost, 'cr', { memo: a.name });
+    add('assetgl', R(proceeds + accum - cost), 'cr', { memo: a.name });
     commit();
   }
 
@@ -602,8 +732,31 @@ export function buildBooks(db) {
   const handlers = {
     opening: postOpening, sale: postSale, sreturn: postSalesReturn, purchase: postPurchase, preturn: postPurchaseReturn,
     expense: postExpense, receipt: postVoucher, payment: postVoucher, transfer: postTransfer, journal: postJournal, adjust: postAdjust,
+    chqclear: postChequeClear, chqbounce: postChequeBounce, depreciation: postDepreciation, disposal: postDisposal,
   };
-  const docs = [opening, ...(db.docs || []).filter((d) => handlers[d.type] && d.type !== 'opening')].sort(docOrder);
+  // قيود مشتقة: تحصيل الشيكات وارتجاعها، والإهلاك الشهري، واستبعاد الأصول
+  const virtual = [];
+  for (const d of db.docs || []) {
+    if (!isPdc(d)) continue;
+    if (isDate(d.cleared)) virtual.push({ id: d.id + ':clr', type: 'chqclear', no: d.no, date: d.cleared, createdAt: d.createdAt, src: d, party: d.party || null, notes: 'تحصيل شيك رقم ' + (d.chequeNo || '') });
+    else if (isDate(d.bounced)) virtual.push({ id: d.id + ':bnc', type: 'chqbounce', no: d.no, date: d.bounced, createdAt: d.createdAt, src: d, party: d.party || null, notes: 'شيك مرتجع رقم ' + (d.chequeNo || '') });
+  }
+  const depMonths = new Map();
+  for (const a of assets) {
+    const sc = schedules.get(a.id);
+    const cut = a.disposed && isDate(a.disposed.date) ? a.disposed.date : null;
+    for (const r of sc.rows) {
+      if (r.date > today || (cut && r.date >= cut)) break;
+      if (!depMonths.has(r.month)) depMonths.set(r.month, []);
+      depMonths.get(r.month).push({ asset: a, amount: r.amount });
+    }
+    if (cut) virtual.push({ id: 'disp:' + a.id, type: 'disposal', no: a.no || 0, date: cut, createdAt: cut + 'T23:59:59', asset: a, href: '#/assets/' + a.id, notes: 'استبعاد ' + a.name });
+  }
+  for (const [m, items] of depMonths) {
+    const date = monthEnd(m + '-01');
+    virtual.push({ id: 'dep:' + m, type: 'depreciation', no: Number(m.replace('-', '')), date, createdAt: date + 'T23:59:58', items, href: '#/assets', notes: 'إهلاك الأصول الثابتة ' + m });
+  }
+  const docs = [opening, ...(db.docs || []).filter((d) => handlers[d.type] && d.type !== 'opening' && !DOC_TYPES[d.type]?.virtual), ...virtual].sort(docOrder);
   for (const d of docs) handlers[d.type](d);
 
   // ── مطابقة الدفعات مع الفواتير: الربط الصريح أولاً ثم الأقدم فالأقدم ──
@@ -646,7 +799,7 @@ export function buildBooks(db) {
     }
   }
 
-  return { dec, postings, entries, totals, lineCosts, stock, moves, partyItems, remaining, applications, partyBalance, openItems, status, issues };
+  return { dec, today, postings, entries, totals, lineCosts, stock, moves, partyItems, remaining, applications, partyBalance, openItems, status, issues, schedules };
 }
 
 export function matchItems(list, R = (x) => round(x, 2)) {
@@ -921,7 +1074,7 @@ export function salesAnalysis(db, books, { from, to } = {}) {
       const name = products.get(l.product)?.name || l.desc || 'بند';
       let r = byProduct.get(key);
       if (!r) byProduct.set(key, r = { key, name, product: products.get(l.product) || null, qty: 0, net: 0, cost: 0 });
-      r.qty += sg * L.qty; r.net += sg * L.net; r.cost += sg * c;
+      r.qty += sg * L.qty * lineFactor(l); r.net += sg * L.net; r.cost += sg * c;
       net += sg * L.net; cost += sg * c;
     });
     const pk = d.party && parties.has(d.party) ? d.party : '_cash';
@@ -945,6 +1098,33 @@ export function cashReport(db, books, { from, to } = {}) {
   });
   const sum = (k) => round(rows.reduce((s, r) => s + r[k], 0), books.dec);
   return { rows, totals: { open: sum('open'), in: sum('in'), out: sum('out'), close: sum('close') } };
+}
+
+// ═══ تقدير الزكاة للاسترشاد ═══
+// صافي الأصول المتداولة الزكوية ناقص الالتزامات المستحقة (الأنسب للمحلات التجارية)
+export const ZAKAT_RATE = { hijri: 2.5, gregorian: 2.5776 };
+export function zakatEstimate(db, books, { to, calendar = 'hijri' } = {}) {
+  const dec = books.dec;
+  const R = (x) => round(x, dec);
+  const m = balances(books, { to });
+  const bal = (id) => (m.get(id) || { close: 0 }).close;
+  const sum = (xs) => R(xs.reduce((t, x) => t + x.amount, 0));
+  const assets = [
+    { key: 'cash', name: 'النقدية في الصندوق والبنوك', amount: R(moneyAccounts(db).reduce((t, a) => t + bal(a.id), 0)) },
+    { key: 'ar', name: 'ذمم العملاء', amount: R(Math.max(0, bal('ar'))) },
+    { key: 'chq_in', name: 'شيكات تحت التحصيل', amount: R(Math.max(0, bal('chq_in'))) },
+    { key: 'inv', name: 'المخزون (بالتكلفة)', amount: R(Math.max(0, bal('inv'))) },
+  ];
+  const liabilities = [
+    { key: 'ap', name: 'ذمم الموردين', amount: R(Math.max(0, -bal('ap'))) },
+    { key: 'vat', name: 'ضريبة مستحقة للهيئة', amount: R(Math.max(0, -(bal('vout') + bal('vin') + bal('vdue')))) },
+    { key: 'wages', name: 'رواتب مستحقة', amount: R(Math.max(0, -bal('wages'))) },
+    { key: 'chq_out', name: 'شيكات مؤجلة الدفع', amount: R(Math.max(0, -bal('chq_out'))) },
+    { key: 'loans', name: 'القروض والتمويل', amount: R(Math.max(0, -bal('loans'))) },
+  ];
+  const base = R(sum(assets) - sum(liabilities));
+  const rate = ZAKAT_RATE[calendar] || ZAKAT_RATE.hijri;
+  return { assets, liabilities, totalAssets: sum(assets), totalLiabilities: sum(liabilities), base, rate, zakat: base > 0 ? R(base * rate / 100) : 0 };
 }
 
 // ملخص لوحة التحكم
@@ -1019,8 +1199,9 @@ export function validateDoc(db, d) {
   const isMoney = (id) => !!leaf(id)?.money;
   const party = (db.parties || []).find((p) => p.id === d.party);
   const T = DOC_TYPES[d.type];
-  if (!T) return { type: 'نوع مستند غير معروف' };
+  if (!T || T.virtual) return { type: 'نوع مستند غير معروف' };
   if (!isDate(d.date)) e.date = 'اختر تاريخاً صحيحاً';
+  else if (isLockedDate(db.settings, d.date)) e.date = `الفترة مقفلة حتى ${db.settings.lockDate}. اختر تاريخاً بعده`;
   const dec = currencyInfo(db.settings?.currency).dec;
   const payRules = (total, kind) => {
     let paid = 0;
@@ -1041,15 +1222,17 @@ export function validateDoc(db, d) {
     if (!lines.length) e.lines = 'أضف بنداً واحداً على الأقل';
     lines.forEach((l, i) => {
       if (!(num(l.qty) > 0)) e['qty' + i] = 'الكمية أكبر من صفر';
+      if (l.factor != null && l.factor !== '' && !(num(l.factor) > 0)) e['qty' + i] = 'معامل الوحدة غير صحيح';
       if (num(l.price) < 0) e['price' + i] = 'السعر لا يكون سالباً';
       if (num(l.disc) < 0 || num(l.disc) > 100) e['disc' + i] = 'الخصم بين 0 و 100';
       if (!l.product && !String(l.desc || '').trim()) e['desc' + i] = 'اختر منتجاً أو اكتب وصفاً';
     });
     if (d.party && (!party || party.kind !== T.party)) e.party = T.party === 'customer' ? 'اختر عميلاً صحيحاً' : 'اختر مورداً صحيحاً';
-    if (d.type !== 'quote') payRules(calcDoc(d, dec).total, T.party);
+    if (T.order && !d.party) e.party = T.party === 'customer' ? 'اختر العميل' : 'اختر المورد';
+    if (!NO_POSTING.includes(d.type)) payRules(calcDoc(d, dec).total, T.party);
   } else if (d.type === 'expense') {
     const a = leaf(d.account);
-    if (!a || !['expense', 'asset'].includes(a.type) || a.money || ['ar', 'ap', 'inv', 'vin'].includes(a.id)) e.account = 'اختر بند المصروف';
+    if (!a || !['expense', 'asset'].includes(a.type) || a.money || ['ar', 'ap', 'inv', 'vin', 'chq_in', 'accdep'].includes(a.id)) e.account = 'اختر بند المصروف';
     if (!(num(d.amount) > 0)) e.amount = 'اكتب المبلغ';
     if (d.party && (!party || party.kind !== 'supplier')) e.party = 'اختر مورداً صحيحاً';
     payRules(calcDoc(expenseAsDoc(d), dec).total, 'supplier');
@@ -1062,6 +1245,12 @@ export function validateDoc(db, d) {
       if (!a) e.account = 'اختر الحساب';
       else if (['ar', 'ap', 'inv'].includes(a.id)) e.account = a.id === 'inv' ? 'حركة المخزون تكون من المشتريات أو التسويات' : 'اختر العميل أو المورد بدلاً من الحساب الإجمالي';
       else if (a.id === d.money) e.account = 'الحساب نفس حساب النقدية';
+      else if (['chq_in', 'chq_out'].includes(a.id)) e.account = 'حساب الشيكات يُدار من صفحة الشيكات';
+    }
+    if (isPdc(d)) {
+      if (!isDate(d.chequeDue)) e.chequeDue = 'اكتب تاريخ استحقاق الشيك';
+      if (isDate(d.cleared) && d.cleared < d.date) e.chequeDue = 'تاريخ التحصيل قبل تاريخ السند';
+      if (isDate(d.bounced) && d.bounced < d.date) e.chequeDue = 'تاريخ الارتجاع قبل تاريخ السند';
     }
   } else if (d.type === 'transfer') {
     if (!isMoney(d.from)) e.from = 'اختر الحساب المحوَّل منه';

@@ -1,19 +1,21 @@
 // ═══ المصروفات، سندات القبض والصرف، والتحويلات بين الصندوق والبنوك ═══
 import * as store from '../store.js';
-import { calcDoc, expenseAsDoc, docNo, DOC_TYPES, validateDoc, num, round, nextAccountCode, tafqeet } from '../core.js';
+import { calcDoc, expenseAsDoc, docNo, DOC_TYPES, validateDoc, num, round, nextAccountCode, tafqeet, isPdc } from '../core.js';
 import { html, raw, money, fmtDate, toast, confirmBox, combo, showErrors, empty, norm, $, $$, exportTable, moneyText, field } from '../ui.js';
 import { go, guard, setTitle, docHref, partyHref, SEG } from '../nav.js';
 import {
   head, bindRows, today, S, dec, taxLabel, partyName, accName, periodOf, periodBar, bindPeriod, inPeriod,
   moneyList, moneyOptions, partyItems, accountItems, quickParty, taxOptions, voucherPaper, printPaper, entryTable, waLink, csvName, METHODS,
+  docLocked, lockedNote, lockedPage,
 } from './common.js';
+import { repeatDialog } from './recurring.js';
 
 const NEW = { expense: 'مصروف جديد', receipt: 'سند قبض جديد', payment: 'سند صرف جديد', transfer: 'تحويل جديد' };
 const ICON = { expense: '💸', receipt: '📥', payment: '📤', transfer: '🔁' };
 const clone = (x) => JSON.parse(JSON.stringify(x));
 
-const expenseAccount = (a) => (a.type === 'expense' || a.type === 'asset') && !a.money && !['ar', 'ap', 'inv', 'vin', 'cogs'].includes(a.id);
-const otherAccount = (a) => !a.money && !['ar', 'ap', 'inv'].includes(a.id);
+const expenseAccount = (a) => (a.type === 'expense' || a.type === 'asset') && !a.money && !['ar', 'ap', 'inv', 'vin', 'cogs', 'chq_in', 'accdep'].includes(a.id);
+const otherAccount = (a) => !a.money && !['ar', 'ap', 'inv', 'chq_in', 'chq_out'].includes(a.id);
 
 function amountOf(d, B) {
   if (d.type === 'expense') return (B.totals.get(d.id) || calcDoc(expenseAsDoc(d), dec())).total;
@@ -96,6 +98,7 @@ export function form(type, ctx) {
   const { root, params } = ctx;
   const existing = params.id ? store.findDoc(params.id) : null;
   if (params.id && (!existing || existing.type !== type)) { root.innerHTML = String(empty('🔎', 'المستند غير موجود')); return; }
+  if (existing && docLocked(existing)) { setTitle(DOC_TYPES[type].name); root.innerHTML = String(lockedPage(existing)); return; }
   const title = existing ? `تعديل ${DOC_TYPES[type].name} ${docNo(existing, S())}` : NEW[type];
   setTitle(title);
   if (type === 'expense') return expenseForm(ctx, existing, title);
@@ -123,8 +126,8 @@ function expenseForm({ root, query }, existing, title) {
   const s = S();
   const db = store.getDb();
   const d = existing ? clone(existing) : {
-    type: 'expense', date: today(), account: query.account || '', amount: '', tax: 'S', inclusive: true,
-    vatRate: s.vat ? num(s.vatRate) : 0, party: query.party || null, payee: '', paid: 0, payAcc: 'cash', ref: '', notes: '',
+    type: 'expense', date: today(), account: query.account || '', amount: query.amount ? num(query.amount) : '', tax: 'S', inclusive: !query.amount,
+    vatRate: s.vat ? num(s.vatRate) : 0, party: query.party || null, payee: '', paid: 0, payAcc: 'cash', ref: '', notes: query.notes || '',
   };
   const showTax = !!s.vat || num(d.vatRate) > 0;
   if (!showTax) d.vatRate = 0;
@@ -230,6 +233,12 @@ function voucherForm(type, { root, query }, existing, title) {
       <label class="fld"><span class="fld-l">${isR ? 'أودع في' : 'صُرف من'}</span><select class="inp" data-f="money" data-k="money">${moneyOptions(d.money)}</select><small class="fld-e" data-err="money" hidden></small></label>
       <label class="fld"><span class="fld-l">طريقة الدفع</span><select class="inp" data-k="method">${Object.entries(METHODS).map(([k, v]) => html`<option value="${k}" ${k === d.method ? raw('selected') : ''}>${v}</option>`)}</select></label>
       ${field('رقم الشيك / المرجع', html`<input class="inp" data-k="chequeNo" value="${d.chequeNo || ''}" dir="auto">`)}
+      <div class="span-all" data-chq-box><div class="form-grid">
+        ${field('البنك المسحوب عليه', html`<input class="inp" data-k="chequeBank" value="${d.chequeBank || ''}" placeholder="مثال: البنك الأهلي">`)}
+        <div class="fld"><span class="fld-l">تاريخ استحقاق الشيك</span><input class="inp" type="date" data-f="chequeDue" data-k="chequeDue" value="${d.chequeDue || ''}"><small class="fld-e" data-err="chequeDue" hidden></small></div>
+        <label class="check" style="align-self:end;min-height:40px"><input type="checkbox" data-pdc ${d.pdc ? raw('checked') : ''}> شيك مؤجل (${isR ? 'يبقى تحت التحصيل' : 'يبقى مستحق الدفع'} حتى تاريخه)</label>
+        <p class="muted small span-all">الشيك المؤجل لا يدخل ${isR ? 'البنك' : 'حركة البنك'} إلا عند تحصيله من صفحة <a href="#/cheques">الشيكات</a>.</p>
+      </div></div>
       <div class="span-all">${field('البيان', html`<textarea class="inp" data-k="notes" rows="2" placeholder="${isR ? 'مثال: دفعة من حساب فاتورة…' : 'مثال: سداد فاتورة…'}">${d.notes || ''}</textarea>`)}</div>
       <div class="span-all muted small" data-words></div>
     </div></div>`));
@@ -284,11 +293,17 @@ function voucherForm(type, { root, query }, existing, title) {
     onType: () => { d.account = ''; dirty(); },
     onPick: (it) => { d.account = it.value; $('[data-acc]', root).value = it.label; dirty(); },
   });
+  const chq = () => { $('[data-chq-box]', root).hidden = d.method !== 'cheque'; };
   root.addEventListener('input', (e) => {
     const k = e.target.dataset.k;
     if (!k) return;
     d[k] = e.target.value; dirty();
     if (k === 'amount') words();
+  });
+  root.addEventListener('change', (e) => {
+    if (e.target.matches('[data-pdc]')) { d.pdc = e.target.checked; dirty(); }
+    if (e.target.dataset.k === 'method') chq();
+    if (e.target.dataset.k === 'chequeDue' && d.chequeDue) { d.pdc = d.chequeDue > d.date; $('[data-pdc]', root).checked = d.pdc; }
   });
   root.addEventListener('change', (e) => {
     const k = e.target.dataset.k;
@@ -308,6 +323,8 @@ function voucherForm(type, { root, query }, existing, title) {
   $('[data-form]', root).onsubmit = (e) => { e.preventDefault(); save('view'); };
   function save(after) {
     const doc = { ...d, amount: round(num(d.amount), dec()), notes: String(d.notes || '').trim(), party: mode === 'account' ? null : d.party, account: mode === 'account' ? d.account : '' };
+    if (doc.method !== 'cheque') { for (const k of ['pdc', 'chequeDue', 'chequeBank', 'cleared', 'bounced']) delete doc[k]; }
+    else if (!doc.pdc) { delete doc.cleared; delete doc.bounced; }
     if (mode !== 'account' && !doc.party) { showErrors(root, { party: mode === 'customer' ? 'اختر العميل' : 'اختر المورد' }); toast('راجع الحقول المظللة', 'err'); return; }
     if (!doc.party) doc.link = null;
     if (!showErrors(root, validateDoc(store.getDb(), doc))) { toast('راجع الحقول المظللة', 'err'); return; }
@@ -316,6 +333,7 @@ function voucherForm(type, { root, query }, existing, title) {
   }
   drawMode();
   words();
+  chq();
 }
 
 // ── التحويل ──
@@ -357,6 +375,9 @@ export function show(type, { root, params, query }) {
   const apps = B.applications.get(d.id) || [];
   const st = B.status.get(d.id);
   const amount = amountOf(d, B);
+  const locked = docLocked(d);
+  const pdc = isPdc(d);
+  const chqState = pdc ? (d.cleared ? ['ok', `حُصّل ${fmtDate(d.cleared)}`] : d.bounced ? ['bad', `مرتجع ${fmtDate(d.bounced)}`] : ['warn', `مؤجل حتى ${fmtDate(d.chequeDue)}`]) : null;
 
   root.innerHTML = String(html`
     ${head(`${T.name} ${no}`, {
@@ -364,9 +385,13 @@ export function show(type, { root, params, query }) {
       actions: html`<button class="btn btn-primary" data-print>🖨️ طباعة / PDF</button>
         ${type === 'receipt' && party ? html`<button class="btn btn-ghost" data-wa>💬 واتساب</button>` : ''}
         ${party ? html`<a class="btn btn-ghost" href="${partyHref(party)}">👤 كشف الحساب</a>` : ''}
-        <a class="btn btn-ghost" href="#/${SEG[type]}/${d.id}/edit">✏️ تعديل</a>
-        <button class="btn btn-text-danger" data-del>🗑️ حذف</button>`,
+        ${pdc ? html`<a class="btn btn-ghost" href="#/cheques">🧾 الشيكات</a>` : ''}
+        <button class="btn btn-ghost" data-repeat>♻️ تكرار</button>
+        ${locked ? '' : html`<a class="btn btn-ghost" href="#/${SEG[type]}/${d.id}/edit">✏️ تعديل</a>
+        <button class="btn btn-text-danger" data-del>🗑️ حذف</button>`}`,
     })}
+    ${locked ? lockedNote(d) : ''}
+    ${chqState ? html`<p class="note note-${chqState[0] === 'ok' ? 'ok' : chqState[0] === 'bad' ? 'bad' : 'warn'}" style="margin-bottom:12px">🧾 شيك رقم ${d.chequeNo || '—'}: ${chqState[1]}</p>` : ''}
     ${type === 'expense' && st && st.due > 0 ? html`<p class="note note-warn" style="margin-bottom:12px">مصروف آجل: المتبقي للمورد ${money(st.due, { sym: true })}. <a href="#/payments/new?party=${d.party}&link=${d.id}&amount=${st.due}">سجّل السداد</a></p>` : ''}
     <div class="paper-wrap">${voucherPaper(d)}</div>
     ${apps.length ? html`<div class="card" style="margin-top:14px"><div class="card-h"><h3>${type === 'expense' ? 'التسديدات' : 'خُصم من'}</h3>${st && st.open ? html`<span class="muted small">غير مخصص: ${money(st.open, { sym: true })}</span>` : ''}</div><div class="list-mini">
@@ -388,7 +413,9 @@ export function show(type, { root, params, query }) {
     const text = [`سند قبض رقم ${no}`, `التاريخ: ${fmtDate(d.date)}`, `استلمنا من: ${party.name}`, `المبلغ: ${moneyText(amount)}`, `الرصيد المتبقي عليكم: ${moneyText(bal)}`, '', `مع تحيات ${s.name || ''}`].join('\n');
     window.open(waLink(party.phone, text), '_blank', 'noopener');
   };
-  $('[data-del]', root).onclick = async () => {
+  $('[data-repeat]', root).onclick = () => repeatDialog(d);
+  const del = $('[data-del]', root);
+  if (del) del.onclick = async () => {
     if (!(await confirmBox(`سيتم حذف ${T.name} ${no} نهائياً مع قيده.`, { ok: 'حذف نهائي', danger: true, title: 'حذف المستند' }))) return;
     store.deleteDoc(d.id);
     toast('تم الحذف');

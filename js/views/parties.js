@@ -3,7 +3,7 @@ import * as store from '../store.js';
 import { docNo, DOC_TYPES, num, partyStatement, validSaudiVat, daysBetween, calcDoc } from '../core.js';
 import { html, raw, money, fmtDate, toast, confirmBox, showErrors, empty, norm, $, exportTable, moneyText, field, badge, attr } from '../ui.js';
 import { go, guard, setTitle, docHref, withQuery } from '../nav.js';
-import { head, bindRows, today, S, dec, periodOf, periodBar, bindPeriod, periodLabel, printReport, waLink, csvName, docStatus } from './common.js';
+import { head, bindRows, today, S, dec, periodOf, periodBar, bindPeriod, periodLabel, printReport, waLink, csvName, docStatus, docOf } from './common.js';
 
 const WORDS = {
   customer: { one: 'عميل', plural: 'العملاء', seg: 'customers', icon: '👥', newDoc: ['#/sales/new', '🧾 فاتورة مبيعات'], voucher: ['#/receipts/new', '📥 سند قبض'], balance: 'مستحق من العميل' },
@@ -18,7 +18,7 @@ export function list(kind, { root, query }) {
   const all = db.parties.filter((p) => p.kind === kind).sort((a, b) => a.name.localeCompare(b.name, 'ar'));
   const state = { q: query.q || '', only: query.only || '' };
   const overdueOf = (p) => (B.openItems.get(p.id) || []).filter((it) => it.side === 'c').reduce((t, it) => {
-    const d = store.findDoc(it.doc);
+    const d = docOf(it.doc, B);
     return d && d.dueDate && d.dueDate < today() ? t + it.open : t;
   }, 0);
 
@@ -111,7 +111,7 @@ export function show(kind, { root, params, query, path }) {
   const bal = B.partyBalance.get(p.id) || 0;
   const docs = db.docs.filter((d) => d.party === p.id).sort((a, b) => b.date.localeCompare(a.date));
   const open = (B.openItems.get(p.id) || []).filter((it) => it.side === 'c');
-  const late = open.reduce((t, it) => { const d = store.findDoc(it.doc); return d && d.dueDate && d.dueDate < today() ? t + it.open : t; }, 0);
+  const late = open.reduce((t, it) => { const d = docOf(it.doc, B); return d && d.dueDate && d.dueDate < today() ? t + it.open : t; }, 0);
   const salesType = kind === 'customer' ? 'sale' : 'purchase';
   const yearStart = today().slice(0, 4) + '-01-01';
   const volume = docs.filter((d) => d.type === salesType && d.date >= yearStart).reduce((t, d) => t + (B.totals.get(d.id)?.total || 0), 0);
@@ -138,7 +138,7 @@ export function show(kind, { root, params, query, path }) {
   if (tab === 'statement') {
     const st = partyStatement(db, B, p.id, per);
     const desc = (r) => {
-      const d = store.findDoc(r.doc);
+      const d = docOf(r.doc, B);
       if (r.doc === 'opening') return 'رصيد افتتاحي';
       if (!d) return r.memo || '';
       if (r.key && r.key.endsWith(':p')) return d.type === 'sale' || d.type === 'purchase' || d.type === 'expense' ? `دفعة على ${DOC_TYPES[d.type].name}` : 'رد نقدي للمرتجع';
@@ -148,7 +148,7 @@ export function show(kind, { root, params, query, path }) {
         <button class="btn btn-ghost btn-sm" data-print>🖨️ طباعة الكشف</button><button class="btn btn-ghost btn-sm" data-csv>⬇️ Excel</button></div>
       <div class="tbl-wrap"><table class="tbl" data-table><thead><tr><th>التاريخ</th><th>المستند</th><th class="hide-sm">البيان</th><th class="num">مدين</th><th class="num">دائن</th><th class="num">الرصيد</th></tr></thead>
       <tbody><tr class="grp"><td colspan="3">الرصيد السابق</td><td></td><td></td><td class="num">${money(st.opening)}</td></tr>
-      ${st.rows.map((r) => { const d = store.findDoc(r.doc); return html`<tr ${d ? attr('data-href', docHref(d)) : ''}><td class="nowrap">${fmtDate(r.date)}</td><td class="nowrap" dir="ltr">${d ? docNo(d, s) : 'افتتاحي'}</td><td class="hide-sm">${desc(r)}</td>
+      ${st.rows.map((r) => { const d = docOf(r.doc, B); return html`<tr ${d ? attr('data-href', docHref(d)) : ''}><td class="nowrap">${fmtDate(r.date)}</td><td class="nowrap" dir="ltr">${d ? docNo(d, s) : 'افتتاحي'}</td><td class="hide-sm">${desc(r)}</td>
         <td class="num">${r.dr ? money(r.dr) : ''}</td><td class="num">${r.cr ? money(r.cr) : ''}</td><td class="num"><b>${money(r.balance)}</b></td></tr>`; })}
       </tbody><tfoot><tr><td colspan="3">الإجمالي والرصيد الختامي</td><td class="num">${money(st.dr)}</td><td class="num">${money(st.cr)}</td><td class="num">${money(st.closing)}</td></tr></tfoot></table></div>
       <p class="tbl-note">${kind === 'customer' ? 'المدين: فواتير عليه. الدائن: دفعات ومرتجعات. الرصيد الموجب مستحق لكم.' : 'الدائن: فواتير له. المدين: دفعات ومرتجعات. الرصيد الموجب مستحق له.'}</p>`);
@@ -157,7 +157,7 @@ export function show(kind, { root, params, query, path }) {
     $('[data-csv]', box).onclick = () => exportTable($('[data-table]', box), csvName('كشف حساب ' + p.name));
   } else if (tab === 'open') {
     box.innerHTML = String(open.length ? html`<div class="tbl-wrap"><table class="tbl"><thead><tr><th>المستند</th><th>التاريخ</th><th>الاستحقاق</th><th class="num">المتبقي</th><th>التأخير</th></tr></thead><tbody>
-      ${open.map((it) => { const d = store.findDoc(it.doc); const dueOn = (d && d.dueDate) || it.date; const lateDays = daysBetween(dueOn, today());
+      ${open.map((it) => { const d = docOf(it.doc, B); const dueOn = (d && d.dueDate) || it.date; const lateDays = daysBetween(dueOn, today());
         return html`<tr ${d ? attr('data-href', docHref(d)) : ''}><td dir="ltr" class="nowrap">${d ? docNo(d, s) : 'رصيد افتتاحي'}</td><td>${fmtDate(it.date)}</td><td>${d && d.dueDate ? fmtDate(d.dueDate) : '—'}</td><td class="num"><b>${money(it.open)}</b></td>
           <td>${lateDays > 0 && d && d.dueDate ? html`<span class="badge badge-bad">${lateDays} يوم</span>` : html`<span class="badge badge-muted">غير متأخر</span>`}</td></tr>`; })}
       </tbody></table></div>` : empty('✅', 'لا توجد مبالغ غير مسددة'));

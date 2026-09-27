@@ -1,9 +1,9 @@
 // ═══ المنتجات والخدمات، بطاقة الصنف، وتسويات المخزون (الجرد) ═══
 import * as store from '../store.js';
-import { docNo, DOC_TYPES, num, round, validateDoc } from '../core.js';
+import { docNo, DOC_TYPES, num, round, validateDoc, lineFactor } from '../core.js';
 import { html, raw, money, qty, fmtDate, toast, confirmBox, combo, showErrors, empty, norm, $, $$, exportTable, field, attr } from '../ui.js';
 import { go, guard, setTitle, docHref } from '../nav.js';
-import { head, bindRows, today, S, dec, taxLabel, taxOptions, productItems, periodOf, periodBar, bindPeriod, inPeriod, entryTable, csvName, printPaper, cameraDialog } from './common.js';
+import { head, bindRows, today, S, dec, taxLabel, taxOptions, productItems, periodOf, periodBar, bindPeriod, inPeriod, entryTable, csvName, printPaper, cameraDialog, docLocked, lockedNote, lockedPage } from './common.js';
 import { makeStoreBarcode, isEan13, code128Supported, barcodeSVG } from '../barcode.js';
 
 const clone = (x) => JSON.parse(JSON.stringify(x));
@@ -84,6 +84,9 @@ export function productForm({ root, params, query = {} }) {
         ${field('سعر الشراء (التكلفة)', inp('cost', numAttrs), { hint: 'يُقترح في فواتير الشراء' })}
         ${s.vat ? field(taxLabel(), html`<select class="inp" data-k="tax">${taxOptions(p.tax || 'S')}</select>`) : ''}
       </div></div>
+      <div class="card"><div class="card-h"><h3>📦 وحدات بيع إضافية</h3><span class="muted small">مثل: كرتون = 12 من الوحدة الأساسية، بسعره وباركوده</span></div>
+        <div data-units></div><small class="fld-e" data-err="units" hidden></small>
+        <button type="button" class="btn btn-ghost btn-sm" data-unit-add style="margin-top:8px">➕ إضافة وحدة</button></div>
       <div class="card" data-stock-box><div class="card-h"><h3>المخزون</h3></div><div class="form-grid">
         ${field('الكمية الافتتاحية', inp('openQty', 'type="text" inputmode="decimal" data-num autocomplete="off"'), { hint: `الموجودة عندك في ${s.startDate ? fmtDate(s.startDate) : 'بداية التشغيل'}` })}
         ${field('تكلفة الوحدة الافتتاحية', inp('openCost', numAttrs))}
@@ -95,6 +98,24 @@ export function productForm({ root, params, query = {} }) {
     </form>`);
   const toggleStock = () => { $('[data-stock-box]', root).hidden = p.type !== 'stock'; };
   toggleStock();
+  p.units = Array.isArray(p.units) ? p.units.map((u) => ({ ...u })) : [];
+  const drawUnits = () => {
+    $('[data-units]', root).innerHTML = p.units.length ? String(html`<div class="unit-rows">
+      <div class="unit-row line-h"><span>اسم الوحدة</span><span>تحتوي</span><span>سعر البيع</span><span>الباركود</span><span></span></div>
+      ${p.units.map((u, i) => html`<div class="unit-row" data-u="${i}">
+        <input class="inp" data-uk="name" value="${u.name || ''}" placeholder="كرتون" aria-label="اسم الوحدة">
+        <input class="inp" data-uk="factor" type="text" inputmode="decimal" data-num value="${u.factor || ''}" placeholder="12" aria-label="تحتوي كم وحدة أساسية">
+        <input class="inp" data-uk="price" type="text" inputmode="decimal" data-num value="${u.price ?? ''}" placeholder="${num(u.factor) && num(p.price) ? round(num(u.factor) * num(p.price), dec()) : 'تلقائي'}" aria-label="سعر البيع">
+        <input class="inp" data-uk="barcode" dir="ltr" value="${u.barcode || ''}" placeholder="اختياري" aria-label="باركود الوحدة">
+        <button type="button" class="icon-btn" data-unit-del="${i}" aria-label="حذف">✕</button></div>`)}</div>`) : String(html`<p class="muted small">لا توجد وحدات إضافية. الوحدة الأساسية: ${p.unit || 'حبة'}.</p>`);
+  };
+  drawUnits();
+  root.addEventListener('input', (e) => { const row = e.target.closest('[data-u]'); if (row && e.target.dataset.uk) { p.units[Number(row.dataset.u)][e.target.dataset.uk] = e.target.value; guard.dirty = true; } });
+  root.addEventListener('click', (e) => {
+    if (e.target.closest('[data-unit-add]')) { p.units.push({ name: '', factor: '', price: '', barcode: '' }); drawUnits(); $$('[data-u] [data-uk="name"]', root).pop()?.focus(); }
+    const del = e.target.closest('[data-unit-del]');
+    if (del) { p.units.splice(Number(del.dataset.unitDel), 1); drawUnits(); guard.dirty = true; }
+  });
   root.addEventListener('input', (e) => { const k = e.target.dataset.k; if (k && k !== 'active') { p[k] = e.target.value; guard.dirty = true; } });
   root.addEventListener('change', (e) => {
     const k = e.target.dataset.k;
@@ -120,7 +141,17 @@ export function productForm({ root, params, query = {} }) {
     if (p.barcode && !isEan13(p.barcode) && !code128Supported(p.barcode)) errs.barcode = 'الباركود أرقام وحروف لاتينية فقط';
     else if (p.barcode && store.getDb().products.some((x) => x.id !== p.id && x.barcode === p.barcode)) errs.barcode = 'الباركود مستخدم لمنتج آخر';
     if (num(p.openQty) && !num(p.openCost) && !num(p.cost)) errs.openCost = 'اكتب تكلفة الوحدة للكمية الافتتاحية';
+    const units = p.units.filter((u) => String(u.name || '').trim() || num(u.factor)).map((u) => ({ name: String(u.name || '').trim(), factor: num(u.factor), price: u.price === '' || u.price == null ? '' : num(u.price), barcode: String(u.barcode || '').trim() }));
+    const codes = new Set(store.getDb().products.filter((x) => x.id !== p.id).flatMap((x) => [x.barcode, ...(x.units || []).map((u) => u.barcode)]).filter(Boolean));
+    if (p.barcode) codes.add(p.barcode);
+    for (const u of units) {
+      if (!u.name || !(u.factor > 0) || u.factor === 1) { errs.units = 'لكل وحدة اسم وعدد أكبر من 1 من الوحدة الأساسية'; break; }
+      if (u.name === (p.unit || 'حبة') || units.filter((x) => x.name === u.name).length > 1) { errs.units = `اسم الوحدة «${u.name}» مكرر`; break; }
+      if (u.barcode && (codes.has(u.barcode) || (!isEan13(u.barcode) && !code128Supported(u.barcode)))) { errs.units = `باركود الوحدة «${u.name}» مستخدم أو غير صالح`; break; }
+      if (u.barcode) codes.add(u.barcode);
+    }
     if (!showErrors(root, errs)) return;
+    p.units = units;
     const out = { ...p, price: num(p.price), cost: num(p.cost), openQty: p.type === 'stock' ? num(p.openQty) : 0, openCost: num(p.openCost) || num(p.cost), reorder: num(p.reorder), sku: String(p.sku || '').trim(), unit: String(p.unit || '').trim(), notes: String(p.notes || '').trim(), tax: p.tax || 'S',
       nameEn: String(p.nameEn || '').trim(), category: String(p.category || '').trim() };
     const saved = store.saveProduct(out);
@@ -154,7 +185,7 @@ export function productShow({ root, params, query, path }) {
     const T = B.totals.get(d.id);
     const costs = B.lineCosts.get(d.id) || [];
     const sg = d.type === 'sale' ? 1 : -1;
-    (d.lines || []).forEach((l, i) => { if (l.product !== p.id) return; soldQ += sg * T.lines[i].qty; soldNet += sg * T.lines[i].net; soldCost += sg * (costs[i] ? costs[i].cost : 0); });
+    (d.lines || []).forEach((l, i) => { if (l.product !== p.id) return; soldQ += sg * T.lines[i].qty * lineFactor(l); soldNet += sg * T.lines[i].net; soldCost += sg * (costs[i] ? costs[i].cost : 0); });
   }
   const margin = soldNet ? ((soldNet - soldCost) / soldNet) * 100 : 0;
   const moveName = (m) => (m.type === 'opening' ? 'رصيد أول المدة' : DOC_TYPES[m.type]?.name || '');
@@ -166,6 +197,7 @@ export function productShow({ root, params, query, path }) {
         ${p.type === 'stock' ? html`<a class="btn btn-ghost" href="#/purchases/new?product=${p.id}">🛒 شراء</a><a class="btn btn-ghost" href="#/adjustments/new?product=${p.id}">⚖️ تسوية</a>` : ''}
         <a class="btn btn-ghost" href="#/products/${p.id}/edit">✏️ تعديل</a><button class="btn btn-text-danger" data-del>🗑️ حذف</button>` })}
     ${p.barcode ? html`<div class="bc" style="margin-bottom:14px">${raw(barcodeSVG(p.barcode))}</div>` : ''}
+    ${(p.units || []).length ? html`<p class="muted small" style="margin-bottom:12px">الوحدات: ${p.unit || 'حبة'} (${money(p.price)})${p.units.map((u) => ` · ${u.name} = ${u.factor} (${money(u.price !== '' && u.price != null ? u.price : u.factor * num(p.price))})`)}</p>` : ''}
     <div class="grid g4" style="margin-bottom:14px">
       ${p.type === 'stock' ? html`<div class="kpi"><span class="kpi-l">الكمية المتوفرة</span><span class="kpi-v ${st.qty < 0 || (num(p.reorder) && st.qty <= num(p.reorder)) ? 'neg' : ''}">${qty(st.qty)} <small class="cur">${p.unit || ''}</small></span>${num(p.reorder) ? html`<span class="kpi-s">حد الطلب ${num(p.reorder)}</span>` : ''}</div>
         <div class="kpi"><span class="kpi-l">متوسط التكلفة</span><span class="kpi-v">${money(avgCost(p), { sym: true })}</span></div>
@@ -218,6 +250,7 @@ export function form(type, { root, params, query }) {
   const s = S();
   const existing = params.id ? store.findDoc(params.id) : null;
   if (params.id && (!existing || existing.type !== 'adjust')) { root.innerHTML = String(empty('🔎', 'المستند غير موجود')); return; }
+  if (existing && docLocked(existing)) { setTitle('تسوية مخزون'); root.innerHTML = String(lockedPage(existing)); return; }
   const d = existing ? clone(existing) : { type: 'adjust', date: today(), account: 'adj', notes: '', lines: [] };
   if (!existing && query.product) { const p = store.findProduct(query.product); if (p) d.lines.push({ product: p.id, qty: '', cost: '' }); }
   if (!d.lines.length) d.lines.push({ product: null, qty: '', cost: '' });
@@ -310,11 +343,13 @@ export function show(type, { root, params }) {
     ${(d.lines || []).map((l, i) => html`<tr><td>${store.findProduct(l.product)?.name || ''}</td><td class="num">${qty(l.qty)}</td><td class="num">${costs[i] ? money(costs[i].unit) : ''}</td><td class="num">${costs[i] ? money(Math.sign(num(l.qty)) * costs[i].cost) : ''}</td></tr>`)}
   </tbody></table>`;
   root.innerHTML = String(html`
-    ${head('تسوية مخزون ' + no, { sub: `${fmtDate(d.date)}${d.notes ? ' · ' + d.notes : ''}`, actions: html`<button class="btn btn-ghost" data-print>🖨️ طباعة</button><a class="btn btn-ghost" href="#/adjustments/${d.id}/edit">✏️ تعديل</a><button class="btn btn-text-danger" data-del>🗑️ حذف</button>` })}
+    ${head('تسوية مخزون ' + no, { sub: `${fmtDate(d.date)}${d.notes ? ' · ' + d.notes : ''}`, actions: html`<button class="btn btn-ghost" data-print>🖨️ طباعة</button>${docLocked(d) ? '' : html`<a class="btn btn-ghost" href="#/adjustments/${d.id}/edit">✏️ تعديل</a><button class="btn btn-text-danger" data-del>🗑️ حذف</button>`}` })}
+    ${docLocked(d) ? lockedNote(d) : ''}
     <div class="tbl-wrap">${table}</div>
     <div class="card" style="margin-top:14px"><div class="card-h"><h3>📒 القيد المحاسبي</h3></div>${entryTable(B.entries.get(d.id))}</div>`);
   $('[data-print]', root).onclick = () => printPaper(html`<div class="paper pp-report"><h1 style="font-size:18px;margin-bottom:6px">تسوية مخزون ${no}</h1><p class="muted">${fmtDate(d.date)} — ${d.notes || ''}</p><div style="margin-top:10px">${table}</div><div class="pp-sign"><div>أمين المخزن</div><div>المحاسب</div><div>المدير</div></div></div>`, { title: no });
-  $('[data-del]', root).onclick = async () => {
+  const del = $('[data-del]', root);
+  if (del) del.onclick = async () => {
     if (!(await confirmBox(`حذف التسوية ${no}؟ ستعود الكميات كما كانت.`, { ok: 'حذف', danger: true }))) return;
     store.deleteDoc(d.id);
     toast('تم الحذف');

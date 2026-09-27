@@ -1,12 +1,14 @@
 // ═══ مستندات البنود: فواتير المبيعات، عروض الأسعار، المرتجعات، فواتير المشتريات ═══
 import * as store from '../store.js';
-import { calcDoc, docNo, DOC_TYPES, validateDoc, num, round, addDays, paymentList } from '../core.js';
+import { calcDoc, docNo, DOC_TYPES, validateDoc, num, round, addDays, paymentList, NO_POSTING, lineFactor } from '../core.js';
 import { html, raw, money, fmtDate, toast, confirmBox, combo, showErrors, badge, empty, norm, $, $$, exportTable, moneyText, field } from '../ui.js';
 import { go, guard, setTitle, docHref, SEG } from '../nav.js';
 import {
   head, bindRows, today, S, dec, taxLabel, partyName, docStatus, periodOf, periodBar, bindPeriod, inPeriod,
   moneyList, partyItems, productItems, quickParty, quickProduct, taxOptions, docPaper, printPaper, entryTable, waLink, csvName,
+  docLocked, lockedNote, lockedPage, deliveryPaper,
 } from './common.js';
+import { repeatDialog } from './recurring.js';
 
 const CFG = {
   sale: { icon: '🧾', kind: 'customer', priceKey: 'price', newLabel: 'فاتورة جديدة', payLabel: 'طريقة الدفع', credit: 'آجل على العميل', paidLabel: 'المبلغ المدفوع' },
@@ -14,7 +16,10 @@ const CFG = {
   sreturn: { icon: '↩️', kind: 'customer', priceKey: 'price', newLabel: 'مرتجع جديد', payLabel: 'طريقة الاسترداد', credit: 'رصيد للعميل (بدون رد نقدي)', paidLabel: 'المبلغ المردود', ref: 'sale' },
   purchase: { icon: '🛒', kind: 'supplier', priceKey: 'cost', newLabel: 'فاتورة مشتريات جديدة', payLabel: 'طريقة الدفع', credit: 'آجل على المورد', paidLabel: 'المبلغ المدفوع' },
   preturn: { icon: '↪️', kind: 'supplier', priceKey: 'cost', newLabel: 'مرتجع جديد', payLabel: 'طريقة الاسترداد', credit: 'خصم من رصيد المورد', paidLabel: 'المبلغ المسترد', ref: 'purchase' },
+  sorder: { icon: '📋', kind: 'customer', priceKey: 'price', newLabel: 'أمر بيع جديد', to: 'sales' },
+  porder: { icon: '📋', kind: 'supplier', priceKey: 'cost', newLabel: 'أمر شراء جديد', to: 'purchases' },
 };
+const isOrder = (type) => type === 'sorder' || type === 'porder';
 const kindName = (k) => (k === 'customer' ? 'العميل' : 'المورد');
 const clone = (x) => JSON.parse(JSON.stringify(x));
 
@@ -38,7 +43,7 @@ export function list(type, { root, query, path }) {
     <div class="toolbar">
       <input class="inp grow" type="search" data-q placeholder="بحث بالرقم أو ${kindName(C.kind)} أو الملاحظات" value="${state.q}">
       ${hasPay ? html`<select class="inp" data-st><option value="">كل الحالات</option><option value="unpaid">غير مدفوعة</option><option value="partial">مدفوعة جزئياً</option><option value="overdue">متأخرة</option><option value="paid">مدفوعة</option></select>` : ''}
-      ${type === 'quote' ? html`<select class="inp" data-st><option value="">كل العروض</option><option value="open">مفتوحة</option><option value="converted">تحوّلت لفواتير</option></select>` : ''}
+      ${NO_POSTING.includes(type) ? html`<select class="inp" data-st><option value="">الكل</option><option value="open">مفتوحة</option><option value="converted">تحوّلت لفواتير</option></select>` : ''}
       ${periodBar(per)}
       <button class="btn btn-ghost btn-sm" data-csv>⬇️ Excel</button>
     </div>
@@ -50,7 +55,7 @@ export function list(type, { root, query, path }) {
     return all.filter((d) => {
       if (q && !norm(`${docNo(d, s)} ${partyName(d.party)} ${d.ref || ''} ${d.notes || ''}`).includes(q)) return false;
       if (!state.st) return true;
-      if (type === 'quote') return state.st === (d.convertedTo ? 'converted' : 'open');
+      if (NO_POSTING.includes(type)) return state.st === (d.convertedTo ? 'converted' : 'open');
       const st = docStatus(d, B);
       return st && (state.st === 'unpaid' ? st.state === 'unpaid' || st.state === 'overdue' : st.state === state.st);
     });
@@ -80,6 +85,7 @@ export function list(type, { root, query, path }) {
         ${hasPay ? html`<td class="num hide-sm">${money(st.paid)}</td><td class="num">${st.due ? money(st.due) : '—'}</td><td>${badge(st.state)}</td>` : ''}
         ${C.ref ? html`<td class="num hide-sm">${st && st.refunded ? money(st.refunded) : '—'}</td>` : ''}
         ${type === 'quote' ? html`<td class="hide-sm">${d.validUntil ? fmtDate(d.validUntil) : ''}</td><td>${badge(d.convertedTo ? 'converted' : d.validUntil && d.validUntil < today() ? 'expired' : 'open')}</td>` : ''}
+        ${isOrder(type) ? html`<td class="hide-sm">${d.deliveryDate ? fmtDate(d.deliveryDate) : ''}</td><td>${badge(d.convertedTo ? 'converted' : 'open')}</td>` : ''}
       </tr>`;
     });
     // الإجماليات على كل النتائج وليس المعروضة فقط
@@ -98,6 +104,7 @@ export function list(type, { root, query, path }) {
         ${hasPay ? html`<th class="num hide-sm">المدفوع</th><th class="num">المتبقي</th><th>الحالة</th>` : ''}
         ${C.ref ? html`<th class="num hide-sm">المردود نقداً</th>` : ''}
         ${type === 'quote' ? html`<th class="hide-sm">صالح حتى</th><th>الحالة</th>` : ''}
+        ${isOrder(type) ? html`<th class="hide-sm">التسليم</th><th>الحالة</th>` : ''}
       </tr></thead><tbody>${body}</tbody></table></div>
       ${rows.length > limit ? html`<p style="text-align:center;margin-top:12px"><button class="btn btn-ghost" data-more>عرض المزيد (${rows.length - limit})</button></p>` : ''}`
       : html`<div class="empty"><p>لا توجد نتائج مطابقة.</p></div>`}`);
@@ -124,6 +131,7 @@ export function form(type, { root, params, query }) {
   const s = S();
   const existing = params.id ? store.findDoc(params.id) : null;
   if (params.id && (!existing || existing.type !== type)) { root.innerHTML = String(empty('🔎', 'المستند غير موجود')); return; }
+  if (existing && docLocked(existing)) { setTitle(T.name); root.innerHTML = String(lockedPage(existing)); return; }
 
   // ── الحالة الابتدائية ──
   let d;
@@ -134,7 +142,8 @@ export function form(type, { root, params, query }) {
     const src = store.findDoc(query.from || query.copy);
     if (src && src.lines) {
       d.party = src.party; d.lines = clone(src.lines); d.inclusive = !!src.inclusive; d.notes = src.notes || '';
-      if (query.from && src.type === 'quote') d.fromQuote = src.id;
+      if (query.from && NO_POSTING.includes(src.type)) d.fromQuote = src.id;
+      if (src.type === 'porder' || src.type === 'sorder') { d.dueDate = ''; d.ref = src.ref || ''; }
     }
     const refDoc = store.findDoc(query.ref);
     if (refDoc && C.ref && refDoc.type === C.ref) {
@@ -146,7 +155,7 @@ export function form(type, { root, params, query }) {
   if (!showTax) d.vatRate = 0;
 
   // الدفع: حساب نقدي أو آجل، والمبلغ يتبع الإجمالي حتى يعدّله المستخدم
-  const hasPay = type !== 'quote';
+  const hasPay = !NO_POSTING.includes(type);
   let pay = '';
   let paidAuto = true;
   // الدفع المقسّم على أكثر من صندوق أو بنك (مثل نقد + مدى من الكاشير): pay = '*'
@@ -195,6 +204,7 @@ export function form(type, { root, params, query }) {
         ${field('التاريخ', html`<input class="inp" type="date" data-f="date" data-k="date" value="${d.date}">`, { err: '' })}
         ${type === 'sale' || type === 'purchase' ? field('تاريخ الاستحقاق', html`<input class="inp" type="date" data-k="dueDate" value="${d.dueDate || ''}">`, { hint: 'للبيع أو الشراء الآجل' }) : ''}
         ${type === 'quote' ? field('صالح حتى', html`<input class="inp" type="date" data-k="validUntil" value="${d.validUntil || ''}">`) : ''}
+        ${isOrder(type) ? field('تاريخ التسليم المتوقع', html`<input class="inp" type="date" data-k="deliveryDate" value="${d.deliveryDate || ''}">`) : ''}
         ${type === 'purchase' ? field('رقم فاتورة المورد', html`<input class="inp" data-k="ref" value="${d.ref || ''}" dir="auto">`) : ''}
         ${C.ref ? html`<label class="fld span2"><span class="fld-l">الفاتورة الأصلية</span>
           <div class="inline"><select class="inp" data-ref>${refOptions()}</select><button type="button" class="btn btn-ghost btn-sm" data-copy-ref ${d.refId ? '' : raw('hidden')}>📋 نسخ بنودها</button></div>
@@ -235,10 +245,19 @@ export function form(type, { root, params, query }) {
     const p = store.findProduct(l.product);
     if (!p || p.type !== 'stock' || !(type === 'sale' || type === 'preturn')) return '';
     const have = stock().get(p.id)?.qty || 0;
-    const mine = existing ? (existing.lines || []).filter((x) => x.product === p.id).reduce((t, x) => t + num(x.qty), 0) : 0;
+    const mine = existing ? (existing.lines || []).filter((x) => x.product === p.id).reduce((t, x) => t + num(x.qty) * lineFactor(x), 0) : 0;
     const avail = round(have + mine, 3);
-    const want = d.lines.filter((x) => x.product === p.id).reduce((t, x) => t + num(x.qty), 0);
-    return html`<small class="c-sub ${want > avail ? 'neg' : ''}">المتوفر: ${avail}${want > avail ? ' — الكمية أكبر من المتوفر' : ''}</small>`;
+    const want = round(d.lines.filter((x) => x.product === p.id).reduce((t, x) => t + num(x.qty) * lineFactor(x), 0), 3);
+    return html`<small class="c-sub ${want > avail ? 'neg' : ''}">المتوفر: ${avail} ${p.unit || ''}${want > avail ? ' — الكمية أكبر من المتوفر' : ''}</small>`;
+  }
+
+  // وحدات المنتج: الأساسية ثم الإضافية (كرتون = 12 حبة)
+  const unitsOf = (p) => (p && Array.isArray(p.units) && p.units.length ? [{ name: p.unit || 'حبة', factor: 1 }, ...p.units.filter((u) => u.name && num(u.factor) > 0)] : null);
+  function unitSelect(l) {
+    const us = unitsOf(store.findProduct(l.product));
+    if (!us) return '';
+    const cur = l.unit && num(l.factor) > 1 ? l.unit : us[0].name;
+    return html`<select class="inp unit-sel" data-k="unit" aria-label="الوحدة">${us.map((u) => html`<option value="${u.name}" ${u.name === cur ? raw('selected') : ''}>${u.name}${num(u.factor) !== 1 ? ` ×${num(u.factor)}` : ''}</option>`)}</select>`;
   }
 
   function lineHTML(l, i, L) {
@@ -246,7 +265,7 @@ export function form(type, { root, params, query }) {
     return html`<div class="line" data-i="${i}">
       <span class="c-idx">${i + 1}</span>
       <div class="c-desc" data-label="المنتج / البيان"><input class="inp" data-k="desc" data-f="desc${i}" value="${l.desc || ''}" placeholder="ابحث عن منتج أو اكتب بياناً">${stockHint(l)}<small class="fld-e" data-err="desc${i}" hidden></small></div>
-      <div class="c-qty" data-label="الكمية">${n('qty', l.qty)}</div>
+      <div class="c-qty" data-label="الكمية">${n('qty', l.qty)}${unitSelect(l)}</div>
       <div class="c-price" data-label="السعر">${n('price', l.price)}</div>
       <div class="c-disc" data-label="خصم %">${n('disc', l.disc, '0')}</div>
       <div class="c-tax" data-label="${taxLabel()}"><select class="inp" data-k="tax">${taxOptions(l.tax || 'S')}</select></div>
@@ -371,6 +390,17 @@ export function form(type, { root, params, query }) {
   root.addEventListener('change', (e) => {
     const el = e.target;
     if (el.dataset.k === 'tax') { d.lines[Number(el.closest('.line').dataset.i)].tax = el.value; dirty(); drawTotals(); }
+    if (el.dataset.k === 'unit') {
+      const i = Number(el.closest('.line').dataset.i);
+      const l = d.lines[i];
+      const p = store.findProduct(l.product);
+      const u = (unitsOf(p) || []).find((x) => x.name === el.value);
+      if (!p || !u) return;
+      const f = num(u.factor);
+      if (f === 1) { delete l.unit; delete l.factor; l.price = num(p[C.priceKey]) || l.price; }
+      else { l.unit = u.name; l.factor = f; l.price = C.priceKey === 'price' && num(u.price) ? num(u.price) : round(num(p[C.priceKey]) * f, 4); }
+      dirty(); drawLines();
+    }
     if (el.dataset.k === 'inclusive') { d.inclusive = el.checked; dirty(); drawLines(); }
     if (el.matches('[data-ref]')) {
       d.refId = el.value || null;
@@ -428,6 +458,7 @@ export function form(type, { root, params, query }) {
       ...d,
       lines: (lines.length ? lines : d.lines).map((l) => ({
         product: l.product || null, desc: String(l.desc || '').trim(), qty: num(l.qty), price: num(l.price), disc: num(l.disc), tax: showTax ? (l.tax || 'S') : 'S',
+        ...(l.product && num(l.factor) > 1 ? { unit: l.unit, factor: num(l.factor) } : {}),
       })),
       vatRate: showTax ? num(d.vatRate) : 0,
       notes: String(d.notes || '').trim(),
@@ -477,6 +508,7 @@ export function show(type, { root, params, query }) {
   const t = B.totals.get(d.id) || calcDoc(d, dec());
   const st = docStatus(d, B);
   const size = s.printSize === 'receipt' && (type === 'sale' || type === 'sreturn') ? 'receipt' : 'a4';
+  const locked = docLocked(d);
 
   const returns = store.getDb().docs.filter((x) => x.refId === d.id);
   const apps = B.applications.get(d.id) || [];
@@ -494,13 +526,17 @@ export function show(type, { root, params, query }) {
       actions: html`
         <button class="btn btn-primary" data-print>🖨️ طباعة / PDF</button>
         ${st && st.due > 0 && party ? html`<a class="btn btn-ghost" href="${payHref}">💵 ${type === 'sale' ? 'تسجيل دفعة' : 'تسجيل سداد'}</a>` : ''}
-        ${type === 'quote' && !conv ? html`<a class="btn btn-ghost" href="#/sales/new?from=${d.id}">✅ تحويل إلى فاتورة</a>` : ''}
+        ${type === 'quote' && !conv ? html`<a class="btn btn-ghost" href="#/sales/new?from=${d.id}">✅ تحويل إلى فاتورة</a><a class="btn btn-ghost" href="#/sales-orders/new?from=${d.id}">📋 أمر بيع</a>` : ''}
+        ${isOrder(type) && !conv ? html`<a class="btn btn-ghost" href="#/${C.to}/new?from=${d.id}">✅ تحويل إلى ${type === 'sorder' ? 'فاتورة مبيعات' : 'فاتورة مشتريات'}</a>` : ''}
+        ${type === 'sale' || type === 'sorder' ? html`<button class="btn btn-ghost" data-delivery>🚚 سند تسليم</button>` : ''}
+        ${type === 'sale' || type === 'purchase' ? html`<button class="btn btn-ghost" data-repeat>♻️ تكرار</button>` : ''}
         ${retHref ? html`<a class="btn btn-ghost" href="${retHref}">${type === 'sale' ? '↩️' : '↪️'} مرتجع</a>` : ''}
-        ${C.kind === 'customer' ? html`<button class="btn btn-ghost" data-wa>💬 واتساب</button>` : ''}
+        ${C.kind === 'customer' || type === 'porder' ? html`<button class="btn btn-ghost" data-wa>💬 واتساب</button>` : ''}
         <a class="btn btn-ghost" href="#/${SEG[type]}/new?copy=${d.id}">📄 نسخ</a>
-        <a class="btn btn-ghost" href="#/${SEG[type]}/${d.id}/edit">✏️ تعديل</a>
-        <button class="btn btn-text-danger" data-del>🗑️ حذف</button>`,
+        ${locked ? '' : html`<a class="btn btn-ghost" href="#/${SEG[type]}/${d.id}/edit">✏️ تعديل</a>
+        <button class="btn btn-text-danger" data-del>🗑️ حذف</button>`}`,
     })}
+    ${locked ? lockedNote(d) : ''}
     <div class="grid g4" style="margin-bottom:14px">
       <div class="kpi"><span class="kpi-l">الإجمالي</span><span class="kpi-v">${money(t.total, { sym: true })}</span>${t.vat ? html`<span class="kpi-s">منها ${taxLabel()} ${money(t.vat)}</span>` : ''}</div>
       ${st && st.state ? html`
@@ -509,10 +545,10 @@ export function show(type, { root, params, query }) {
         <div class="kpi"><span class="kpi-l">الحالة</span><span class="kpi-v">${badge(st.state)}</span></div>` : ''}
       ${C.ref ? html`<div class="kpi"><span class="kpi-l">${C.paidLabel}</span><span class="kpi-v">${money(st ? st.refunded : 0, { sym: true })}</span></div>
         <div class="kpi"><span class="kpi-l">المتبقي كرصيد</span><span class="kpi-v">${money(st ? st.open : 0, { sym: true })}</span><span class="kpi-s">يُخصم من الفواتير القادمة</span></div>` : ''}
-      ${type === 'quote' ? html`<div class="kpi"><span class="kpi-l">الحالة</span><span class="kpi-v">${badge(conv ? 'converted' : d.validUntil && d.validUntil < today() ? 'expired' : 'open')}</span>${conv ? html`<a class="kpi-s" href="${docHref(conv)}">الفاتورة ${docNo(conv, s)}</a>` : ''}</div>` : ''}
+      ${NO_POSTING.includes(type) ? html`<div class="kpi"><span class="kpi-l">الحالة</span><span class="kpi-v">${badge(conv ? 'converted' : d.validUntil && d.validUntil < today() ? 'expired' : 'open')}</span>${conv ? html`<a class="kpi-s" href="${docHref(conv)}">${DOC_TYPES[conv.type]?.name || ''} ${docNo(conv, s)}</a>` : ''}</div>` : ''}
     </div>
     ${ref ? html`<p class="note note-info" style="margin-bottom:12px">مرتبط بالفاتورة الأصلية <a href="${docHref(ref)}">${docNo(ref, s)}</a></p>` : ''}
-    ${quote ? html`<p class="note note-info" style="margin-bottom:12px">محوّلة من عرض السعر <a href="${docHref(quote)}">${docNo(quote, s)}</a></p>` : ''}
+    ${quote ? html`<p class="note note-info" style="margin-bottom:12px">محوّل من ${DOC_TYPES[quote.type]?.name || 'مستند'} <a href="${docHref(quote)}">${docNo(quote, s)}</a></p>` : ''}
     ${returns.length ? html`<p class="note note-warn" style="margin-bottom:12px">عليها مرتجعات: ${returns.map((r, i) => html`${i ? '، ' : ''}<a href="${docHref(r)}">${docNo(r, s)}</a>`)}</p>` : ''}
     <div class="paper-wrap">${docPaper(d, { size })}</div>
     ${apps.length ? html`<div class="card" style="margin-top:14px"><div class="card-h"><h3>التسديدات المرتبطة</h3></div><div class="list-mini">
@@ -524,10 +560,14 @@ export function show(type, { root, params, query }) {
         return self || !x ? html`<div class="it">${inner}</div>` : html`<a href="${docHref(x)}">${inner}</a>`;
       })}
     </div></div>` : ''}
-    ${type === 'quote' ? '' : html`<details class="card" style="margin-top:14px"><summary style="cursor:pointer;font-weight:800">📒 القيد المحاسبي</summary><div style="margin-top:12px">${entryTable(B.entries.get(d.id))}</div></details>`}`);
+    ${NO_POSTING.includes(type) ? '' : html`<details class="card" style="margin-top:14px"><summary style="cursor:pointer;font-weight:800">📒 القيد المحاسبي</summary><div style="margin-top:12px">${entryTable(B.entries.get(d.id))}</div></details>`}`);
 
   const doPrint = () => printPaper(docPaper(d, { size }), { size, title: `${no} - ${s.name || ''}` });
   $('[data-print]', root).onclick = doPrint;
+  const dn = $('[data-delivery]', root);
+  if (dn) dn.onclick = () => printPaper(deliveryPaper(d), { title: `سند تسليم ${no}` });
+  const rp = $('[data-repeat]', root);
+  if (rp) rp.onclick = () => repeatDialog(d);
   if (query.print) setTimeout(doPrint, 300);
   const wa = $('[data-wa]', root);
   if (wa) wa.onclick = () => {
@@ -536,7 +576,8 @@ export function show(type, { root, params, query }) {
     lines.push('', `مع تحيات ${s.name || ''}`);
     window.open(waLink(party && party.phone, lines.filter((x) => x !== '').join('\n')), '_blank', 'noopener');
   };
-  $('[data-del]', root).onclick = async () => {
+  const del = $('[data-del]', root);
+  if (del) del.onclick = async () => {
     const linked = returns.length || apps.some((a) => a.doc !== d.id);
     const msg = `سيتم حذف ${T.name} ${no} نهائياً مع قيدها وأثرها على المخزون.${linked ? ' المرتجعات والسندات المرتبطة بها ستبقى لكن بدون ربط.' : ''}${s.vat && (type === 'sale' || type === 'sreturn') ? ' ملاحظة: الأسلم ضريبياً إصدار إشعار دائن بدلاً من الحذف.' : ''}`;
     if (!(await confirmBox(msg, { ok: 'حذف نهائي', danger: true, title: 'حذف المستند' }))) return;

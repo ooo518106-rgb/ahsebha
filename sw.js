@@ -1,6 +1,6 @@
 // عامل الخدمة: يشغّل البرنامج بدون إنترنت. الشبكة أولاً دائماً حتى تصل التحديثات فوراً،
 // والنسخة المخزنة تُستخدم فقط عند انقطاع الاتصال.
-const CACHE = 'ahsebha-accounting-v2';
+const CACHE = 'ahsebha-accounting-v3';
 
 self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', (e) => {
