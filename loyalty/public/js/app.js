@@ -526,6 +526,9 @@ async function loadReports() {
         ${g.comments.length ? html`<h3 style="margin-top:8px">آخر الملاحظات (بتوصلك إنت بس)</h3><ul class="list" id="rcomments">${g.comments.map((c) => html`<li class="click" data-member="${c.memberId}"><div class="main"><b>${'★'.repeat(c.stars)} ${c.name}</b><span class="small muted">${c.comment || 'بدون تعليق'} · ${ago(c.at)}</span></div></li>`)}</ul>` : ''}
       </section>
     </div>
+    ${r.staff.length ? html`<section class="panel" style="margin-top:14px"><h3>👥 شغل الموظفين</h3>
+      <ul class="list">${r.staff.map((u) => html`<li><div class="main"><b>${u.name}${u.role === 'owner' ? ' (المالك)' : ''}</b>
+        <span class="small muted">${fmt(u.customers)} زبون · ${fmt(u.earns)} مرة إضافة · ${fmt(u.points)} ${state.shop.unit} · ${fmt(u.redeems)} مكافأة</span></div></li>`)}</ul></section>` : ''}
     <section class="panel" style="margin-top:14px"><h3>أحسن 10 زبائن</h3>
       ${r.top.length ? html`<ul class="list" id="rtop">${r.top.map((m, i) => html`<li class="click" data-member="${m.id}"><div class="main"><b>${i + 1}. ${m.name}</b><span class="small muted">${fmt(m.visits)} زيارة · ${fmt(m.lifetime)} ${state.shop.unit} · آخر زيارة ${ago(m.lastVisit)}</span></div></li>`)}</ul>` : html`<p class="muted small">لسا ما في زيارات.</p>`}
     </section>`);
@@ -683,6 +686,17 @@ async function settings() {
           <p class="hint">صورة مربعة PNG أو JPG، والأفضل 660×660.</p>
         </section>
         <section class="panel stack"><h2>محفظة Google</h2><div id="gpanel">${googlePanel()}</div></section>
+        <section class="panel stack" id="alertsPanel"></section>
+        <form class="panel stack" id="guardForm">
+          <h2>🛡️ الحماية من تلاعب الكاشير</h2>
+          <div class="row">
+            <div class="field grow"><label for="g-cool">نفس الزبون مرتين ورا بعض: استنى (دقيقة)</label><input id="g-cool" name="guardCooldown" type="number" min="0" max="240" value="${s.perks.guardCooldown}" class="num"></div>
+            <div class="field grow"><label for="g-day">أكتر إشي باليوم لنفس الزبون</label><input id="g-day" name="guardDaily" type="number" min="0" max="50" value="${s.perks.guardDaily}" class="num"></div>
+          </div>
+          <div class="field"><label for="g-big">نبّهني إذا كاشير ضاف بمرة وحدة أكتر من (${s.unit})</label><input id="g-big" name="guardBig" type="number" min="1" value="${s.perks.guardBig}" class="num"></div>
+          <p class="hint">بتنطبق على الكاشيرية بس، إنت مستثنى. 0 = بدون حد. لما حدا يحاول يتجاوز الحد بيوصلك تنبيه (فعّل «🔔 تنبيهات إلك»)، وبتلاقي شغل كل موظف بـ 📊 النشاط.</p>
+          <button class="btn" type="submit">حفظ</button>
+        </form>
         <section class="panel stack" id="staffPanel"><h2>الموظفين</h2><p class="muted small">جاري التحميل…</p></section>
         <form class="panel stack" id="pwForm">
           <h2>كلمة السر</h2>
@@ -793,6 +807,15 @@ async function settings() {
   bindGoogle();
 
   loadBilling();
+  drawAlerts();
+  $('#guardForm').onsubmit = async (e) => {
+    e.preventDefault();
+    try {
+      const r = await api('/api/shop/perks', { method: 'PUT', body: Object.fromEntries(new FormData(e.target)) });
+      state.shop = r.shop;
+      toast('انحفظ ✅', 'ok');
+    } catch (err) { toast(err.message, 'bad'); }
+  };
   $('#pwForm').onsubmit = async (e) => {
     e.preventDefault();
     try { await api('/api/me/password', { method: 'PUT', body: Object.fromEntries(new FormData(e.target)) }); e.target.reset(); toast('تغيّرت كلمة السر ✅', 'ok'); } catch (err) { toast(err.message, 'bad'); }
@@ -1006,6 +1029,60 @@ async function loadBilling() {
       toast('وصلنا تبليغك ✅ منتأكد ومنفعّل', 'ok');
       loadBilling();
     } catch (err) { toast(err.message, 'bad'); }
+  };
+}
+
+
+// ─── تنبيهات لصاحب المحل (ولمدير المنصة) على جواله ───
+const dashStandalone = matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+const dashIOS = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const pushOK = 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+const b64key = (b64) => Uint8Array.from(atob(b64.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - (b64.length % 4)) % 4)), (ch) => ch.charCodeAt(0));
+
+async function drawAlerts(note = null) {
+  const box = $('#alertsPanel');
+  if (!box) return;
+  const what = state.me.user.isAdmin
+    ? 'تقييم زعلان من زبون، وملخص آخر اليوم، وتنبيه إذا كاشير ضاف نقاط كتير. وكمدير منصة: طلبات الاشتراك، والمحلات الجديدة، وحوالات CliQ.'
+    : 'تقييم زعلان من زبون، وملخص آخر اليوم الساعة 10 بالليل، وتنبيه إذا كاشير ضاف نقاط كتير، وتأكيد اشتراكك.';
+  let on = false;
+  if (pushOK && Notification.permission === 'granted') {
+    try { const reg = await navigator.serviceWorker.getRegistration('/'); on = !!(reg && await reg.pushManager.getSubscription()) && state.me.userPush > 0; } catch { on = false; }
+  }
+  render(box, html`<h2>🔔 تنبيهات إلك</h2><p class="hint">${what}</p>
+    ${!pushOK ? (dashIOS && !dashStandalone
+      ? html`<p class="alert warn small">على الآيفون: افتح اللوحة بـ Safari ← <b>مشاركة ⬆️</b> ← <b>«إضافة إلى الشاشة الرئيسية»</b>، وافتحها من الأيقونة وارجع لهون.</p>`
+      : html`<p class="muted small">هالمتصفح ما بيدعم الإشعارات.</p>`)
+      : Notification.permission === 'denied' ? html`<p class="alert warn small">الإشعارات مسكّرة. افتحها من إعدادات الجوال للموقع.</p>`
+        : on ? html`<p class="small">✅ مفعّلة على هالجهاز · <button class="linkish" type="button" id="alertTest">جرّب</button> · <button class="linkish" type="button" id="alertOff">إيقاف</button></p>`
+          : html`<button class="btn" type="button" id="alertOn">فعّل التنبيهات على هالجهاز</button>`}
+    ${note ? html`<p class="alert ${note.ok ? 'ok' : 'warn'} small">${note.text}</p>` : ''}`);
+  const subscribe = async (test) => {
+    const reg = await navigator.serviceWorker.register('/sw.js');
+    await navigator.serviceWorker.ready;
+    const { publicKey } = await api('/api/push/key');
+    const sub = (await reg.pushManager.getSubscription()) || await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64key(publicKey) });
+    const r = await api('/api/me/push', { method: 'POST', body: { ...sub.toJSON(), test } });
+    state.me.userPush = Math.max(1, state.me.userPush);
+    return r.result === 'ok' ? { ok: true, text: '✅ انبعتلك تنبيه تجريبي، لازم يطلعلك هلق.' } : { ok: false, text: `ما وصل التنبيه (${r.reason || 'خطأ'})` };
+  };
+  const on$ = $('#alertOn', box);
+  if (on$) on$.onclick = async () => {
+    on$.disabled = true;
+    if ((await Notification.requestPermission()) !== 'granted') { drawAlerts(); return; }
+    try { drawAlerts(await subscribe(true)); } catch (e) { drawAlerts({ ok: false, text: e.message }); }
+  };
+  const test$ = $('#alertTest', box);
+  if (test$) test$.onclick = async () => { try { drawAlerts(await subscribe(true)); } catch (e) { drawAlerts({ ok: false, text: e.message }); } };
+  const off$ = $('#alertOff', box);
+  if (off$) off$.onclick = async () => {
+    try {
+      const reg = await navigator.serviceWorker.getRegistration('/');
+      const sub = reg && await reg.pushManager.getSubscription();
+      if (sub) await api('/api/me/push', { method: 'DELETE', body: { endpoint: sub.endpoint } });
+    } catch { /* بنطفيها على كل حال */ }
+    state.me.userPush = 0;
+    drawAlerts();
   };
 }
 

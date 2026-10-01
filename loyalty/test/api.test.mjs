@@ -244,7 +244,11 @@ test('الإعدادات: الفروع والتحقق من القيم', async ()
   const { shop } = await signup(c);
   let r = await c.put('/api/shop', { locations: [{ name: 'عبدون', lat: 31.9539123, lng: 35.9106456 }, { lat: '31.98', lng: '35.87' }] });
   assert.equal(r.status, 200);
-  assert.deepEqual(r.data.shop.locations, [{ name: 'عبدون', lat: 31.953912, lng: 35.910646 }, { name: 'فرع 2', lat: 31.98, lng: 35.87 }]);
+  assert.deepEqual(r.data.shop.locations.map(({ id, ...l }) => l), [{ name: 'عبدون', lat: 31.953912, lng: 35.910646 }, { name: 'فرع 2', lat: 31.98, lng: 35.87 }]);
+  // كل فرع إله رقم ثابت، وما بيتغيّر لما نعيد الحفظ
+  const ids = r.data.shop.locations.map((l) => l.id);
+  assert.ok(ids.every((id) => /^b[a-z0-9]{6}$/.test(id)) && ids[0] !== ids[1]);
+  assert.deepEqual((await c.put('/api/shop', { locations: r.data.shop.locations })).data.shop.locations.map((l) => l.id), ids);
   assert.equal(r.data.google.enabled, false);
   assert.equal((await c.put('/api/shop', { locations: [{ lat: 95, lng: 10 }] })).status, 400);
   assert.equal((await c.put('/api/shop', { locations: Array(11).fill({ lat: 1, lng: 1 }) })).status, 400);

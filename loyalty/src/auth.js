@@ -51,7 +51,7 @@ export async function currentUser(db, request) {
   const token = parseCookies(request.headers.get('cookie'))[COOKIE];
   if (!token) return null;
   return db.get(
-    `SELECT u.id, u.shop_id, u.email, u.name, u.role FROM sessions s JOIN users u ON u.id = s.user_id
+    `SELECT u.id, u.shop_id, u.email, u.name, u.role, u.branch_id FROM sessions s JOIN users u ON u.id = s.user_id
      WHERE s.token_hash = ? AND s.expires_at > ?`,
     await sha256Hex(token), Date.now(),
   );

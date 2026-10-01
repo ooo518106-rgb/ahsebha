@@ -164,6 +164,73 @@ export const SCHEMA = [
   )`,
   'CREATE INDEX IF NOT EXISTS payments_status ON payments(status, created_at)',
   'CREATE INDEX IF NOT EXISTS payments_shop ON payments(shop_id, created_at)',
+  // إشعارات لأصحاب المحلات ومدير المنصة (على اللوحة)
+  `CREATE TABLE IF NOT EXISTS user_push_subs (
+    id INTEGER PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    endpoint TEXT NOT NULL,
+    p256dh TEXT NOT NULL,
+    auth TEXT NOT NULL,
+    last_at INTEGER,
+    last_error TEXT,
+    created_at INTEGER NOT NULL,
+    UNIQUE (endpoint, user_id)
+  )`,
+  'CREATE INDEX IF NOT EXISTS user_push_user ON user_push_subs(user_id)',
+  // كوبونات لمجموعة زبائن، وكل زبون بيصرف الكوبون مرة وحدة
+  `CREATE TABLE IF NOT EXISTS coupons (
+    id INTEGER PRIMARY KEY,
+    shop_id INTEGER NOT NULL REFERENCES shops(id),
+    title TEXT NOT NULL,
+    details TEXT NOT NULL DEFAULT '',
+    segment TEXT NOT NULL,
+    expires_at INTEGER NOT NULL,
+    issued INTEGER NOT NULL DEFAULT 0,
+    used INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL
+  )`,
+  'CREATE INDEX IF NOT EXISTS coupons_shop ON coupons(shop_id, created_at)',
+  `CREATE TABLE IF NOT EXISTS member_coupons (
+    coupon_id INTEGER NOT NULL REFERENCES coupons(id),
+    member_id INTEGER NOT NULL REFERENCES members(id),
+    shop_id INTEGER NOT NULL,
+    used_at INTEGER,
+    used_by INTEGER,
+    PRIMARY KEY (coupon_id, member_id)
+  )`,
+  'CREATE INDEX IF NOT EXISTS member_coupons_member ON member_coupons(member_id)',
+  // الرصيد المدفوع مسبقاً (بالفلس: 1000 = دينار)
+  `CREATE TABLE IF NOT EXISTS credit_txns (
+    id INTEGER PRIMARY KEY,
+    shop_id INTEGER NOT NULL REFERENCES shops(id),
+    member_id INTEGER NOT NULL REFERENCES members(id),
+    kind TEXT NOT NULL CHECK (kind IN ('topup', 'spend')),
+    amount INTEGER NOT NULL,
+    bonus INTEGER NOT NULL DEFAULT 0,
+    user_id INTEGER,
+    branch_id TEXT,
+    idem TEXT,
+    created_at INTEGER NOT NULL
+  )`,
+  'CREATE INDEX IF NOT EXISTS credit_member ON credit_txns(member_id, created_at)',
+  'CREATE INDEX IF NOT EXISTS credit_shop ON credit_txns(shop_id, created_at)',
+  'CREATE UNIQUE INDEX IF NOT EXISTS credit_idem ON credit_txns(shop_id, idem)',
+  // المندوبين: بيجيبوا محلات وبياخدوا نسبة من الاشتراك
+  `CREATE TABLE IF NOT EXISTS resellers (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL,
+    phone TEXT NOT NULL DEFAULT '',
+    code TEXT NOT NULL UNIQUE,
+    token TEXT NOT NULL UNIQUE,
+    pct INTEGER NOT NULL DEFAULT 20,
+    created_at INTEGER NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS reseller_payouts (
+    id INTEGER PRIMARY KEY,
+    reseller_id INTEGER NOT NULL REFERENCES resellers(id),
+    amount REAL NOT NULL,
+    created_at INTEGER NOT NULL
+  )`,
   'CREATE INDEX IF NOT EXISTS leads_time ON leads(created_at)',
   'CREATE INDEX IF NOT EXISTS members_shop ON members(shop_id, created_at)',
   'CREATE INDEX IF NOT EXISTS txns_shop_time ON txns(shop_id, created_at)',
@@ -203,7 +270,25 @@ export const MIGRATIONS = [
   'ALTER TABLE members ADD COLUMN boost_until INTEGER',
   'ALTER TABLE members ADD COLUMN nudged_at INTEGER',
   'ALTER TABLE members ADD COLUMN review_ask_at INTEGER',
+  // الحماية من التلاعب، الملخص اليومي، الرصيد المدفوع، صلاحية النقاط، الروابط، الفروع، اللغة، المندوبين
+  'ALTER TABLE shops ADD COLUMN guard_cooldown INTEGER NOT NULL DEFAULT 10',
+  'ALTER TABLE shops ADD COLUMN guard_daily INTEGER NOT NULL DEFAULT 3',
+  'ALTER TABLE shops ADD COLUMN guard_big INTEGER',
+  'ALTER TABLE shops ADD COLUMN summary_day INTEGER',
+  'ALTER TABLE shops ADD COLUMN credit_on INTEGER NOT NULL DEFAULT 0',
+  'ALTER TABLE shops ADD COLUMN credit_bonus INTEGER NOT NULL DEFAULT 10',
+  'ALTER TABLE shops ADD COLUMN expiry_months INTEGER NOT NULL DEFAULT 0',
+  'ALTER TABLE shops ADD COLUMN expiry_since INTEGER',
+  "ALTER TABLE shops ADD COLUMN links TEXT NOT NULL DEFAULT '{}'",
+  'ALTER TABLE shops ADD COLUMN reseller_id INTEGER',
+  'ALTER TABLE members ADD COLUMN credit INTEGER NOT NULL DEFAULT 0',
+  'ALTER TABLE members ADD COLUMN expiry_warned_at INTEGER',
+  "ALTER TABLE members ADD COLUMN lang TEXT NOT NULL DEFAULT 'ar'",
+  'ALTER TABLE users ADD COLUMN branch_id TEXT',
+  'ALTER TABLE txns ADD COLUMN branch_id TEXT',
+  'ALTER TABLE leads ADD COLUMN reseller_id INTEGER',
   // فهارس على الأعمدة الجديدة (لازم تيجي بعد ما ينضاف العمود)
+  'CREATE INDEX IF NOT EXISTS shops_reseller ON shops(reseller_id)',
   'CREATE UNIQUE INDEX IF NOT EXISTS members_ref ON members(shop_id, ref_code)',
   'CREATE INDEX IF NOT EXISTS members_referrer ON members(referred_by)',
   'CREATE INDEX IF NOT EXISTS members_visit ON members(shop_id, last_visit)',

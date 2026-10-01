@@ -1,0 +1,12 @@
+{
+  "name": "نقاطك — لوحة المحل",
+  "short_name": "نقاطك",
+  "start_url": "/app",
+  "scope": "/",
+  "display": "standalone",
+  "dir": "rtl",
+  "lang": "ar",
+  "background_color": "#f6f4f1",
+  "theme_color": "#6b3e26",
+  "icons": [{ "src": "/img/nuqatak-logo.png", "sizes": "1024x1024", "type": "image/png", "purpose": "any" }]
+}
