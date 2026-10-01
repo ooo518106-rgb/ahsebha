@@ -471,6 +471,65 @@ async function activity() {
     </section>`);
   const list = $('#alist');
   if (list) list.onclick = (e) => { const li = e.target.closest('[data-member]'); if (li && li.dataset.member) memberDialog(li.dataset.member); };
+  if (isOwner()) loadReports();
+}
+
+// ─── التقارير (للمالك) ───
+const WEEKDAYS = ['الأحد', 'الاتنين', 'التلاتا', 'الأربعا', 'الخميس', 'الجمعة', 'السبت'];
+const hourLabel = (h) => (h === 0 ? '12ص' : h < 12 ? `${h}ص` : h === 12 ? '12ظ' : `${h - 12}م`);
+
+// أعمدة بلون المحل: سلسلة وحدة (بدون مفتاح ألوان)، القيمة عند المرور أو اللمس، ورقم الأعلى بس مكتوب، وجدول بالأرقام تحت
+function columns(values, labels, { tick = () => true, unit = '', tip = (l) => l } = {}) {
+  const max = Math.max(...values, 0);
+  const peak = values.indexOf(max);
+  return html`<div class="cols" role="img" aria-label="${labels.map((l, i) => `${l}: ${values[i]}`).join('، ')}">
+      ${values.map((v, i) => html`<div class="col" tabindex="0" data-tip="${tip(labels[i])}: ${fmt(v)}${unit}">
+        ${i === peak && max > 0 ? html`<b class="num">${fmt(v)}</b>` : ''}<i style="height:${max ? Math.round((v / max) * 100) : 0}%"></i></div>`)}
+    </div>
+    <div class="cols-x">${labels.map((l, i) => html`<span>${tick(i) ? l : ''}</span>`)}</div>
+    <details class="small"><summary class="muted">الأرقام</summary><table class="mini">${labels.map((l, i) => html`<tr><td>${l}</td><td class="num">${fmt(values[i])}</td></tr>`)}</table></details>`;
+}
+
+async function loadReports() {
+  const box = document.createElement('div');
+  box.id = 'reports';
+  view.append(box);
+  render(box, html`<p class="center muted">جاري تحميل التقارير…</p>`);
+  let r;
+  try { r = await api('/api/reports'); } catch (e) { render(box, html`<p class="alert bad">${e.message}</p>`); return; }
+  const t = r.totals;
+  const g = r.ratings;
+  const weeks = r.newByWeek.map((_, i) => (i === 7 ? 'هالأسبوع' : `قبل ${7 - i}`));
+  render(box, html`
+    <div class="row" style="margin-top:22px;justify-content:space-between">
+      <h2 style="margin:0">📊 التقارير <span class="small muted">(آخر 30 يوم)</span></h2>
+      <a class="btn ghost sm" href="/api/reports/members.csv" download>⬇️ ملف Excel بكل الزبائن</a>
+    </div>
+    <div class="stats" style="margin-top:10px">
+      <div class="stat"><b class="num">${t.returnRate == null ? '—' : `${t.returnRate}%`}</b><span class="small muted">رجعوا أكتر من مرة</span></div>
+      <div class="stat"><b class="num">${fmt(t.active || 0)}</b><span class="small muted">زاروا آخر 30 يوم</span></div>
+      <div class="stat"><b class="num">${g.avg == null ? '—' : `${g.avg} ⭐`}</b><span class="small muted">متوسط التقييم (${fmt(g.total)})</span></div>
+      <div class="stat"><b class="num">${fmt(t.pushDevices || 0)}</b><span class="small muted">جهاز مفعّل الإشعارات</span></div>
+      <div class="stat"><b class="num">${fmt(t.referred || 0)}</b><span class="small muted">إجوا بدعوة صاحب</span></div>
+      <div class="stat"><b class="num">${fmt(t.birthdays || 0)}</b><span class="small muted">سجّلوا عيد ميلادهم</span></div>
+    </div>
+    <div class="grid2" style="align-items:start;margin-top:14px">
+      <section class="panel stack"><h3>أكتر ساعات فيها زيارات</h3>${columns(r.byHour, r.byHour.map((_, h) => hourLabel(h)), { tick: (h) => h % 3 === 0, unit: ' زيارة', tip: (l) => `الساعة ${l}` })}</section>
+      <section class="panel stack"><h3>الزيارات حسب أيام الأسبوع</h3>${columns(r.byWeekday, WEEKDAYS, { unit: ' زيارة' })}</section>
+      <section class="panel stack"><h3>زبائن جدد كل أسبوع</h3>${columns(r.newByWeek, weeks, { tick: (i) => i === 0 || i === 7 || i === 4, unit: ' زبون' })}</section>
+      <section class="panel stack"><h3>التقييمات</h3>
+        ${g.total ? html`<div class="hbars">${[5, 4, 3, 2, 1].map((n) => html`<div class="hbar"><span>${n} ★</span><div class="track"><i style="width:${Math.round((g.counts[n - 1] / Math.max(...g.counts)) * 100)}%"></i></div><b class="num">${fmt(g.counts[n - 1])}</b></div>`)}</div>`
+          : html`<p class="muted small">لسا ما في تقييمات. بتوصل لحالها بعد الزيارات (من 🎁 العروض).</p>`}
+        ${g.comments.length ? html`<h3 style="margin-top:8px">آخر الملاحظات (بتوصلك إنت بس)</h3><ul class="list" id="rcomments">${g.comments.map((c) => html`<li class="click" data-member="${c.memberId}"><div class="main"><b>${'★'.repeat(c.stars)} ${c.name}</b><span class="small muted">${c.comment || 'بدون تعليق'} · ${ago(c.at)}</span></div></li>`)}</ul>` : ''}
+      </section>
+    </div>
+    <section class="panel" style="margin-top:14px"><h3>أحسن 10 زبائن</h3>
+      ${r.top.length ? html`<ul class="list" id="rtop">${r.top.map((m, i) => html`<li class="click" data-member="${m.id}"><div class="main"><b>${i + 1}. ${m.name}</b><span class="small muted">${fmt(m.visits)} زيارة · ${fmt(m.lifetime)} ${state.shop.unit} · آخر زيارة ${ago(m.lastVisit)}</span></div></li>`)}</ul>` : html`<p class="muted small">لسا ما في زيارات.</p>`}
+    </section>`);
+  for (const id of ['#rtop', '#rcomments']) {
+    const el = $(id, box);
+    if (el) el.onclick = (e) => { const li = e.target.closest('[data-member]'); if (li) memberDialog(li.dataset.member); };
+  }
 }
 
 // ─── رابط الانضمام والملصق ───

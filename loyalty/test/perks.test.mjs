@@ -208,3 +208,38 @@ test('المهام الدورية ما بتشتغل للمحل المتوقف، 
   await db.run('UPDATE members SET last_visit = ?, created_at = ? WHERE token = ?', t - 40 * DAY, t - 60 * DAY, token);
   assert.equal((await cron(t + 30 * 60 * 1000)).winback, 0);
 });
+
+test('التقارير وملف Excel: للمالك بس، والأرقام صح', async () => {
+  const { db, owner, customer, client, shop } = await world();
+  const a = await customer('=HYPERLINK("x")', '0791110020', { bdayDay: 1, bdayMonth: 5 });
+  const b = await customer('سارة', '0791110021');
+  for (let i = 0; i < 3; i++) await owner.post(`/api/members/${a.id}/earn`, { amount: 10 });
+  await owner.post(`/api/members/${b.id}/earn`, { amount: 10 });
+  await db.run('UPDATE members SET last_visit = ? WHERE id = ?', Date.now(), b.id);
+  await db.run("INSERT INTO reviews (shop_id, member_id, stars, comment, created_at) VALUES (?, ?, 5, '', ?), (?, ?, 2, 'بطيء', ?)", shop.id, a.id, Date.now(), shop.id, b.id, Date.now());
+  const r = (await owner.get('/api/reports')).data;
+  assert.equal(r.totals.members, 2);
+  assert.equal(r.totals.repeaters, 1);
+  assert.equal(r.totals.returnRate, 50);
+  assert.equal(r.totals.birthdays, 1);
+  assert.equal(r.byHour.reduce((x, y) => x + y, 0), 4);
+  assert.equal(r.byWeekday.reduce((x, y) => x + y, 0), 4);
+  assert.equal(r.byWeekday[localTime('JO').weekday], 4, 'كل الزيارات اليوم بتوقيت المحل');
+  assert.equal(r.byHour[localTime('JO').hour] >= 3, true);
+  assert.equal(r.newByWeek[7], 2);
+  assert.equal(r.top[0].visits, 3);
+  assert.equal(r.ratings.avg, 3.5);
+  assert.deepEqual(r.ratings.comments.map((x) => x.comment), ['بطيء']);
+  const csv = await owner.get('/api/reports/members.csv');
+  assert.equal(csv.headers.get('content-type'), 'text/csv; charset=utf-8');
+  const text = new TextDecoder('utf-8', { ignoreBOM: true }).decode(csv.data);
+  assert.ok(text.startsWith('\ufeff"الاسم"'), 'BOM عشان Excel يقرأ العربي');
+  assert.ok(text.includes(`"'=HYPERLINK(""x"")"`), 'المعادلات ما بتنفّذ بـ Excel');
+  assert.ok(text.includes('"0791110021"'));
+  // الموظف لأ
+  await owner.post('/api/staff', { name: 'كاشير', email: 'rep-cashier@test.com', password: 'cashier-pass' });
+  const staff = client();
+  await staff.post('/api/auth/login', { email: 'rep-cashier@test.com', password: 'cashier-pass' });
+  assert.equal((await staff.get('/api/reports')).status, 403);
+  assert.equal((await staff.get('/api/reports/members.csv')).status, 403);
+});

@@ -1215,6 +1215,68 @@ async function activity(c) {
   return json({ stats: { members: members.n, newWeek: newWeek.n, visitsDay: visitsDay.n, earnedMonth: earnedMonth.n, redeemedMonth: redeemedMonth.n }, recent });
 }
 
+// ─── التقارير (للمالك): آخر 30 يوم ───
+// فرق توقيت المحل عن UTC (بالدقيقة)، عشان نجمّع الزيارات حسب ساعة ويوم المحل
+function tzOffset(country, now = Date.now()) {
+  const t = perks.localTime(country, now);
+  return Date.UTC(t.year, t.month - 1, t.day, t.hour, t.minute) - Math.floor(now / 60000) * 60000;
+}
+
+async function reports(c) {
+  const s = c.shop.id;
+  const now = Date.now();
+  const since = now - 30 * DAY;
+  const off = tzOffset(c.shop.country, now);
+  const [totals, byHour, byDay, weekly, top, stars, comments] = await Promise.all([
+    c.db.get(`SELECT COUNT(*) AS members,
+        SUM(CASE WHEN last_visit >= ? THEN 1 ELSE 0 END) AS active,
+        SUM(CASE WHEN visits >= 1 THEN 1 ELSE 0 END) AS visited,
+        SUM(CASE WHEN visits >= 2 THEN 1 ELSE 0 END) AS repeaters,
+        SUM(CASE WHEN birthday IS NOT NULL THEN 1 ELSE 0 END) AS birthdays,
+        SUM(CASE WHEN ref_rewarded > 0 THEN 1 ELSE 0 END) AS referred,
+        (SELECT COUNT(*) FROM push_subs p WHERE p.shop_id = ?) AS pushDevices
+      FROM members WHERE shop_id = ?`, since, s, s),
+    c.db.all("SELECT CAST((created_at + ?) / 3600000 AS INTEGER) % 24 AS k, COUNT(*) AS n FROM txns WHERE shop_id = ? AND kind = 'earn' AND created_at >= ? GROUP BY k", off, s, since),
+    // يوم 0 بالتاريخ (1/1/1970) كان خميس، فـ (اليوم + 4) % 7 = يوم الأسبوع (0 = الأحد)
+    c.db.all("SELECT (CAST((created_at + ?) / 86400000 AS INTEGER) + 4) % 7 AS k, COUNT(*) AS n FROM txns WHERE shop_id = ? AND kind = 'earn' AND created_at >= ? GROUP BY k", off, s, since),
+    c.db.all('SELECT CAST((? - created_at) / 604800000 AS INTEGER) AS k, COUNT(*) AS n FROM members WHERE shop_id = ? AND created_at >= ? GROUP BY k', now, s, now - 8 * 7 * DAY),
+    c.db.all('SELECT id, name, visits, lifetime, last_visit AS lastVisit FROM members WHERE shop_id = ? AND visits > 0 ORDER BY visits DESC, lifetime DESC LIMIT 10', s),
+    c.db.all('SELECT stars AS k, COUNT(*) AS n FROM reviews WHERE shop_id = ? GROUP BY stars', s),
+    c.db.all(`SELECT r.stars, r.comment, r.created_at AS at, m.id AS memberId, m.name FROM reviews r JOIN members m ON m.id = r.member_id
+      WHERE r.shop_id = ? AND (r.stars <= 3 OR r.comment <> '') ORDER BY r.created_at DESC LIMIT 20`, s),
+  ]);
+  const fill = (rows, n) => { const a = Array(n).fill(0); for (const r of rows) if (r.k >= 0 && r.k < n) a[r.k] = r.n; return a; };
+  const starCounts = fill(stars.map((r) => ({ k: r.k - 1, n: r.n })), 5);
+  const rated = starCounts.reduce((a, b) => a + b, 0);
+  return json({
+    totals: { ...totals, returnRate: totals.visited ? Math.round((totals.repeaters / totals.visited) * 100) : null },
+    byHour: fill(byHour, 24),
+    byWeekday: fill(byDay, 7),
+    newByWeek: fill(weekly, 8).reverse(), // من الأقدم للأحدث
+    top,
+    ratings: { counts: starCounts, total: rated, avg: rated ? Math.round((starCounts.reduce((a, n, i) => a + n * (i + 1), 0) / rated) * 10) / 10 : null, comments },
+  });
+}
+
+// ملف Excel (CSV) بكل الزبائن — للمالك بس لأنه فيه أرقام الجوالات
+async function membersCsv(c) {
+  const rows = await c.db.all('SELECT * FROM members WHERE shop_id = ? ORDER BY created_at', c.shop.id);
+  const off = tzOffset(c.shop.country);
+  const day = (ms) => (ms ? new Date(ms + off).toISOString().slice(0, 10) : '');
+  // خلية بتبلّش بـ = أو + أو - أو @ ممكن Excel ينفذها كمعادلة، فبنحط قبلها '
+  const cell = (v) => { let x = String(v ?? ''); if (/^[=+\-@\t\r]/.test(x)) x = `'${x}`; return `"${x.replace(/"/g, '""')}"`; };
+  const head = ['الاسم', 'الجوال', 'رقم البطاقة', 'الرصيد', 'مجموع النقاط', 'الزيارات', 'المكافآت', 'آخر زيارة', 'تاريخ الانضمام', 'عيد الميلاد', 'المستوى'];
+  const lines = [head.map(cell).join(',')];
+  for (const m of rows) {
+    const tier = perks.tierOf(c.shop, m.visits);
+    lines.push([m.name, m.phone, m.card_no, m.balance, m.lifetime, m.visits, m.redeemed, day(m.last_visit), day(m.created_at), m.birthday || '', tier ? tier.name : ''].map(cell).join(','));
+  }
+  // BOM عشان Excel يقرأ العربي صح
+  return new Response(`\ufeff${lines.join('\r\n')}\r\n`, {
+    headers: { 'content-type': 'text/csv; charset=utf-8', 'content-disposition': `attachment; filename="members-${c.shop.slug}.csv"`, 'cache-control': 'no-store' },
+  });
+}
+
 // ─── إعدادات المحل (للمالك) ───
 async function updateShop(c) {
   const b = c.body;
@@ -1424,6 +1486,8 @@ const API = [
   ['POST', /^\/api\/members\/(\d+)\/adjust$/, adjust, 'owner'],
   ['DELETE', /^\/api\/members\/(\d+)$/, removeMember, 'owner'],
   ['GET', /^\/api\/activity$/, activity, 'staff'],
+  ['GET', /^\/api\/reports$/, reports, 'owner'],
+  ['GET', /^\/api\/reports\/members\.csv$/, membersCsv, 'owner'],
   ['PUT', /^\/api\/shop$/, updateShop, 'owner'],
   ['PUT', /^\/api\/shop\/logo$/, updateLogo, 'owner'],
   ['PUT', /^\/api\/shop\/perks$/, updatePerks, 'owner'],
