@@ -256,7 +256,65 @@ async function deleteCard(c, token) {
 }
 
 async function site(c) {
-  return json({ contactEmail: c.env.CONTACT_EMAIL || null });
+  return json({
+    contactEmail: c.env.CONTACT_EMAIL || null,
+    whatsapp: /^\d{8,15}$/.test(String(c.env.WHATSAPP_NUMBER || '')) ? String(c.env.WHATSAPP_NUMBER) : null,
+    signupOpen: !c.env.SIGNUP_CODE,
+  });
+}
+
+// طلب اشتراك من صفحة البيع
+const LEAD_KINDS = ['مطعم', 'كوفي شوب', 'مخبز وحلويات', 'صالون', 'محل تجاري', 'غيره'];
+async function createLead(c) {
+  const b = c.body;
+  if (b.website) fail(400, 'طلب غير صالح');
+  await rateLimit(c, `lead:${c.ip}`, 5, 60 * MIN);
+  const shopName = clean(b.shopName, 60);
+  if (shopName.length < 2) fail(400, 'اكتب اسم المحل');
+  const name = readName(b.name);
+  const phone = readPhone(b.phone);
+  const kind = LEAD_KINDS.includes(b.kind) ? b.kind : '';
+  await c.db.run(
+    'INSERT INTO leads (shop_name, name, phone, city, kind, note, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    shopName, name, phone, clean(b.city, 40), kind, clean(b.note, 500), Date.now(),
+  );
+  return json({ ok: true }, 201);
+}
+
+// مدير المنصة = أول حساب انعمل عليها (صاحب المنصة)
+async function isPlatformAdmin(c) {
+  const first = await c.db.get('SELECT MIN(id) AS id FROM users');
+  return !!(c.user && first && first.id === c.user.id);
+}
+
+async function requireAdmin(c) {
+  if (!(await isPlatformAdmin(c))) fail(403, 'هاي الصفحة لمدير المنصة بس');
+}
+
+async function adminLeads(c) {
+  await requireAdmin(c);
+  const leads = await c.db.all('SELECT id, shop_name AS shopName, name, phone, city, kind, note, status, created_at AS createdAt FROM leads ORDER BY created_at DESC LIMIT 200');
+  return json({ leads });
+}
+
+async function adminLeadStatus(c, id) {
+  await requireAdmin(c);
+  if (!['new', 'contacted', 'won', 'lost'].includes(c.body.status)) fail(400, 'حالة غير معروفة');
+  const r = await c.db.run('UPDATE leads SET status = ? WHERE id = ?', c.body.status, Number(id));
+  if (!r.changes) fail(404, 'ما لقينا الطلب');
+  return adminLeads(c);
+}
+
+async function adminShops(c) {
+  await requireAdmin(c);
+  const shops = await c.db.all(
+    `SELECT s.id, s.name, s.slug, s.created_at AS createdAt,
+       (SELECT COUNT(*) FROM members m WHERE m.shop_id = s.id) AS members,
+       (SELECT MAX(t.created_at) FROM txns t WHERE t.shop_id = s.id) AS lastActivity,
+       (SELECT u.email FROM users u WHERE u.shop_id = s.id AND u.role = 'owner' ORDER BY u.id LIMIT 1) AS ownerEmail
+     FROM shops s ORDER BY s.created_at DESC LIMIT 500`,
+  );
+  return json({ shops, signupOpen: !c.env.SIGNUP_CODE });
 }
 
 async function logo(c, shopId) {
@@ -322,7 +380,7 @@ async function logout(c) {
 
 async function me(c) {
   return json({
-    user: { id: c.user.id, name: c.user.name, email: c.user.email, role: c.user.role },
+    user: { id: c.user.id, name: c.user.name, email: c.user.email, role: c.user.role, isAdmin: await isPlatformAdmin(c) },
     shop: shopView(c.shop, c.origin),
     google: googleStatus(c, c.shop),
     currencies: CURRENCIES,
@@ -619,6 +677,10 @@ const API = [
   ['GET', /^\/api\/cards\/([a-z2-9]{20})$/, cardInfo],
   ['POST', /^\/api\/cards\/([a-z2-9]{20})\/delete$/, deleteCard],
   ['GET', /^\/api\/site$/, site],
+  ['POST', /^\/api\/leads$/, createLead],
+  ['GET', /^\/api\/admin\/leads$/, adminLeads, 'staff'],
+  ['PUT', /^\/api\/admin\/leads\/(\d+)$/, adminLeadStatus, 'staff'],
+  ['GET', /^\/api\/admin\/shops$/, adminShops, 'staff'],
   ['POST', /^\/api\/auth\/signup$/, signup],
   ['POST', /^\/api\/auth\/login$/, loginRoute],
   ['POST', /^\/api\/auth\/logout$/, logout],

@@ -334,7 +334,44 @@ test('صفحة الخصوصية وإيميل التواصل', async () => {
   const r = await c.get('/privacy');
   assert.equal(r.status, 200);
   assert.equal(r.data, '<html>/privacy.html</html>');
-  assert.deepEqual((await c.get('/api/site')).data, { contactEmail: 'privacy@example.com' });
-  const { client: client2 } = await setup();
-  assert.deepEqual((await client2().get('/api/site')).data, { contactEmail: null });
+  assert.deepEqual((await c.get('/api/site')).data, { contactEmail: 'privacy@example.com', whatsapp: null, signupOpen: true });
+  const { client: client2 } = await setup({ WHATSAPP_NUMBER: '962798900911', SIGNUP_CODE: 'x' });
+  assert.deepEqual((await client2().get('/api/site')).data, { contactEmail: null, whatsapp: '962798900911', signupOpen: false });
+});
+
+test('طلبات الاشتراك: من صفحة البيع، وبيشوفها مدير المنصة بس', async () => {
+  const { client } = await setup();
+  const platform = client();
+  await signup(platform, { shopName: 'Platform Owner' }); // أول حساب = مدير المنصة
+  const shopOwner = client();
+  await signup(shopOwner, { shopName: 'Another Shop' });
+
+  assert.equal((await platform.get('/api/me')).data.user.isAdmin, true);
+  assert.equal((await shopOwner.get('/api/me')).data.user.isAdmin, false);
+
+  const visitor = client();
+  let r = await visitor.post('/api/leads', { shopName: 'كافيه الورد', name: 'ليث', phone: '0795551234', city: 'عمّان', kind: 'كوفي شوب', note: 'عندي فرعين' });
+  assert.equal(r.status, 201);
+  assert.equal((await visitor.post('/api/leads', { shopName: 'x', name: 'ليث', phone: '0795551234' })).status, 400, 'اسم المحل قصير');
+  assert.equal((await visitor.post('/api/leads', { shopName: 'بوت', name: 'بوت', phone: '0795551234', website: 'spam' })).status, 400);
+  for (let i = 0; i < 4; i++) await visitor.post('/api/leads', { shopName: `محل ${i}`, name: 'سبام', phone: '0795551234' });
+  assert.equal((await visitor.post('/api/leads', { shopName: 'محل زيادة', name: 'سبام', phone: '0795551234' })).status, 429);
+
+  assert.equal((await visitor.get('/api/admin/leads')).status, 401);
+  assert.equal((await shopOwner.get('/api/admin/leads')).status, 403, 'صاحب محل عادي ما بيشوف الطلبات');
+  assert.equal((await shopOwner.get('/api/admin/shops')).status, 403);
+
+  r = await platform.get('/api/admin/leads');
+  assert.equal(r.status, 200);
+  assert.equal(r.data.leads.length, 4, '5 محاولات بالساعة (حتى الغلط منها بينحسب)');
+  const lead = r.data.leads.find((l) => l.shopName === 'كافيه الورد');
+  assert.deepEqual([lead.name, lead.phone, lead.city, lead.kind, lead.note, lead.status], ['ليث', '0795551234', 'عمّان', 'كوفي شوب', 'عندي فرعين', 'new']);
+  r = await platform.put(`/api/admin/leads/${lead.id}`, { status: 'contacted' });
+  assert.equal(r.data.leads.find((l) => l.id === lead.id).status, 'contacted');
+  assert.equal((await platform.put(`/api/admin/leads/${lead.id}`, { status: 'weird' })).status, 400);
+
+  r = await platform.get('/api/admin/shops');
+  assert.equal(r.data.shops.length, 2);
+  assert.equal(r.data.signupOpen, true);
+  assert.ok(r.data.shops.every((s) => s.ownerEmail && typeof s.members === 'number'));
 });

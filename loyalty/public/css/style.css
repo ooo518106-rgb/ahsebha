@@ -1,4 +1,4 @@
-/* نقاط الولاء — واجهة واحدة للتاجر والزبون، من اليمين لليسار وللجوال أولاً */
+/* نقاطك — واجهة واحدة للتاجر والزبون، من اليمين لليسار وللجوال أولاً */
 :root {
   --brand: #6b3e26;
   --brand-ink: #ffffff;
@@ -171,17 +171,66 @@ dialog .dlg-body { padding: 16px; }
 .brand-hero h1 { margin-top: 10px; font-size: 1.5rem; }
 .brand-strip { height: 120px; background: var(--brand); margin-bottom: -76px; }
 
-/* الصفحة الرئيسية */
-.hero { background: linear-gradient(160deg, #3b2418, #6b3e26 55%, #a0643f); color: #fff; padding: 40px 16px 56px; }
-.hero h1 { font-size: clamp(1.6rem, 5vw, 2.4rem); }
-.hero p { opacity: .9; margin-top: 8px; max-width: 640px; }
-.features { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); margin-top: -32px; }
+/* صفحة البيع */
+.site-nav { position: sticky; top: 0; z-index: 20; background: rgba(255, 255, 255, .92); backdrop-filter: blur(8px); border-bottom: 1px solid var(--border); }
+.site-nav .wrap { display: flex; align-items: center; gap: 14px; padding-block: 10px; }
+.brand { display: inline-flex; align-items: center; gap: 8px; font-weight: 900; font-size: 1.25rem; color: var(--text); text-decoration: none; }
+.brand img { border-radius: 8px; }
+.nav-links { display: flex; gap: 16px; margin-inline-start: auto; }
+.nav-links a { color: var(--muted); text-decoration: none; font-weight: 600; font-size: .95rem; }
+.site-nav .btn { margin-inline-start: 4px; }
+@media (max-width: 640px) { .nav-links { display: none; } .site-nav .btn { margin-inline-start: auto; } }
+.hero2 { background: radial-gradient(1200px 500px at 85% -10%, #8a5434, transparent), linear-gradient(160deg, #2c1a11, #5b3420 60%, #8a5434); color: #fff; padding: 40px 0 56px; overflow: hidden; }
+.hero-grid { display: grid; gap: 32px; align-items: center; grid-template-columns: 1.1fr .9fr; }
+@media (max-width: 860px) { .hero-grid { grid-template-columns: 1fr; } }
+.hero-copy h1 { font-size: clamp(2rem, 6vw, 3.2rem); margin: 12px 0 10px; line-height: 1.15; }
+.hero-copy p { opacity: .92; font-size: 1.08rem; max-width: 560px; }
+.hero-cta { margin-top: 20px; }
+.hero-note { opacity: .75; margin-top: 8px; }
+.pill { display: inline-block; background: rgba(255, 255, 255, .14); border: 1px solid rgba(255, 255, 255, .25); padding: 4px 12px; border-radius: 99px; font-size: .85rem; font-weight: 700; }
+.btn.light { background: #fff; color: #3b2418; }
+.btn.wa { background: #1fa855; color: #fff; }
+.phone { width: min(330px, 100%); margin: 0 auto; background: #f6f4f1; border: 10px solid #111; border-radius: 42px; padding: 26px 12px 18px; box-shadow: 0 30px 70px rgba(0, 0, 0, .45); color: var(--text); }
+.phone .loyalty-card { padding: 14px; }
+.phone .loyalty-card .lc-qr { width: 62%; padding: 8px; margin-top: 12px; }
+.phone .loyalty-card .stamps { gap: 4px; }
+.phone .loyalty-card .stamps i { width: 22px; height: 22px; font-size: .7rem; }
+.phone-notif { display: flex; gap: 10px; align-items: center; background: rgba(255, 255, 255, .95); border-radius: 18px; padding: 10px 12px; margin-bottom: 12px; box-shadow: 0 6px 18px rgba(0, 0, 0, .12); animation: notif 5s ease-in-out infinite; }
+.phone-notif img { width: 34px; height: 34px; border-radius: 9px; flex: none; }
+.phone-notif b { display: block; font-size: .85rem; }
+.phone-notif span { font-size: .8rem; color: var(--muted); }
+@keyframes notif { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-4px); } }
+@media (prefers-reduced-motion: reduce) { .phone-notif { animation: none; } }
+.section { padding: 44px 0 8px; }
+.section-title { text-align: center; font-size: clamp(1.4rem, 4vw, 1.9rem); margin-bottom: 18px; }
+.steps { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); }
+.step { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; }
+.step > b { display: inline-grid; place-items: center; width: 36px; height: 36px; border-radius: 50%; background: var(--brand); color: #fff; font-weight: 900; }
+.step h3 { font-size: 1.05rem; margin: 10px 0 4px; }
+.features { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
 .feature { background: var(--card); border-radius: var(--radius); padding: 16px; box-shadow: var(--shadow); }
 .feature span { font-size: 1.6rem; }
 .feature h3 { font-size: 1rem; margin: 6px 0 4px; }
+.plans { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); max-width: 640px; margin: 18px auto 0; }
+.plan { position: relative; background: var(--card); border: 1px solid var(--border); border-radius: 18px; padding: 22px 18px; text-align: center; display: grid; gap: 10px; align-content: start; }
+.plan.best { border: 2px solid var(--brand); box-shadow: var(--shadow); }
+.plan .badge { position: absolute; top: -11px; inset-inline-start: 50%; transform: translateX(50%); }
+.plan h3 { font-size: 1.1rem; }
+.price b { font-size: 2.6rem; font-weight: 900; color: var(--brand); }
+.checks { list-style: none; padding: 0; max-width: 640px; margin: 18px auto 0; display: grid; gap: 8px 16px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+.checks li::before { content: "✓"; color: var(--ok); font-weight: 900; margin-inline-end: 8px; }
+.faq { max-width: 720px; margin: 0 auto; display: grid; gap: 8px; }
+.faq details { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 12px 16px; }
+.faq summary { font-weight: 700; cursor: pointer; }
+.faq details p { margin-top: 8px; color: var(--muted); }
+.site-foot { margin-top: 40px; border-top: 1px solid var(--border); background: var(--card); }
+.site-foot .wrap { gap: 16px; padding-block: 18px; }
+.site-foot a { color: var(--muted); text-decoration: none; font-size: .9rem; }
 .seg { display: flex; background: #eee; border-radius: 12px; padding: 4px; gap: 4px; }
 .seg button { flex: 1; border: 0; background: transparent; font: inherit; font-weight: 700; padding: 8px; border-radius: 9px; cursor: pointer; color: var(--muted); }
 .seg button.on { background: #fff; color: var(--text); box-shadow: 0 1px 3px rgba(0, 0, 0, .1); }
+.powered { text-align: center; font-size: .8rem; color: var(--muted); margin: 18px 0 8px; }
+.powered a { color: var(--muted); font-weight: 700; }
 
 /* صفحة الخصوصية */
 .policy h1 { margin: 24px 0 2px; }

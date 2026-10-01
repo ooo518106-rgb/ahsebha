@@ -18,21 +18,22 @@ async function loadMe() {
   applyShop();
   $('#userName').textContent = me.user.name;
   $$('.owner-only').forEach((el) => el.classList.toggle('hidden', !isOwner()));
+  $$('.admin-only').forEach((el) => el.classList.toggle('hidden', !me.user.isAdmin));
 }
 
 function applyShop() {
   setBrand(state.shop.color);
   $('#shopLogo').src = state.shop.logo;
   $('#shopName').textContent = state.shop.name;
-  document.title = `${state.shop.name} — نقاط الولاء`;
+  document.title = `${state.shop.name} — نقاطك`;
 }
 
-const VIEWS = { cashier, members, activity, join: joinView, settings };
+const VIEWS = { cashier, members, activity, join: joinView, settings, admin };
 function route() {
   stopCamera();
   $('#dlg').onclose = null;
   let tab = location.hash.slice(1) || 'cashier';
-  if (!VIEWS[tab] || (tab === 'settings' && !isOwner())) tab = 'cashier';
+  if (!VIEWS[tab] || (tab === 'settings' && !isOwner()) || (tab === 'admin' && !state.me.user.isAdmin)) tab = 'cashier';
   $$('#tabs a').forEach((a) => a.classList.toggle('on', a.dataset.tab === tab));
   VIEWS[tab]();
 }
@@ -684,6 +685,58 @@ async function loadStaff(data) {
     e.preventDefault();
     try { loadStaff(await api('/api/staff', { method: 'POST', body: Object.fromEntries(new FormData(e.target)) })); toast('انضاف الموظف ✅', 'ok'); } catch (err) { toast(err.message, 'bad'); }
   };
+}
+
+// ─── لوحة مدير المنصة: طلبات الاشتراك والمحلات المشتركة ───
+const LEAD_STATUS = { new: ['جديد', 'warn'], contacted: ['تم التواصل', ''], won: ['اشترك ✅', 'ok'], lost: ['ما اشترك', 'bad'] };
+const TRIAL_DAYS = 14;
+
+async function admin() {
+  render(view, html`<p class="center muted">جاري التحميل…</p>`);
+  let leads;
+  let shops;
+  let signupOpen;
+  try {
+    [{ leads }, { shops, signupOpen }] = await Promise.all([api('/api/admin/leads'), api('/api/admin/shops')]);
+  } catch (e) { render(view, html`<p class="alert bad">${e.message}</p>`); return; }
+  const fresh = leads.filter((l) => l.status === 'new').length;
+  render(view, html`
+    ${signupOpen
+      ? html`<p class="alert warn">التسجيل مفتوح لأي حدا. عشان تسكّره، حط <b dir="ltr">SIGNUP_CODE</b> كـ Secret بإعدادات Cloudflare.</p>`
+      : html`<p class="alert ok">التسجيل مسكّر برمز ✅ ابعت للمحل الجديد: <span dir="ltr" class="num">${location.origin}/?code=رمزك</span></p>`}
+    <div class="stats" style="margin-top:12px">
+      <div class="stat"><b class="num">${fresh}</b><span class="small muted">طلبات جديدة</span></div>
+      <div class="stat"><b class="num">${leads.length}</b><span class="small muted">كل الطلبات</span></div>
+      <div class="stat"><b class="num">${shops.length}</b><span class="small muted">محلات مسجّلة</span></div>
+    </div>
+    <section class="panel" style="margin-top:14px">
+      <h2>طلبات الاشتراك</h2>
+      ${leads.length ? html`<ul class="list" id="leadList">${leads.map((l) => html`<li style="align-items:flex-start">
+        <div class="main"><b>${l.shopName} <span class="badge ${LEAD_STATUS[l.status][1]}">${LEAD_STATUS[l.status][0]}</span></b>
+          <span class="small muted">${l.name} · <span class="num">${l.phone}</span>${l.city ? ` · ${l.city}` : ''}${l.kind ? ` · ${l.kind}` : ''} · ${ago(l.createdAt)}</span>
+          ${l.note ? html`<div class="small" style="margin-top:4px">${l.note}</div>` : ''}
+          <div class="row" style="margin-top:6px">
+            <a class="btn sm wa" href="${waLink(l.phone, `مرحبا ${l.name}، معك فريق نقاطك بخصوص طلب التجربة لـ ${l.shopName} 🙌`)}" target="_blank" rel="noopener">واتساب</a>
+            <a class="btn sm ghost" href="tel:${l.phone}">اتصال</a>
+            <select class="lead-status" data-id="${l.id}" style="width:auto;min-height:34px;padding:4px 8px">${Object.entries(LEAD_STATUS).map(([k, [label]]) => html`<option value="${k}" ${k === l.status ? 'selected' : ''}>${label}</option>`)}</select>
+          </div></div></li>`)}</ul>`
+        : html`<p class="muted">لسا ما وصل طلبات. شارك رابط موقعك: <span dir="ltr">${location.origin}</span></p>`}
+    </section>
+    <section class="panel">
+      <h2>المحلات</h2>
+      ${shops.length ? html`<ul class="list">${shops.map((s) => {
+        const left = Math.ceil((s.createdAt + TRIAL_DAYS * 864e5 - Date.now()) / 864e5);
+        return html`<li><div class="main"><b>${s.name}</b>
+          <span class="small muted"><span dir="ltr">${s.ownerEmail || ''}</span> · من ${fmtDate(s.createdAt)} · آخر حركة ${ago(s.lastActivity)}</span></div>
+          <span class="small num">${fmt(s.members)} زبون</span>
+          <span class="badge ${left > 0 ? 'warn' : ''}">${left > 0 ? `تجربة: باقي ${left} يوم` : 'خلصت التجربة'}</span></li>`;
+      })}</ul>` : html`<p class="muted">ما في محلات لسا.</p>`}
+    </section>`);
+  $$('.lead-status').forEach((sel) => {
+    sel.onchange = async () => {
+      try { await api(`/api/admin/leads/${sel.dataset.id}`, { method: 'PUT', body: { status: sel.value } }); admin(); toast('انحفظ', 'ok'); } catch (e) { toast(e.message, 'bad'); }
+    };
+  });
 }
 
 boot();

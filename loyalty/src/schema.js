@@ -76,6 +76,19 @@ export const SCHEMA = [
     n INTEGER NOT NULL,
     expires_at INTEGER NOT NULL
   )`,
+  // طلبات الاشتراك من صفحة البيع
+  `CREATE TABLE IF NOT EXISTS leads (
+    id INTEGER PRIMARY KEY,
+    shop_name TEXT NOT NULL,
+    name TEXT NOT NULL,
+    phone TEXT NOT NULL,
+    city TEXT NOT NULL DEFAULT '',
+    kind TEXT NOT NULL DEFAULT '',
+    note TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'new' CHECK (status IN ('new', 'contacted', 'won', 'lost')),
+    created_at INTEGER NOT NULL
+  )`,
+  'CREATE INDEX IF NOT EXISTS leads_time ON leads(created_at)',
   'CREATE INDEX IF NOT EXISTS members_shop ON members(shop_id, created_at)',
   'CREATE INDEX IF NOT EXISTS txns_shop_time ON txns(shop_id, created_at)',
   'CREATE INDEX IF NOT EXISTS txns_member ON txns(member_id, created_at)',

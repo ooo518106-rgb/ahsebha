@@ -25,6 +25,8 @@ database_id = "d9ec1b6e-14fb-4d36-8ae4-78bc7e01d46e"
 [vars]
 # رقم المُصدِر من Google Pay & Wallet Console (مش سري)
 GOOGLE_ISSUER_ID = "3388000000023212673"
+# رقم واتساب للتواصل بصفحة البيع والخصوصية (مع مفتاح الدولة، بدون + أو صفر)
+WHATSAPP_NUMBER = "962798900911"
 # الأسرار بتنحط من لوحة Cloudflare (Settings ← Variables and Secrets ← Secret)، مش هون:
 #   GOOGLE_SERVICE_ACCOUNT = محتوى ملف JSON تبع حساب الخدمة
 #   SIGNUP_CODE (اختياري) = رمز بتعطيه للمحلات عشان تقدر تسجّل؛ بدونه التسجيل مفتوح للكل

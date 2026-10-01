@@ -4,55 +4,165 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#3b2418">
-  <title>نقاط الولاء — بطاقة ولاء بمحفظة الجوال لمحلك</title>
-  <meta name="description" content="بطاقة ولاء لمطعمك أو الكوفي شوب بتنحفظ بمحفظة الجوال مع QR، وبتطلع للزبون لما يقرّب من المحل. نقاط أو أختام، والكاشير بيمسح بكاميرا الجوال.">
+  <title>نقاطك — بطاقة ولاء بمحفظة الجوال لمطعمك والكوفي شوب</title>
+  <meta name="description" content="نقاطك: بطاقة ولاء لمطعمك أو الكوفي شوب بتنحفظ بمحفظة جوال الزبون، وبتطلعله لما يقرّب من محلك. نقاط أو أختام، والكاشير بيمسح بكاميرا الجوال. جرّب 14 يوم مجاناً.">
+  <meta property="og:title" content="نقاطك — خلّي زبونك يرجعلك">
+  <meta property="og:description" content="بطاقة ولاء بمحفظة الجوال، بدون تطبيق وبدون كروت ورق. جرّب 14 يوم مجاناً.">
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/css/style.css">
 </head>
 <body>
-  <header class="hero">
+  <header class="site-nav">
     <div class="wrap">
-      <h1>بطاقة ولاء لمحلك… جوّا محفظة الجوال</h1>
-      <p>زبونك بيمسح QR عالكاونتر، بتنضاف بطاقته لـ Google Wallet جنب بطاقة البنك، وبتطلعله لحالها لما يقرّب من المحل. وإنت بتمسحها بكاميرا جوالك وبتضيفله نقاط أو أختام.</p>
+      <a class="brand" href="/"><img src="/favicon.svg" alt="" width="32" height="32">نقاطك</a>
+      <nav class="nav-links"><a href="#how">كيف بتشتغل</a><a href="#pricing">الأسعار</a><a href="#faq">أسئلة</a></nav>
+      <a class="btn ghost sm" href="#login" id="navLogin">دخول المحلات</a>
     </div>
   </header>
+
+  <section class="hero2">
+    <div class="wrap hero-grid">
+      <div class="hero-copy">
+        <span class="pill">بطاقات ولاء بمحفظة الجوال</span>
+        <h1>خلّي زبونك يرجعلك</h1>
+        <p>بطاقة ولاء لمطعمك أو الكوفي شوب تبعك، بتنحفظ بمحفظة جوال الزبون جنب بطاقة البنك، وبتطلعله لحالها لما يقرّب من محلك. بدون تطبيق، وبدون كروت ورق بتضيع.</p>
+        <div class="row hero-cta">
+          <a class="btn big light" href="#contact">جرّب 14 يوم مجاناً</a>
+          <a class="btn big wa hidden" data-wa target="_blank" rel="noopener">واتساب</a>
+        </div>
+        <p class="small hero-note">بدون بطاقة بنك وبدون أي التزام.</p>
+      </div>
+      <div class="phone" aria-hidden="true">
+        <div class="phone-notif"><img src="/img/demo-logo.svg" alt=""><div><b>موكا كوفي هاوس</b><span>بطاقتك جاهزة، إنت قريب من المحل 📍</span></div></div>
+        <div id="demoCard"></div>
+      </div>
+    </div>
+  </section>
+
   <main class="wrap">
-    <section class="features">
-      <div class="feature"><span>📱</span><h3>بالمحفظة مش بتطبيق</h3><p class="muted small">ما في تطبيق ينزّله الزبون. البطاقة بتنحفظ بـ Google Wallet، وبطاقة الآيفون (Apple Wallet) جاية قريباً.</p></div>
-      <div class="feature"><span>📍</span><h3>بتطلع لما يقرّب</h3><p class="muted small">بتحط مواقع فروعك (لحد 10)، والجوال بيطلّع بطاقتك على شاشة القفل لما يكون الزبون قريب.</p></div>
-      <div class="feature"><span>☕</span><h3>نقاط أو أختام</h3><p class="muted small">«كل دينار = نقطة» أو «اشتري 9 والعاشر مجاني». المكافأة إنت بتحددها.</p></div>
-      <div class="feature"><span>📷</span><h3>الكاشير بجوال عادي</h3><p class="muted small">بتمسح QR الزبون بكاميرا الجوال أو التابلت، وبتضيف النقاط بكبسة، والبطاقة بتتحدّث عنده فوراً.</p></div>
-      <div class="feature"><span>🔔</span><h3>رسائل وعروض</h3><p class="muted small">بتبعت إشعار لكل زبائنك: «خصم 20% اليوم».</p></div>
-      <div class="feature"><span>👥</span><h3>موظفين وفروع</h3><p class="muted small">كل كاشير إله حسابه، وكل حركة بتنسجل مين عملها.</p></div>
+    <section class="section" id="how">
+      <h2 class="section-title">كيف بتشتغل؟</h2>
+      <div class="steps">
+        <div class="step"><b>1</b><h3>الزبون بيمسح الملصق</h3><p class="muted small">ملصق QR عالكاونتر أو الطاولة. بيكتب اسمه ورقمه، وبتطلعله بطاقته خلال ثواني.</p></div>
+        <div class="step"><b>2</b><h3>بيحفظها بالمحفظة</h3><p class="muted small">بكبسة وحدة بتنضاف لـ Google Wallet، وبتطلعله على شاشة القفل كل ما يقرّب من محلك.</p></div>
+        <div class="step"><b>3</b><h3>الكاشير بيمسح ويضيف</h3><p class="muted small">بكاميرا أي جوال: نقاط حسب الفاتورة أو ختم، والرصيد بيتحدّث بمحفظة الزبون فوراً.</p></div>
+      </div>
     </section>
 
-    <section class="narrow" style="margin-top:24px">
+    <section class="section">
+      <h2 class="section-title">كل اللي بتحتاجه لترجّع زبائنك</h2>
+      <div class="features">
+        <div class="feature"><span>📱</span><h3>بالمحفظة مش بتطبيق</h3><p class="muted small">ما في تطبيق ينزّله الزبون، والبطاقة ما بتضيع ولا بتنتسى بالبيت.</p></div>
+        <div class="feature"><span>📍</span><h3>بتطلع لما يقرّب</h3><p class="muted small">حط مواقع فروعك (لحد 10)، والجوال بيذكّر زبونك فيك وهو ماشي جنب المحل.</p></div>
+        <div class="feature"><span>☕</span><h3>نقاط أو أختام</h3><p class="muted small">«كل دينار = نقطة» أو «اشتري 9 والعاشر مجاني». والمكافأة إنت بتحددها.</p></div>
+        <div class="feature"><span>🔔</span><h3>عروض لكل زبائنك</h3><p class="muted small">ابعت إشعار على البطاقة: «خصم 20% اليوم». بيوصل لكل اللي حافظينها.</p></div>
+        <div class="feature"><span>📊</span><h3>بتعرف زبائنك</h3><p class="muted small">مين زبائنك الدايمين، وكم زيارة اليوم، وكم مكافأة انصرفت هالشهر.</p></div>
+        <div class="feature"><span>👥</span><h3>موظفين وفروع</h3><p class="muted small">كل كاشير إله حسابه، وكل حركة بينسجل مين عملها. ما في تلاعب بالنقاط.</p></div>
+      </div>
+    </section>
+
+    <section class="section" id="pricing">
+      <h2 class="section-title">سعر واحد، كل الميزات</h2>
+      <p class="center muted">أول 14 يوم مجاناً. إذا ما عجبتك، ما بتدفع إشي.</p>
+      <div class="plans">
+        <div class="plan">
+          <h3>شهري</h3>
+          <div class="price"><b class="num">15</b> دينار <span class="muted">/ بالشهر</span></div>
+          <a class="btn block soft" href="#contact">ابدأ التجربة</a>
+        </div>
+        <div class="plan best">
+          <span class="badge ok">وفّر 30 دينار</span>
+          <h3>سنوي</h3>
+          <div class="price"><b class="num">150</b> دينار <span class="muted">/ بالسنة</span></div>
+          <p class="small muted">يعني شهرين ببلاش.</p>
+          <a class="btn block" href="#contact">ابدأ التجربة</a>
+        </div>
+      </div>
+      <ul class="checks">
+        <li>زبائن بلا حدود</li><li>نقاط أو أختام ومكافآت على كيفك</li><li>بطاقة بمحفظة Google</li><li>تنبيه القرب لحد 10 فروع</li>
+        <li>كاشير بكاميرا الجوال وحسابات موظفين</li><li>رسائل وعروض لكل الزبائن</li><li>تقارير الزيارات والمكافآت</li><li>دعم على واتساب</li>
+      </ul>
+    </section>
+
+    <section class="section" id="faq">
+      <h2 class="section-title">أسئلة بتتكرر</h2>
+      <div class="faq">
+        <details><summary>لازم الزبون ينزّل تطبيق؟</summary><p>لا. بيمسح الـ QR، وبتنحفظ البطاقة بمحفظة Google اللي موجودة أصلاً على جوالات الأندرويد.</p></details>
+        <details><summary>وزبائن الآيفون؟</summary><p>لهلأ بياخدوا بطاقة على المتصفح فيها نفس الـ QR، وبتشتغل عادي مع الكاشير. وبطاقة Apple Wallet جاية قريباً.</p></details>
+        <details><summary>بحتاج جهاز خاص للكاشير؟</summary><p>لا. أي جوال أو تابلت فيه كاميرا بيكفي، وإذا عندك قارئ QR موصول بالكمبيوتر بيشتغل كمان.</p></details>
+        <details><summary>كيف بتطلع البطاقة لما يقرّب الزبون؟</summary><p>بتحط موقع محلك بالإعدادات، وجوال الزبون نفسه بيطلّع البطاقة على شاشة القفل لما يكون قريب. نظام الجوال هو اللي بيحدد المسافة والتوقيت، ونحنا ما بنعرف موقع الزبون أبداً.</p></details>
+        <details><summary>بقدر أختار المكافأة؟</summary><p>أكيد. نقاط حسب مبلغ الفاتورة (مثلاً كل دينار = نقطة، و100 نقطة = مشروب مجاني)، أو أختام (اشتري 9 والعاشر مجاني). والمكافأة إنت بتحددها.</p></details>
+        <details><summary>كيف بدفع؟ وبقدر أوقف؟</summary><p>بعد الـ 14 يوم، إذا عجبتك، بنتفق معك على طريقة الدفع اللي بتناسبك. وبتقدر توقف بأي وقت.</p></details>
+        <details><summary>شو بصير ببيانات زبائني؟</summary><p>بيانات كل محل معزولة عن غيره، وما منبيعها لحدا. التفاصيل بـ <a href="/privacy">سياسة الخصوصية</a>.</p></details>
+      </div>
+    </section>
+
+    <section class="section narrow" id="contact">
+      <h2 class="section-title">جرّب نقاطك 14 يوم مجاناً</h2>
+      <p class="center muted">اترك معلوماتك ومنرجعلك خلال يوم، أو احكينا مباشرة على واتساب.</p>
+      <form class="panel stack" id="leadForm" novalidate>
+        <div class="field"><label for="l-shop">اسم المحل</label><input id="l-shop" name="shopName" required maxlength="60" placeholder="موكا كوفي هاوس"></div>
+        <div class="row">
+          <div class="field grow"><label for="l-name">اسمك</label><input id="l-name" name="name" autocomplete="name" required maxlength="60"></div>
+          <div class="field grow"><label for="l-phone">رقم الجوال</label><input id="l-phone" name="phone" type="tel" inputmode="tel" autocomplete="tel" dir="ltr" required placeholder="07xxxxxxxx"></div>
+        </div>
+        <div class="row">
+          <div class="field grow"><label for="l-city">المدينة</label><input id="l-city" name="city" maxlength="40" placeholder="عمّان"></div>
+          <div class="field grow"><label for="l-kind">نوع المحل</label>
+            <select id="l-kind" name="kind"><option>كوفي شوب</option><option>مطعم</option><option>مخبز وحلويات</option><option>صالون</option><option>محل تجاري</option><option>غيره</option></select></div>
+        </div>
+        <div class="field"><label for="l-note">ملاحظات <span class="hint">(اختياري)</span></label><textarea id="l-note" name="note" rows="2" maxlength="500" placeholder="كم فرع عندك؟ شو المكافأة اللي ببالك؟"></textarea></div>
+        <div class="hp" aria-hidden="true"><input type="text" name="website" tabindex="-1" autocomplete="off"></div>
+        <p class="error" id="leadErr" role="alert"></p>
+        <button class="btn big block" type="submit">بدي أجرّب</button>
+        <a class="btn big block wa hidden" data-wa target="_blank" rel="noopener">أو احكينا على واتساب</a>
+      </form>
+      <div class="panel center hidden" id="leadDone">
+        <div style="font-size:2.5rem">🎉</div>
+        <h3>وصلنا طلبك!</h3>
+        <p class="muted">منتواصل معك خلال يوم لنجهّزلك حسابك.</p>
+        <a class="btn wa hidden" data-wa target="_blank" rel="noopener" style="margin-top:10px">مستعجل؟ احكينا واتساب</a>
+      </div>
+    </section>
+
+    <section class="section narrow" id="login">
       <div class="panel">
-        <div class="seg" role="tablist">
-          <button type="button" class="on" data-mode="signup">سجّل محلك</button>
-          <button type="button" data-mode="login">تسجيل الدخول</button>
+        <h2 style="text-align:center">دخول المحلات</h2>
+        <div class="seg hidden" role="tablist" id="authTabs" style="margin-top:10px">
+          <button type="button" data-mode="login" class="on">تسجيل الدخول</button>
+          <button type="button" data-mode="signup">فتح حساب جديد</button>
         </div>
         <form id="auth" class="stack" style="margin-top:14px" novalidate>
-          <div class="signup-only field"><label for="shopName">اسم المحل</label><input id="shopName" name="shopName" autocomplete="organization" placeholder="موكا كوفي هاوس" required>
+          <div class="signup-only field hidden"><label for="shopName">اسم المحل</label><input id="shopName" name="shopName" autocomplete="organization" placeholder="موكا كوفي هاوس">
             <div class="hint">لو كتبته بالإنجليزي كمان (Mocha Coffee) بيطلع رابط أحلى، وبتقدر تغيّره بعدين.</div></div>
-          <div class="signup-only field"><label for="name">اسمك</label><input id="name" name="name" autocomplete="name"></div>
-          <div class="signup-only field"><label for="country">الدولة</label>
+          <div class="signup-only field hidden"><label for="name">اسمك</label><input id="name" name="name" autocomplete="name"></div>
+          <div class="signup-only field hidden"><label for="country">الدولة</label>
             <select id="country" name="country">
               <option value="JO">الأردن</option><option value="PS">فلسطين</option><option value="SA">السعودية</option><option value="AE">الإمارات</option>
               <option value="KW">الكويت</option><option value="QA">قطر</option><option value="BH">البحرين</option><option value="OM">عُمان</option>
               <option value="EG">مصر</option><option value="IQ">العراق</option><option value="LB">لبنان</option><option value="SY">سوريا</option><option value="TR">تركيا</option><option value="US">أمريكا</option>
             </select></div>
           <div class="field"><label for="email">الإيميل</label><input id="email" name="email" type="email" autocomplete="email" dir="ltr" required></div>
-          <div class="field"><label for="password">كلمة السر</label><input id="password" name="password" type="password" autocomplete="new-password" dir="ltr" minlength="8" required>
-            <div class="hint signup-only">8 حروف على الأقل.</div></div>
-          <div class="signup-only field hidden" id="codeField"><label for="code">رمز التسجيل</label><input id="code" name="code" dir="ltr"><div class="hint">إذا عندك رمز من فريقنا.</div></div>
+          <div class="field"><label for="password">كلمة السر</label><input id="password" name="password" type="password" autocomplete="current-password" dir="ltr" minlength="8" required>
+            <div class="hint signup-only hidden">8 حروف على الأقل.</div></div>
+          <div class="signup-only field hidden" id="codeField"><label for="code">رمز التسجيل</label><input id="code" name="code" dir="ltr"><div class="hint">الرمز اللي وصلك منّا.</div></div>
           <p class="error" id="authError" role="alert"></p>
-          <button class="btn big block" type="submit" id="authBtn">ابدأ مجاناً</button>
+          <button class="btn big block" type="submit" id="authBtn">دخول</button>
         </form>
       </div>
     </section>
   </main>
-  <footer class="wrap center small muted" style="padding-bottom:32px"><a href="/privacy">سياسة الخصوصية</a></footer>
+
+  <footer class="site-foot">
+    <div class="wrap row">
+      <span class="brand small"><img src="/favicon.svg" alt="" width="22" height="22">نقاطك</span>
+      <span class="grow"></span>
+      <a href="/privacy">سياسة الخصوصية</a>
+      <a href="#login">دخول المحلات</a>
+      <a class="hidden" data-wa target="_blank" rel="noopener">واتساب</a>
+    </div>
+  </footer>
+  <script src="/vendor/qrcode.js"></script>
   <script type="module" src="/js/landing.js"></script>
 </body>
 </html>

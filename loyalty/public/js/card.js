@@ -36,6 +36,7 @@ async function load(first = false) {
       </div>
       <p class="center small muted">زياراتك: <span class="num">${member.visits}</span> · المكافآت اللي أخدتها: <span class="num">${member.redeemed}</span></p>
       <p class="center small muted"><a href="/privacy">سياسة الخصوصية</a> · <button type="button" class="linkish" id="deleteCard">احذف بطاقتي وبياناتي</button></p>
+      <p class="powered">بطاقات الولاء من <a href="/">نقاطك</a></p>
     </div>`);
 }
 
