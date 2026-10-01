@@ -88,6 +88,7 @@ test('زر «جرّب إشعار»: بيحفظ الاشتراك وبيرجّع �
   const token = (await guest.post(`/api/shops/${shop.slug}/join`, { name: 'سارة', phone: '0791110000' })).data.token;
   const id = (await owner.get(`/api/members/lookup?code=${token}`)).data.member.id;
   assert.deepEqual((await owner.get(`/api/members/${id}`)).data.push, { devices: 0, lastAt: null, lastError: null });
+  assert.deepEqual((await owner.post(`/api/members/${id}/earn`, { amount: 1 })).data.push, { devices: 0 }, 'زبون بدون إشعارات');
 
   const d = await fakeDevice();
   const endpoint = 'https://web.push.apple.com/device-1';
@@ -107,8 +108,8 @@ test('زر «جرّب إشعار»: بيحفظ الاشتراك وبيرجّع �
   reply = () => Response.json({ reason: 'BadJwtToken' }, { status: 403 });
   r = await guest.post(`/api/cards/${token}/push/test`, sub);
   assert.deepEqual(r.data, { result: 'error', reason: '403 BadJwtToken' });
-  await owner.post(`/api/members/${id}/earn`, { amount: 5 });
-  await owner.flush();
+  const e = await owner.post(`/api/members/${id}/earn`, { amount: 5 });
+  assert.deepEqual(e.data.push, { devices: 1, sent: 0, reason: '403 BadJwtToken' }, 'الكاشير بيشوف سبب الرفض');
   p = (await owner.get(`/api/members/${id}`)).data.push;
   assert.equal(p.lastError, '403 BadJwtToken');
 
@@ -156,8 +157,8 @@ test('من البطاقة للإشعار: اشتراك، إشعار نقاط، �
 
   // إضافة نقاط ← إشعار للزبون
   const id = (await owner.get(`/api/members/lookup?code=${token}`)).data.member.id;
-  await owner.post(`/api/members/${id}/earn`, { amount: 10 });
-  await owner.flush();
+  const e1 = await owner.post(`/api/members/${id}/earn`, { amount: 10 });
+  assert.deepEqual(e1.data.push, { devices: 1, sent: 1, reason: null }, 'الكاشير بيعرف إنه الإشعار انبعت');
   assert.equal(sent.length, 1);
   assert.equal(sent[0].msg.title, 'Mocha');
   assert.match(sent[0].msg.body, /انضافلك 10 نقطة.*رصيدك صار 10.*باقي 20/);

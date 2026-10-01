@@ -107,7 +107,16 @@ function pushPanel() {
   return '';
 }
 
-async function load(first = false) {
+// إشعار وصل والبطاقة مفتوحة: بنحدّثها فوراً وبنعرض نص الإشعار
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.addEventListener('message', async (e) => {
+    if (!e.data || e.data.type !== 'push') return;
+    await load(false, true);
+    if (e.data.body) toast(`🔔 ${e.data.body}`, 'ok');
+  });
+}
+
+async function load(first = false, quiet = false) {
   let data;
   try {
     data = await api(`/api/cards/${token}`);
@@ -115,7 +124,7 @@ async function load(first = false) {
     if (first) render(root, html`<div class="panel center" style="margin-top:60px"><h1>😕</h1><p>${e.message}</p></div>`);
     return;
   }
-  if (lastBalance !== null && data.member.balance > lastBalance) toast(`+${data.member.balance - lastBalance} ${data.shop.unit} 🎉`, 'ok');
+  if (!quiet && lastBalance !== null && data.member.balance > lastBalance) toast(`+${data.member.balance - lastBalance} ${data.shop.unit} 🎉`, 'ok');
   lastBalance = data.member.balance;
   lastData = data;
   draw();

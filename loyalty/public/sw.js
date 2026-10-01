@@ -5,14 +5,19 @@ self.addEventListener('activate', (event) => event.waitUntil(self.clients.claim(
 self.addEventListener('push', (event) => {
   let data = {};
   try { data = event.data ? event.data.json() : {}; } catch { data = { body: event.data && event.data.text() }; }
-  event.waitUntil(self.registration.showNotification(data.title || 'نقاطك', {
-    body: data.body || '',
-    icon: data.icon,
-    tag: data.tag,
-    dir: 'rtl',
-    lang: 'ar',
-    data: { url: data.url || '/' },
-  }));
+  event.waitUntil((async () => {
+    await self.registration.showNotification(data.title || 'نقاطك', {
+      body: data.body || '',
+      icon: data.icon,
+      tag: data.tag,
+      dir: 'rtl',
+      lang: 'ar',
+      data: { url: data.url || '/' },
+    });
+    // لو البطاقة مفتوحة قدّام الزبون (الآيفون ما بيطلّع الإشعار فوقها): بتتحدّث فوراً وبتعرض الرسالة جوّاها
+    const list = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    for (const c of list) c.postMessage({ type: 'push', title: data.title, body: data.body });
+  })());
 });
 
 self.addEventListener('notificationclick', (event) => {

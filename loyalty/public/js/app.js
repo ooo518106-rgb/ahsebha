@@ -229,12 +229,20 @@ async function earn(m, body) {
     state.key = newKey();
     state.member = r.member;
     toast(r.duplicate ? 'هاي الحركة انسجلت قبل' : `+${fmt(r.delta)} ${state.shop.unit} لـ ${m.name}`, 'ok');
+    if (r.push) pushToast(r.push);
     showMember(r.member);
   } catch (e) {
     toast(e.message, 'bad');
     btn.disabled = false;
     onSubError(e);
   }
+}
+
+// شو صار بإشعار الزبون بعد إضافة النقاط
+function pushToast(p) {
+  if (!p.devices) toast('🔕 الزبون مش مفعّل الإشعارات على بطاقته');
+  else if (p.pending || p.sent) toast('🔔 انبعت إشعار للزبون', 'ok');
+  else toast(`⚠️ إشعار الزبون ما انبعت (${p.reason || 'خطأ'})`, 'bad');
 }
 
 async function redeem(m) {

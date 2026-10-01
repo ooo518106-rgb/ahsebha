@@ -370,7 +370,6 @@ async function cardPushTest(c, token) {
     body: 'تمام! الإشعارات شغّالة ✅ رح يوصلك إشعار كل ما تنضافلك نقاط.',
     icon: logoUrl(shop, c.origin),
     url: `${c.origin}/c/${m.token}`,
-    tag: `test-${m.id}`,
   }));
   const x = r.results[0];
   return json({ result: x.result, reason: x.reason });
@@ -402,11 +401,19 @@ async function pushTo(c, subs, messageFor) {
   return out;
 }
 
-function notifyMember(c, member, message) {
-  c.waitUntil((async () => {
-    const subs = await c.db.all('SELECT * FROM push_subs WHERE member_id = ?', member.id);
-    await pushTo(c, subs, () => ({ ...message, url: `${c.origin}/c/${member.token}` }));
-  })().catch((e) => console.error('web push:', e.message)));
+// إشعار لزبون واحد (نقاط/مكافأة): بنستنى النتيجة لحد ثانيتين عشان الكاشير يعرف إذا انبعت، والباقي بيكمل بالخلفية
+async function notifyMember(c, member, message) {
+  const subs = await c.db.all('SELECT * FROM push_subs WHERE member_id = ?', member.id);
+  if (!subs.length) return { devices: 0 };
+  const job = pushTo(c, subs, () => ({ ...message, url: `${c.origin}/c/${member.token}` }))
+    .catch((e) => { console.error('web push:', e.message); return null; });
+  c.waitUntil(job);
+  let timer;
+  const r = await Promise.race([job, new Promise((res) => { timer = setTimeout(res, 2000, 'slow'); })]);
+  clearTimeout(timer);
+  if (r === 'slow') return { devices: subs.length, pending: true };
+  if (!r) return { devices: subs.length, sent: 0, reason: 'خطأ بالسيرفر' };
+  return { devices: subs.length, sent: r.ok, reason: r.ok ? null : (r.results.find((x) => x.result !== 'ok') || {}).reason || null };
 }
 
 function earnMessage(shop, before, after, delta) {
@@ -418,7 +425,7 @@ function earnMessage(shop, before, after, delta) {
     : stamps
       ? `انضافلك ${delta === 1 ? 'ختم' : `${delta} أختام`} ☕ صار عندك ${p1.toward}/${p1.cost}`
       : `انضافلك ${delta} نقطة ☕ رصيدك صار ${after.balance}، وباقي ${p1.remaining} لـ ${shop.reward_name}`;
-  return { title: shop.name, body, tag: `card-${after.id}` };
+  return { title: shop.name, body };
 }
 
 // الرسالة الجماعية بتنبعت على دفعات (Cloudflare بيحد عدد الطلبات الخارجية بكل طلب)
@@ -840,11 +847,12 @@ async function seenKey(c, key) {
 async function respondMember(c, id, extra = {}, message = null) {
   const fresh = await c.db.get('SELECT * FROM members WHERE id = ?', id);
   if (!extra.duplicate) pushMember(c, c.shop, fresh);
+  let push;
   if (!extra.duplicate && message) {
     const msg = message(fresh);
-    if (msg) notifyMember(c, fresh, { ...msg, icon: logoUrl(c.shop, c.origin) });
+    if (msg) push = await notifyMember(c, fresh, { ...msg, icon: logoUrl(c.shop, c.origin) });
   }
-  return json({ member: memberView(fresh, c.shop), ...extra });
+  return json({ member: memberView(fresh, c.shop), ...extra, ...(push ? { push } : {}) });
 }
 
 async function earn(c, id) {
