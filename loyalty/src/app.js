@@ -1,0 +1,671 @@
+// السيرفر: صفحات + API. معالج واحد handle(request, ctx) بيشتغل على Cloudflare Workers وعلى Node.
+// ctx = { db, env, asset(path) → Response, waitUntil(promise) }
+import * as auth from './auth.js';
+import * as gw from './gwallet.js';
+import { defaultLogoPng } from './png.js';
+import { earnFor, progress, rewardCost, rewardRule, stampsLine, unitLabel } from '../public/js/rules.js';
+import { b64ToBytes, bytesToB64, clean, fail, HttpError, isUniqueError, json, normPhone, randomDigits, randomToken } from './util.js';
+
+const COLOR_RE = /^#[0-9a-f]{6}$/i;
+const SLUG_RE = /^[a-z0-9][a-z0-9-]{1,38}[a-z0-9]$/;
+const TOKEN_RE = /^[a-z2-9]{20}$/;
+const EMAIL_RE = /^[^\s@]{1,64}@[^\s@]{1,255}\.[^\s@]{2,}$/;
+export const CURRENCIES = { JO: 'JOD', PS: 'ILS', SA: 'SAR', AE: 'AED', KW: 'KWD', QA: 'QAR', BH: 'BHD', OM: 'OMR', EG: 'EGP', IQ: 'IQD', LB: 'USD', SY: 'SYP', TR: 'TRY', US: 'USD' };
+const MAX_BODY = 1.5 * 1024 * 1024;
+const MAX_LOGO = 700 * 1024;
+
+const SECURITY_HEADERS = {
+  'content-security-policy': "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; media-src 'self' blob:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+  'x-content-type-options': 'nosniff',
+  'referrer-policy': 'same-origin',
+  'permissions-policy': 'camera=(self), geolocation=(self)',
+};
+
+// ─── عرض البيانات ───
+function shopView(shop, origin) {
+  return {
+    id: shop.id,
+    slug: shop.slug,
+    name: shop.name,
+    color: shop.color,
+    programType: shop.program_type,
+    pointsPerUnit: shop.points_per_unit,
+    rewardThreshold: shop.reward_threshold,
+    stampsRequired: shop.stamps_required,
+    rewardName: shop.reward_name,
+    currency: shop.currency,
+    country: shop.country,
+    welcomeText: shop.welcome_text,
+    locations: JSON.parse(shop.locations || '[]'),
+    logo: logoUrl(shop, origin),
+    customLogo: !!shop.custom_logo,
+    joinUrl: `${origin}/j/${shop.slug}`,
+    rule: rewardRule(shop),
+    cost: rewardCost(shop),
+    unit: unitLabel(shop),
+  };
+}
+
+function publicShopView(shop, origin) {
+  return {
+    slug: shop.slug,
+    name: shop.name,
+    color: shop.color,
+    logo: logoUrl(shop, origin),
+    programType: shop.program_type,
+    rewardName: shop.reward_name,
+    rule: rewardRule(shop),
+    cost: rewardCost(shop),
+    unit: unitLabel(shop),
+    welcomeText: shop.welcome_text,
+  };
+}
+
+function memberView(m, shop) {
+  return {
+    id: m.id,
+    name: m.name,
+    phone: m.phone,
+    cardNo: m.card_no,
+    token: m.token,
+    balance: m.balance,
+    lifetime: m.lifetime,
+    redeemed: m.redeemed,
+    visits: m.visits,
+    lastVisit: m.last_visit,
+    createdAt: m.created_at,
+    inWallet: !!m.gw_object,
+    progress: progress(shop, m.balance),
+    stamps: shop.program_type === 'stamps' ? stampsLine(shop, m.balance) : null,
+  };
+}
+
+const logoUrl = (shop, origin) => `${origin}/media/logo/${shop.id}.png?v=${shop.logo_version}`;
+
+// ─── Google Wallet ───
+async function syncClass(c, shop) {
+  const cfg = gw.googleConfig(c.env);
+  if (!cfg) return { enabled: false };
+  try {
+    await gw.upsertClass(cfg, gw.buildClass(cfg, shop, c.origin));
+    shop.gw_synced_at = Date.now();
+    await c.db.run('UPDATE shops SET gw_synced_at = ?, gw_error = NULL WHERE id = ?', shop.gw_synced_at, shop.id);
+    return { enabled: true, ok: true };
+  } catch (e) {
+    await c.db.run('UPDATE shops SET gw_error = ? WHERE id = ?', String(e.message).slice(0, 500), shop.id);
+    return { enabled: true, ok: false, error: e.message };
+  }
+}
+
+function googleStatus(c, shop) {
+  return { enabled: !!gw.googleConfig(c.env), syncedAt: shop.gw_synced_at || null, error: shop.gw_error || null };
+}
+
+// بعد أي تغيير بالنقاط: نحدّث البطاقة بمحفظة الزبون بالخلفية (بدون ما نأخّر الكاشير)
+function pushMember(c, shop, member) {
+  const cfg = gw.googleConfig(c.env);
+  if (!cfg || !member.gw_object) return;
+  c.waitUntil(gw.patchObject(cfg, gw.buildObject(cfg, shop, member, c.origin)).catch((e) => console.error('gwallet patch:', e.message)));
+}
+
+async function googleSave(c, token) {
+  const m = TOKEN_RE.test(token) ? await c.db.get('SELECT * FROM members WHERE token = ?', token) : null;
+  if (!m) return notFound(c);
+  const cfg = gw.googleConfig(c.env);
+  if (!cfg) return new Response(null, { status: 302, headers: { location: `/c/${token}?gw=off` } });
+  const shop = await c.db.get('SELECT * FROM shops WHERE id = ?', m.shop_id);
+  const obj = gw.buildObject(cfg, shop, m, c.origin);
+  let url;
+  try {
+    if (!shop.gw_synced_at) {
+      const s = await syncClass(c, shop);
+      if (!s.ok) throw new Error(s.error);
+    }
+    await gw.upsertObject(cfg, obj);
+    url = await gw.saveUrl(cfg, c.origin, { objects: [{ id: obj.id, classId: obj.classId }] });
+  } catch (e) {
+    // لو الـ API ما زبط، منبعت الفئة والبطاقة كاملين جوّا الرابط و Google بتنشئهم وقت الحفظ
+    console.error('gwallet save:', e.message);
+    url = await gw.saveUrl(cfg, c.origin, { classes: [gw.buildClass(cfg, shop, c.origin)], objects: [obj] });
+  }
+  await c.db.run('UPDATE members SET gw_object = 1 WHERE id = ?', m.id);
+  return new Response(null, { status: 302, headers: { location: url, 'cache-control': 'no-store' } });
+}
+
+// ─── مساعدات ───
+async function shopBySlug(db, slug) {
+  const shop = await db.get('SELECT * FROM shops WHERE slug = ?', String(slug).toLowerCase());
+  if (!shop) fail(404, 'ما لقينا هالمحل');
+  return shop;
+}
+
+async function memberOf(c, id) {
+  const m = await c.db.get('SELECT * FROM members WHERE id = ? AND shop_id = ?', Number(id), c.shop.id);
+  if (!m) fail(404, 'ما لقينا هالزبون');
+  return m;
+}
+
+function readName(v) {
+  const name = clean(v, 60);
+  if (name.length < 2) fail(400, 'اكتب الاسم');
+  return name;
+}
+
+function readPhone(v) {
+  const phone = normPhone(v);
+  if (phone.length < 7 || phone.length > 15) fail(400, 'رقم الجوال مش صحيح');
+  return phone;
+}
+
+const DUPLICATE_PHONE = 'هالرقم مسجّل عنا من قبل. اطلب من الكاشير يبعتلك رابط بطاقتك.';
+
+async function createMember(db, shop, name, phone) {
+  for (let i = 0; i < 6; i++) {
+    try {
+      const r = await db.run(
+        'INSERT INTO members (shop_id, token, card_no, name, phone, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+        shop.id, randomToken(), randomDigits(8), name, phone, Date.now(),
+      );
+      return db.get('SELECT * FROM members WHERE id = ?', r.lastId);
+    } catch (e) {
+      if (!isUniqueError(e)) throw e;
+      if (/phone/.test(e.message)) fail(409, DUPLICATE_PHONE);
+    }
+  }
+  fail(500, 'ما قدرنا ننشئ البطاقة، جرّب كمان مرة');
+}
+
+function slugBase(name) {
+  const base = name.toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 30);
+  return base.length >= 3 ? base : 'shop';
+}
+
+async function storeDefaultLogo(db, shop) {
+  const png = await defaultLogoPng(shop.color);
+  await db.run('INSERT OR REPLACE INTO shop_logos (shop_id, mime, data) VALUES (?, ?, ?)', shop.id, 'image/png', bytesToB64(png));
+}
+
+function idemKey(v) {
+  const k = clean(v, 64);
+  return /^[A-Za-z0-9_-]{8,64}$/.test(k) ? k : null;
+}
+
+function int(v, min, max, msg) {
+  const n = Number(v);
+  if (!Number.isInteger(n) || n < min || n > max) fail(400, msg);
+  return n;
+}
+
+// ─── المسارات العامة (بدون تسجيل دخول) ───
+async function publicShop(c, slug) {
+  return json({ shop: publicShopView(await shopBySlug(c.db, slug), c.origin) });
+}
+
+async function join(c, slug) {
+  const shop = await shopBySlug(c.db, slug);
+  if (c.body.website) fail(400, 'طلب غير صالح'); // فخ للبوتات
+  const m = await createMember(c.db, shop, readName(c.body.name), readPhone(c.body.phone));
+  return json({ token: m.token, url: `${c.origin}/c/${m.token}` }, 201);
+}
+
+async function cardInfo(c, token) {
+  const m = await c.db.get('SELECT * FROM members WHERE token = ?', token);
+  if (!m) fail(404, 'ما لقينا هالبطاقة');
+  const shop = await c.db.get('SELECT * FROM shops WHERE id = ?', m.shop_id);
+  const v = memberView(m, shop);
+  delete v.phone;
+  delete v.id;
+  return json({ shop: publicShopView(shop, c.origin), member: v, google: !!gw.googleConfig(c.env) });
+}
+
+async function logo(c, shopId) {
+  let row = await c.db.get('SELECT mime, data FROM shop_logos WHERE shop_id = ?', Number(shopId));
+  if (!row) {
+    const shop = await c.db.get('SELECT * FROM shops WHERE id = ?', Number(shopId));
+    if (!shop) return notFound(c);
+    await storeDefaultLogo(c.db, shop);
+    row = await c.db.get('SELECT mime, data FROM shop_logos WHERE shop_id = ?', shop.id);
+  }
+  return new Response(b64ToBytes(row.data), { headers: { 'content-type': row.mime, 'cache-control': 'public, max-age=86400', 'x-content-type-options': 'nosniff' } });
+}
+
+// ─── الحساب ───
+async function signup(c) {
+  const b = c.body;
+  if (c.env.SIGNUP_CODE && String(b.code || '').trim() !== String(c.env.SIGNUP_CODE)) fail(403, 'رمز التسجيل غلط. تواصل معنا لتحصل عليه');
+  const shopName = clean(b.shopName, 60);
+  if (shopName.length < 2) fail(400, 'اكتب اسم المحل');
+  const email = String(b.email || '').trim().toLowerCase();
+  if (!EMAIL_RE.test(email)) fail(400, 'الإيميل مش صحيح');
+  auth.checkPasswordStrength(b.password);
+  if (await c.db.get('SELECT id FROM users WHERE email = ?', email)) fail(409, 'هالإيميل مسجّل من قبل، سجّل دخول');
+  const ownerName = clean(b.name, 60) || shopName;
+  const country = CURRENCIES[b.country] ? b.country : 'JO';
+  const pw = await auth.hashPassword(b.password);
+  const now = Date.now();
+  const base = slugBase(shopName);
+  let slug = base;
+  for (let i = 0; ; i++) {
+    try {
+      await c.db.batch([
+        ['INSERT INTO shops (slug, name, country, currency, welcome_text, created_at) VALUES (?, ?, ?, ?, ?, ?)', [slug, shopName, country, CURRENCIES[country], `${shopName} ترحب بكم`, now]],
+        ['INSERT INTO users (shop_id, email, name, role, pw_hash, created_at) VALUES ((SELECT id FROM shops WHERE slug = ?), ?, ?, \'owner\', ?, ?)', [slug, email, ownerName, pw, now]],
+      ]);
+      break;
+    } catch (e) {
+      if (!isUniqueError(e)) throw e;
+      if (/email/.test(e.message)) fail(409, 'هالإيميل مسجّل من قبل، سجّل دخول');
+      if (i >= 5) throw e;
+      slug = `${base}-${randomDigits(4)}`;
+    }
+  }
+  const shop = await c.db.get('SELECT * FROM shops WHERE slug = ?', slug);
+  await storeDefaultLogo(c.db, shop);
+  const user = await c.db.get('SELECT id FROM users WHERE email = ?', email);
+  const token = await auth.createSession(c.db, user.id);
+  return json({ ok: true }, 201, { 'set-cookie': auth.sessionCookie(token, c.req) });
+}
+
+async function loginRoute(c) {
+  const user = await auth.login(c.db, c.body.email, c.body.password);
+  const token = await auth.createSession(c.db, user.id);
+  return json({ ok: true }, 200, { 'set-cookie': auth.sessionCookie(token, c.req) });
+}
+
+async function logout(c) {
+  await auth.endSession(c.db, c.req);
+  return json({ ok: true }, 200, { 'set-cookie': auth.sessionCookie(null, c.req) });
+}
+
+async function me(c) {
+  return json({
+    user: { id: c.user.id, name: c.user.name, email: c.user.email, role: c.user.role },
+    shop: shopView(c.shop, c.origin),
+    google: googleStatus(c, c.shop),
+    currencies: CURRENCIES,
+  });
+}
+
+async function changePassword(c) {
+  const row = await c.db.get('SELECT pw_hash FROM users WHERE id = ?', c.user.id);
+  if (!(await auth.verifyPassword(String(c.body.current || ''), row.pw_hash))) fail(400, 'كلمة السر الحالية غلط');
+  auth.checkPasswordStrength(c.body.next);
+  await c.db.run('UPDATE users SET pw_hash = ? WHERE id = ?', await auth.hashPassword(c.body.next), c.user.id);
+  return json({ ok: true });
+}
+
+// ─── الزبائن والنقاط ───
+async function listMembers(c) {
+  const q = clean(c.url.searchParams.get('q'), 60);
+  const offset = Math.max(0, Number(c.url.searchParams.get('offset')) || 0);
+  let where = 'shop_id = ?';
+  const a = [c.shop.id];
+  if (q) {
+    const like = `%${q.replace(/[\\%_]/g, (ch) => `\\${ch}`)}%`;
+    const digits = normPhone(q);
+    where += " AND (name LIKE ? ESCAPE '\\' OR card_no = ?" + (digits.length >= 3 ? ' OR phone LIKE ?' : '') + ')';
+    a.push(like, q);
+    if (digits.length >= 3) a.push(`%${digits}%`);
+  }
+  const rows = await c.db.all(`SELECT * FROM members WHERE ${where} ORDER BY COALESCE(last_visit, created_at) DESC LIMIT 50 OFFSET ?`, ...a, offset);
+  const total = await c.db.get(`SELECT COUNT(*) AS n FROM members WHERE ${where}`, ...a);
+  return json({ members: rows.map((m) => memberView(m, c.shop)), total: total.n });
+}
+
+async function addMember(c) {
+  const name = readName(c.body.name);
+  const phone = readPhone(c.body.phone);
+  const existing = await c.db.get('SELECT id FROM members WHERE shop_id = ? AND phone = ?', c.shop.id, phone);
+  if (existing) return json({ error: 'هالرقم إله بطاقة من قبل', memberId: existing.id }, 409);
+  const m = await createMember(c.db, c.shop, name, phone);
+  return json({ member: memberView(m, c.shop), cardUrl: `${c.origin}/c/${m.token}` }, 201);
+}
+
+// الكاشير بيمسح QR (توكن أو رابط البطاقة) أو بيكتب رقم البطاقة أو الجوال
+async function lookup(c) {
+  const code = String(c.url.searchParams.get('code') || '').trim();
+  const fromUrl = code.match(/\/c\/([a-z2-9]{20})(?:[/?#]|$)/);
+  const token = fromUrl ? fromUrl[1] : code.toLowerCase();
+  let m = null;
+  if (TOKEN_RE.test(token)) m = await c.db.get('SELECT * FROM members WHERE token = ? AND shop_id = ?', token, c.shop.id);
+  if (!m) {
+    const digits = normPhone(code);
+    if (/^\d{8}$/.test(digits)) m = await c.db.get('SELECT * FROM members WHERE card_no = ? AND shop_id = ?', digits, c.shop.id);
+    if (!m && digits.length >= 7) m = await c.db.get('SELECT * FROM members WHERE phone = ? AND shop_id = ?', digits, c.shop.id);
+  }
+  if (!m) fail(404, 'ما لقينا هالبطاقة عندكم');
+  return json({ member: memberView(m, c.shop) });
+}
+
+async function memberDetail(c, id) {
+  const m = await memberOf(c, id);
+  const txns = await c.db.all(
+    `SELECT t.id, t.kind, t.delta, t.amount, t.note, t.created_at AS at, u.name AS by FROM txns t LEFT JOIN users u ON u.id = t.user_id
+     WHERE t.member_id = ? AND t.shop_id = ? ORDER BY t.created_at DESC, t.id DESC LIMIT 30`,
+    m.id, c.shop.id,
+  );
+  return json({ member: memberView(m, c.shop), txns, cardUrl: `${c.origin}/c/${m.token}` });
+}
+
+// كل حركة نقاط إلها مفتاح (idem) من الواجهة: لو انبعتت مرتين (نت ضعيف أو كبسة مكررة) بتنحسب مرة وحدة
+async function applyTxn(c, statements) {
+  try {
+    return await c.db.batch(statements);
+  } catch (e) {
+    if (isUniqueError(e) && /idem/.test(e.message)) return null;
+    throw e;
+  }
+}
+
+// الحركة المشروطة ما انطبقت: يا الرصيد مش كافي، يا هاي إعادة لطلب نجح قبل (فالرصيد نقص من أول مرة)
+async function seenKey(c, key) {
+  const k = idemKey(key);
+  return !!(k && (await c.db.get('SELECT id FROM txns WHERE shop_id = ? AND idem = ?', c.shop.id, k)));
+}
+
+async function respondMember(c, id, extra = {}) {
+  const fresh = await c.db.get('SELECT * FROM members WHERE id = ?', id);
+  if (!extra.duplicate) pushMember(c, c.shop, fresh);
+  return json({ member: memberView(fresh, c.shop), ...extra });
+}
+
+async function earn(c, id) {
+  const m = await memberOf(c, id);
+  const r = earnFor(c.shop, c.body);
+  if (r.error) fail(400, r.error);
+  const now = Date.now();
+  const res = await applyTxn(c, [
+    ['INSERT INTO txns (shop_id, member_id, kind, delta, amount, user_id, idem, created_at) VALUES (?, ?, \'earn\', ?, ?, ?, ?, ?)', [c.shop.id, m.id, r.delta, r.amount, c.user.id, idemKey(c.body.key), now]],
+    ['UPDATE members SET balance = balance + ?, lifetime = lifetime + ?, visits = visits + 1, last_visit = ? WHERE id = ? AND shop_id = ?', [r.delta, r.delta, now, m.id, c.shop.id]],
+  ]);
+  return respondMember(c, m.id, res ? { delta: r.delta } : { duplicate: true });
+}
+
+async function redeem(c, id) {
+  const m = await memberOf(c, id);
+  const cost = rewardCost(c.shop);
+  const now = Date.now();
+  // الشرط (الرصيد كافي) جوّا نفس العملية، فما في مجال تنصرف المكافأة مرتين
+  const res = await applyTxn(c, [
+    [`INSERT INTO txns (shop_id, member_id, kind, delta, user_id, idem, created_at)
+      SELECT ?, id, 'redeem', ?, ?, ?, ? FROM members WHERE id = ? AND shop_id = ? AND balance >= ?`, [c.shop.id, -cost, c.user.id, idemKey(c.body.key), now, m.id, c.shop.id, cost]],
+    ['UPDATE members SET balance = balance - ?, redeemed = redeemed + 1 WHERE id = ? AND shop_id = ? AND balance >= ?', [cost, m.id, c.shop.id, cost]],
+  ]);
+  if (!res || (!res[1].changes && (await seenKey(c, c.body.key)))) return respondMember(c, m.id, { duplicate: true });
+  if (!res[1].changes) fail(409, `ما عنده ${c.shop.program_type === 'stamps' ? 'أختام' : 'نقاط'} كفاية للمكافأة`);
+  return respondMember(c, m.id, { delta: -cost });
+}
+
+async function adjust(c, id) {
+  const m = await memberOf(c, id);
+  const delta = int(c.body.delta, -100000, 100000, 'اكتب عدد صحيح');
+  if (!delta) fail(400, 'اكتب عدد غير الصفر');
+  const note = clean(c.body.note, 120);
+  if (note.length < 2) fail(400, 'اكتب سبب التعديل');
+  const now = Date.now();
+  const res = await applyTxn(c, [
+    [`INSERT INTO txns (shop_id, member_id, kind, delta, user_id, note, idem, created_at)
+      SELECT ?, id, 'adjust', ?, ?, ?, ?, ? FROM members WHERE id = ? AND shop_id = ? AND balance + ? >= 0`, [c.shop.id, delta, c.user.id, note, idemKey(c.body.key), now, m.id, c.shop.id, delta]],
+    ['UPDATE members SET balance = balance + ? WHERE id = ? AND shop_id = ? AND balance + ? >= 0', [delta, m.id, c.shop.id, delta]],
+  ]);
+  if (!res || (!res[1].changes && (await seenKey(c, c.body.key)))) return respondMember(c, m.id, { duplicate: true });
+  if (!res[1].changes) fail(409, 'الرصيد ما بيصير بالسالب');
+  return respondMember(c, m.id, { delta });
+}
+
+// آخر الحركات + أرقام اليوم والأسبوع والشهر (البداية بتيجي من جهاز المستخدم عشان فرق التوقيت)
+async function activity(c) {
+  const p = c.url.searchParams;
+  const since = (k, def) => { const v = Number(p.get(k)); return Number.isFinite(v) && v > 0 ? v : def; };
+  const now = Date.now();
+  const day = since('dayStart', now - 864e5);
+  const week = since('weekStart', now - 7 * 864e5);
+  const month = since('monthStart', now - 30 * 864e5);
+  const s = c.shop.id;
+  const [members, newWeek, visitsDay, earnedMonth, redeemedMonth, recent] = await Promise.all([
+    c.db.get('SELECT COUNT(*) AS n FROM members WHERE shop_id = ?', s),
+    c.db.get('SELECT COUNT(*) AS n FROM members WHERE shop_id = ? AND created_at >= ?', s, week),
+    c.db.get("SELECT COUNT(*) AS n FROM txns WHERE shop_id = ? AND kind = 'earn' AND created_at >= ?", s, day),
+    c.db.get("SELECT COALESCE(SUM(delta), 0) AS n FROM txns WHERE shop_id = ? AND kind = 'earn' AND created_at >= ?", s, month),
+    c.db.get("SELECT COUNT(*) AS n FROM txns WHERE shop_id = ? AND kind = 'redeem' AND created_at >= ?", s, month),
+    c.db.all(
+      `SELECT t.id, t.kind, t.delta, t.amount, t.note, t.created_at AS at, m.id AS memberId, m.name AS member, u.name AS by
+       FROM txns t JOIN members m ON m.id = t.member_id LEFT JOIN users u ON u.id = t.user_id
+       WHERE t.shop_id = ? ORDER BY t.created_at DESC, t.id DESC LIMIT 50`, s,
+    ),
+  ]);
+  return json({ stats: { members: members.n, newWeek: newWeek.n, visitsDay: visitsDay.n, earnedMonth: earnedMonth.n, redeemedMonth: redeemedMonth.n }, recent });
+}
+
+// ─── إعدادات المحل (للمالك) ───
+async function updateShop(c) {
+  const b = c.body;
+  const s = c.shop;
+  const next = {};
+  next.name = clean(b.name ?? s.name, 60);
+  if (next.name.length < 2) fail(400, 'اكتب اسم المحل');
+  next.slug = String(b.slug ?? s.slug).trim().toLowerCase();
+  if (!SLUG_RE.test(next.slug)) fail(400, 'رابط المحل: حروف إنجليزية صغيرة وأرقام وشرطة (3 حروف على الأقل)');
+  next.color = String(b.color ?? s.color);
+  if (!COLOR_RE.test(next.color)) fail(400, 'اللون مش صحيح');
+  next.country = CURRENCIES[b.country] ? b.country : s.country;
+  next.currency = CURRENCIES[next.country];
+  next.program_type = b.programType ?? s.program_type;
+  if (!['points', 'stamps'].includes(next.program_type)) fail(400, 'نوع البرنامج مش صحيح');
+  if (next.program_type !== s.program_type && (await c.db.get('SELECT id FROM txns WHERE shop_id = ? LIMIT 1', s.id))) {
+    fail(409, 'ما بتقدر تغيّر نوع البرنامج بعد ما بلّشت تسجّل للزبائن');
+  }
+  const ppu = Number(b.pointsPerUnit ?? s.points_per_unit);
+  if (!Number.isFinite(ppu) || ppu <= 0 || ppu > 1000) fail(400, 'النقاط لكل وحدة لازم تكون بين 0 و 1000');
+  next.points_per_unit = Math.round(ppu * 1000) / 1000;
+  next.reward_threshold = int(b.rewardThreshold ?? s.reward_threshold, 1, 1000000, 'نقاط المكافأة لازم تكون عدد صحيح');
+  next.stamps_required = int(b.stampsRequired ?? s.stamps_required, 2, 30, 'عدد الأختام لازم يكون بين 2 و 30');
+  next.reward_name = clean(b.rewardName ?? s.reward_name, 40);
+  if (next.reward_name.length < 2) fail(400, 'اكتب شو المكافأة');
+  next.welcome_text = clean(b.welcomeText ?? s.welcome_text, 100);
+  const locs = b.locations ?? JSON.parse(s.locations || '[]');
+  if (!Array.isArray(locs) || locs.length > 10) fail(400, 'لحد 10 فروع');
+  next.locations = JSON.stringify(locs.map((l, i) => {
+    const lat = Number(l && l.lat);
+    const lng = Number(l && l.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180 || (lat === 0 && lng === 0)) fail(400, `موقع الفرع ${i + 1} مش صحيح`);
+    return { name: clean(l.name, 40) || `فرع ${i + 1}`, lat: Math.round(lat * 1e6) / 1e6, lng: Math.round(lng * 1e6) / 1e6 };
+  }));
+  try {
+    await c.db.run(
+      `UPDATE shops SET name = ?, slug = ?, color = ?, country = ?, currency = ?, program_type = ?, points_per_unit = ?, reward_threshold = ?,
+       stamps_required = ?, reward_name = ?, welcome_text = ?, locations = ? WHERE id = ?`,
+      next.name, next.slug, next.color, next.country, next.currency, next.program_type, next.points_per_unit, next.reward_threshold,
+      next.stamps_required, next.reward_name, next.welcome_text, next.locations, s.id,
+    );
+  } catch (e) {
+    if (isUniqueError(e)) fail(409, 'هالرابط مستخدم لمحل تاني');
+    throw e;
+  }
+  if (next.color !== s.color && !s.custom_logo) {
+    await storeDefaultLogo(c.db, { ...s, color: next.color });
+    await c.db.run('UPDATE shops SET logo_version = logo_version + 1 WHERE id = ?', s.id);
+  }
+  const shop = await c.db.get('SELECT * FROM shops WHERE id = ?', s.id);
+  const google = await syncClass(c, shop);
+  return json({ shop: shopView(shop, c.origin), google: { ...googleStatus(c, shop), lastSync: google } });
+}
+
+async function updateLogo(c) {
+  const s = c.shop;
+  if (c.body.remove) {
+    await storeDefaultLogo(c.db, s);
+    await c.db.run('UPDATE shops SET custom_logo = 0, logo_version = logo_version + 1 WHERE id = ?', s.id);
+  } else {
+    const m = /^data:(image\/(?:png|jpeg));base64,([A-Za-z0-9+/]+=*)$/.exec(String(c.body.dataUrl || ''));
+    if (!m) fail(400, 'الشعار لازم يكون صورة PNG أو JPG');
+    const bytes = b64ToBytes(m[2]);
+    if (bytes.length > MAX_LOGO) fail(400, 'الصورة كبيرة، صغّرها');
+    const png = bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47;
+    const jpg = bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
+    if ((m[1] === 'image/png' && !png) || (m[1] === 'image/jpeg' && !jpg)) fail(400, 'ملف الصورة تالف');
+    await c.db.run('INSERT OR REPLACE INTO shop_logos (shop_id, mime, data) VALUES (?, ?, ?)', s.id, m[1], m[2]);
+    await c.db.run('UPDATE shops SET custom_logo = 1, logo_version = logo_version + 1 WHERE id = ?', s.id);
+  }
+  const shop = await c.db.get('SELECT * FROM shops WHERE id = ?', s.id);
+  const google = await syncClass(c, shop);
+  return json({ shop: shopView(shop, c.origin), google: { ...googleStatus(c, shop), lastSync: google } });
+}
+
+async function syncNow(c) {
+  const r = await syncClass(c, c.shop);
+  if (!r.enabled) fail(400, 'Google Wallet مش مفعّل على السيرفر');
+  const shop = await c.db.get('SELECT * FROM shops WHERE id = ?', c.shop.id);
+  return json({ google: { ...googleStatus(c, shop), lastSync: r } });
+}
+
+async function broadcast(c) {
+  const cfg = gw.googleConfig(c.env);
+  if (!cfg) fail(400, 'Google Wallet مش مفعّل على السيرفر');
+  const header = clean(c.body.header, 40) || c.shop.name;
+  const body = clean(c.body.body, 300);
+  if (body.length < 2) fail(400, 'اكتب نص الرسالة');
+  if (!c.shop.gw_synced_at) {
+    const s = await syncClass(c, c.shop);
+    if (!s.ok) fail(502, s.error);
+  }
+  try {
+    await gw.addClassMessage(cfg, c.shop.id, { header, body });
+  } catch (e) {
+    fail(502, e.message);
+  }
+  return json({ ok: true });
+}
+
+// ─── الموظفين ───
+async function listStaff(c) {
+  const users = await c.db.all('SELECT id, name, email, role, created_at AS createdAt FROM users WHERE shop_id = ? ORDER BY id', c.shop.id);
+  return json({ users });
+}
+
+async function addStaff(c) {
+  const name = readName(c.body.name);
+  const email = String(c.body.email || '').trim().toLowerCase();
+  if (!EMAIL_RE.test(email)) fail(400, 'الإيميل مش صحيح');
+  auth.checkPasswordStrength(c.body.password);
+  try {
+    await c.db.run("INSERT INTO users (shop_id, email, name, role, pw_hash, created_at) VALUES (?, ?, ?, 'staff', ?, ?)", c.shop.id, email, name, await auth.hashPassword(c.body.password), Date.now());
+  } catch (e) {
+    if (isUniqueError(e)) fail(409, 'هالإيميل مستخدم');
+    throw e;
+  }
+  return listStaff(c);
+}
+
+async function removeStaff(c, id) {
+  const r = await c.db.run("DELETE FROM users WHERE id = ? AND shop_id = ? AND role = 'staff'", Number(id), c.shop.id);
+  if (!r.changes) fail(404, 'ما لقينا هالموظف');
+  return listStaff(c);
+}
+
+// ─── التوجيه ───
+const API = [
+  ['GET', /^\/api\/shops\/([a-z0-9-]{3,40})\/public$/, publicShop],
+  ['POST', /^\/api\/shops\/([a-z0-9-]{3,40})\/join$/, join],
+  ['GET', /^\/api\/cards\/([a-z2-9]{20})$/, cardInfo],
+  ['POST', /^\/api\/auth\/signup$/, signup],
+  ['POST', /^\/api\/auth\/login$/, loginRoute],
+  ['POST', /^\/api\/auth\/logout$/, logout],
+  ['GET', /^\/api\/me$/, me, 'staff'],
+  ['PUT', /^\/api\/me\/password$/, changePassword, 'staff'],
+  ['GET', /^\/api\/members$/, listMembers, 'staff'],
+  ['POST', /^\/api\/members$/, addMember, 'staff'],
+  ['GET', /^\/api\/members\/lookup$/, lookup, 'staff'],
+  ['GET', /^\/api\/members\/(\d+)$/, memberDetail, 'staff'],
+  ['POST', /^\/api\/members\/(\d+)\/earn$/, earn, 'staff'],
+  ['POST', /^\/api\/members\/(\d+)\/redeem$/, redeem, 'staff'],
+  ['POST', /^\/api\/members\/(\d+)\/adjust$/, adjust, 'owner'],
+  ['GET', /^\/api\/activity$/, activity, 'staff'],
+  ['PUT', /^\/api\/shop$/, updateShop, 'owner'],
+  ['PUT', /^\/api\/shop\/logo$/, updateLogo, 'owner'],
+  ['POST', /^\/api\/shop\/sync$/, syncNow, 'owner'],
+  ['POST', /^\/api\/broadcast$/, broadcast, 'owner'],
+  ['GET', /^\/api\/staff$/, listStaff, 'owner'],
+  ['POST', /^\/api\/staff$/, addStaff, 'owner'],
+  ['DELETE', /^\/api\/staff\/(\d+)$/, removeStaff, 'owner'],
+];
+
+async function readBody(req) {
+  if (req.method === 'GET' || req.method === 'HEAD') return {};
+  // طلبات التعديل لازم تكون JSON: المتصفح ما بيسمح لموقع غريب يبعت JSON بدون إذن (CORS)، فهيك منحمي من CSRF
+  if (req.method !== 'DELETE' && !/^application\/json\b/i.test(req.headers.get('content-type') || '')) fail(415, 'لازم الطلب يكون JSON');
+  const len = Number(req.headers.get('content-length') || 0);
+  if (len > MAX_BODY) fail(413, 'الطلب كبير كتير');
+  const text = await req.text();
+  if (!text) return {};
+  if (text.length > MAX_BODY) fail(413, 'الطلب كبير كتير');
+  try {
+    const body = JSON.parse(text);
+    if (!body || typeof body !== 'object' || Array.isArray(body)) throw new Error();
+    return body;
+  } catch {
+    fail(400, 'JSON مش صالح');
+  }
+}
+
+async function api(c) {
+  const { req, url } = c;
+  if (req.method !== 'GET' && req.method !== 'HEAD') {
+    const origin = req.headers.get('origin');
+    if (origin && (() => { try { return new URL(origin).host !== url.host; } catch { return true; } })()) fail(403, 'مصدر الطلب مش مسموح');
+  }
+  for (const [method, re, fn, role] of API) {
+    const m = url.pathname.match(re);
+    if (!m) continue;
+    if (method !== req.method) continue;
+    if (role) {
+      c.user = await auth.currentUser(c.db, req);
+      if (!c.user) fail(401, 'سجّل دخول أول');
+      if (role === 'owner' && c.user.role !== 'owner') fail(403, 'هاد الإجراء للمالك بس');
+      c.shop = await c.db.get('SELECT * FROM shops WHERE id = ?', c.user.shop_id);
+    }
+    c.body = await readBody(req);
+    return fn(c, ...m.slice(1));
+  }
+  fail(404, 'مسار غير موجود');
+}
+
+function notFound(c) {
+  return new Response('<!doctype html><meta charset="utf-8"><title>مش موجود</title><body style="font-family:system-ui;text-align:center;padding:4rem" dir="rtl"><h1>الصفحة مش موجودة</h1><a href="/">الرئيسية</a>', {
+    status: 404,
+    headers: { 'content-type': 'text/html; charset=utf-8', ...SECURITY_HEADERS },
+  });
+}
+
+async function page(c, file) {
+  const res = await c.asset(file);
+  if (!res.ok) return notFound(c);
+  const out = new Response(res.body, res);
+  for (const [k, v] of Object.entries(SECURITY_HEADERS)) out.headers.set(k, v);
+  out.headers.set('cache-control', 'no-cache');
+  return out;
+}
+
+export async function handle(req, ctx) {
+  const url = new URL(req.url);
+  const c = { ...ctx, req, url, origin: String(ctx.env.PUBLIC_URL || url.origin).replace(/\/+$/, ''), body: {} };
+  const p = url.pathname;
+  try {
+    if (p.startsWith('/api/')) return await api(c);
+    if (req.method !== 'GET' && req.method !== 'HEAD') return notFound(c);
+    let m;
+    if ((m = p.match(/^\/media\/logo\/(\d+)\.png$/))) return await logo(c, m[1]);
+    if (p === '/' || p === '/index.html') return await page(c, '/index.html');
+    if (p === '/app' || p === '/app/') return await page(c, '/app.html');
+    if (/^\/j\/[a-z0-9-]{3,40}\/?$/.test(p)) return await page(c, '/join.html');
+    if ((m = p.match(/^\/c\/([a-z2-9]{20})\/google$/))) return await googleSave(c, m[1]);
+    if (/^\/c\/[a-z2-9]{20}\/?$/.test(p)) return await page(c, '/card.html');
+    if (/\.html$/.test(p)) return notFound(c);
+    const res = await c.asset(p);
+    return res.status === 404 ? notFound(c) : res;
+  } catch (e) {
+    if (e instanceof HttpError) return json({ error: e.message }, e.status);
+    console.error(e);
+    return json({ error: 'صار خطأ بالسيرفر، جرّب كمان شوي' }, 500);
+  }
+}

@@ -1,0 +1,129 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { createVerify } from 'node:crypto';
+import { buildClass, buildObject, googleConfig, SAVE_URL } from '../src/gwallet.js';
+import { fakeGoogle, rsaKey, setup, signup } from './helpers.mjs';
+
+const key = rsaKey();
+const serviceAccount = JSON.stringify({ client_email: 'wallet@proj.iam.gserviceaccount.com', private_key: key.pem });
+
+function decodeJwt(jwt) {
+  const [h, p, s] = jwt.split('.');
+  const verify = createVerify('RSA-SHA256');
+  verify.update(`${h}.${p}`);
+  return {
+    header: JSON.parse(Buffer.from(h, 'base64url')),
+    payload: JSON.parse(Buffer.from(p, 'base64url')),
+    valid: verify.verify(key.publicKey, Buffer.from(s, 'base64url')),
+  };
+}
+
+test('الإعداد: لازم رقم المُصدِر وملف حساب الخدمة', () => {
+  assert.equal(googleConfig({}), null);
+  assert.equal(googleConfig({ GOOGLE_ISSUER_ID: '1', GOOGLE_SERVICE_ACCOUNT: 'not json' }), null);
+  const cfg = googleConfig({ GOOGLE_ISSUER_ID: ' 3388 ', GOOGLE_SERVICE_ACCOUNT: serviceAccount });
+  assert.equal(cfg.issuerId, '3388');
+  assert.equal(cfg.prefix, 'loy');
+});
+
+test('شكل الفئة والبطاقة', () => {
+  const cfg = googleConfig({ GOOGLE_ISSUER_ID: '3388', GOOGLE_SERVICE_ACCOUNT: serviceAccount });
+  const shop = { id: 7, name: 'موكا', color: '#6b3e26', country: 'JO', currency: 'JOD', logo_version: 2, program_type: 'stamps', stamps_required: 9, reward_threshold: 100, points_per_unit: 1, reward_name: 'قهوة مجانية', locations: JSON.stringify(Array.from({ length: 12 }, (_, i) => ({ name: `f${i}`, lat: 31 + i / 100, lng: 35.9 }))) };
+  const cls = buildClass(cfg, shop, 'https://x.test');
+  assert.equal(cls.id, '3388.loy_s7');
+  assert.equal(cls.programLogo.sourceUri.uri, 'https://x.test/media/logo/7.png?v=2');
+  assert.equal(cls.merchantLocations.length, 10, 'Google بتقبل لحد 10 مواقع');
+  assert.deepEqual(cls.merchantLocations[0], { latitude: 31, longitude: 35.9 });
+  assert.equal(cls.reviewStatus, 'UNDER_REVIEW');
+
+  const obj = buildObject(cfg, shop, { id: 42, card_no: '12345678', name: 'أحمد', token: 'abcdefghijkmnpqrstuv', balance: 4 }, 'https://x.test');
+  assert.equal(obj.id, '3388.loy_m42');
+  assert.equal(obj.classId, '3388.loy_s7');
+  assert.deepEqual(obj.barcode, { type: 'QR_CODE', value: 'abcdefghijkmnpqrstuv', alternateText: '12345678' });
+  assert.deepEqual(obj.loyaltyPoints, { label: 'الأختام', balance: { string: '4/9' } });
+  assert.deepEqual(obj.secondaryLoyaltyPoints, { label: 'باقي للمكافأة', balance: { int: 5 } });
+  assert.equal(obj.textModulesData[0].body, '●●●●○○○○○');
+  assert.equal(obj.linksModuleData.uris[0].uri, 'https://x.test/c/abcdefghijkmnpqrstuv');
+});
+
+test('من البداية للنهاية: مزامنة الفئة، رابط الحفظ، وتحديث النقاط بالمحفظة', async () => {
+  const google = fakeGoogle({
+    'POST /loyaltyClass': () => ({ status: 200 }),
+    'POST /loyaltyObject': () => ({ status: 409 }), // موجود من قبل → PATCH
+    'PATCH /loyaltyObject/': () => ({ status: 200 }),
+  });
+  const { client } = await setup({ GOOGLE_ISSUER_ID: '3388', GOOGLE_SERVICE_ACCOUNT: serviceAccount, fetch: google.fetch });
+  const c = client();
+  const { shop } = await signup(c);
+
+  let r = await c.put('/api/shop', { locations: [{ name: 'الفرع', lat: 31.95, lng: 35.91 }] });
+  assert.equal(r.data.google.enabled, true);
+  assert.equal(r.data.google.lastSync.ok, true);
+  const classCall = google.calls.find((x) => x.method === 'POST' && x.url.endsWith('/loyaltyClass'));
+  assert.deepEqual(classCall.body.merchantLocations, [{ latitude: 31.95, longitude: 35.91 }]);
+  assert.equal(classCall.body.issuerName, 'Mocha Coffee House');
+
+  const join = await client().post(`/api/shops/${shop.slug}/join`, { name: 'أحمد', phone: '0791234567' });
+  const card = await client().get(`/api/cards/${join.data.token}`);
+  assert.equal(card.data.google, true);
+
+  // قبل ما يحفظ البطاقة ما في تحديثات لـ Google
+  const member = (await c.get(`/api/members/lookup?code=${join.data.token}`)).data.member;
+  await c.post(`/api/members/${member.id}/earn`, { amount: 5 });
+  await c.flush();
+  assert.equal(google.calls.filter((x) => x.method === 'PATCH').length, 0);
+
+  const save = await client().get(`/c/${join.data.token}/google`);
+  assert.equal(save.status, 302);
+  const loc = save.headers.get('location');
+  assert.ok(loc.startsWith(SAVE_URL));
+  const jwt = decodeJwt(loc.slice(SAVE_URL.length));
+  assert.equal(jwt.valid, true, 'التوقيع صحيح بمفتاح حساب الخدمة');
+  assert.equal(jwt.header.alg, 'RS256');
+  assert.equal(jwt.payload.iss, 'wallet@proj.iam.gserviceaccount.com');
+  assert.equal(jwt.payload.aud, 'google');
+  assert.equal(jwt.payload.typ, 'savetowallet');
+  assert.deepEqual(jwt.payload.origins, ['https://loyalty.test']);
+  assert.deepEqual(jwt.payload.payload.loyaltyObjects, [{ id: `3388.loy_m${member.id}`, classId: `3388.loy_s${shop.id}` }], 'JWT قصير لأن البطاقة انضافت بالـ API');
+  const patchOnSave = google.calls.find((x) => x.method === 'PATCH' && x.url.includes('/loyaltyObject/'));
+  assert.equal(patchOnSave.body.loyaltyPoints.balance.int, 5, 'البطاقة بتنحفظ بالرصيد الحالي');
+
+  // بعد الحفظ: كل حركة بتحدّث المحفظة
+  const before = google.calls.length;
+  r = await c.post(`/api/members/${member.id}/earn`, { amount: 20 });
+  await c.flush();
+  const patch = google.calls.slice(before).find((x) => x.method === 'PATCH');
+  assert.ok(patch.url.endsWith(encodeURIComponent(`3388.loy_m${member.id}`)));
+  assert.deepEqual(patch.body.loyaltyPoints, { label: 'النقاط', balance: { int: 25 } });
+  assert.deepEqual(patch.body.secondaryLoyaltyPoints, { label: 'باقي للمكافأة', balance: { int: 75 } });
+
+  // رسالة لكل الزبائن
+  r = await c.post('/api/broadcast', { body: 'خصم 20% اليوم على كل المشروبات' });
+  assert.equal(r.status, 200);
+  const msg = google.calls.find((x) => x.url.includes('/addMessage'));
+  assert.ok(msg.url.includes(encodeURIComponent(`3388.loy_s${shop.id}`)));
+  assert.equal(msg.body.message.messageType, 'TEXT_AND_NOTIFY');
+  assert.equal(msg.body.message.header, 'Mocha Coffee House');
+});
+
+test('لو Google رفضت: الخطأ بيبيّن بالإعدادات، ورابط الحفظ بيشتغل بالبيانات كاملة', async () => {
+  const google = fakeGoogle({
+    'POST /loyaltyClass': () => ({ status: 400, body: { error: { message: 'Invalid logo' } } }),
+  });
+  const { client } = await setup({ GOOGLE_ISSUER_ID: '3388', GOOGLE_SERVICE_ACCOUNT: serviceAccount, fetch: google.fetch });
+  const c = client();
+  const { shop } = await signup(c);
+  const r = await c.post('/api/shop/sync', {});
+  assert.equal(r.data.google.lastSync.ok, false);
+  assert.match(r.data.google.error, /Invalid logo/);
+  assert.match((await c.get('/api/me')).data.google.error, /Invalid logo/);
+
+  const join = await client().post(`/api/shops/${shop.slug}/join`, { name: 'سارة', phone: '0791234568' });
+  const save = await client().get(`/c/${join.data.token}/google`);
+  const jwt = decodeJwt(save.headers.get('location').slice(SAVE_URL.length));
+  assert.equal(jwt.valid, true);
+  assert.equal(jwt.payload.payload.loyaltyClasses[0].id, `3388.loy_s${shop.id}`);
+  assert.equal(jwt.payload.payload.loyaltyObjects[0].accountName, 'سارة');
+
+  assert.equal((await c.post('/api/broadcast', { body: 'مرحبا' })).status, 502);
+});
