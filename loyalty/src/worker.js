@@ -25,7 +25,7 @@ export default {
     });
   },
 
-  // كل 15 دقيقة (wrangler.toml ← triggers): هدايا عيد الميلاد، طلب التقييم، تذكير الغايبين
+  // كل 5 دقايق (wrangler.toml ← triggers): هدايا عيد الميلاد، طلب التقييم، تذكير الغايبين
   async scheduled(event, env, ctx) {
     const db = await openDb(env);
     const out = await runScheduled({ db, env, waitUntil: (p) => ctx.waitUntil(p) }, event.scheduledTime || Date.now());

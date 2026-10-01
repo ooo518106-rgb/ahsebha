@@ -140,7 +140,7 @@ test('من البطاقة للإشعار: اشتراك، إشعار نقاط، �
   await owner.flush();
   assert.match(sent[1].msg.body, /🎁 مكافأتك جاهزة/);
 
-  // رسالة جماعية: 45 زبون مشتركين → دفعتين
+  // رسالة جماعية: 45 زبون مشتركين → 5 دفعات
   for (let i = 0; i < 44; i++) {
     const t = (await client().post(`/api/shops/${shop.slug}/join`, { name: `زبون ${i}`, phone: `07922${String(i).padStart(5, '0')}` })).data.token;
     const dev = await fakeDevice();
@@ -152,11 +152,15 @@ test('من البطاقة للإشعار: اشتراك، إشعار نقاط، �
   let r = await owner.post('/api/broadcast', { body: 'خصم 20% اليوم ☕' });
   assert.equal(r.status, 200);
   assert.equal(r.data.google, null, 'Google مش مفعّل بهالاختبار');
-  assert.equal(r.data.push.sent + r.data.push.failed, 40);
-  assert.ok(r.data.push.next);
-  const r2 = await owner.post(`/api/broadcast/${r.data.id}/continue`, { cursor: r.data.push.next });
-  assert.equal(r2.data.push.sent + r2.data.push.failed, 5);
-  assert.equal(r2.data.push.next, null);
+  // دفعات من 10، والواجهة بتكمّل لحد ما يخلصوا
+  const sizes = [r.data.push.sent + r.data.push.failed];
+  let next = r.data.push.next;
+  while (next) {
+    const x = await owner.post(`/api/broadcast/${r.data.id}/continue`, { cursor: next });
+    sizes.push(x.data.push.sent + x.data.push.failed);
+    next = x.data.push.next;
+  }
+  assert.deepEqual(sizes, [10, 10, 10, 10, 5]);
   assert.equal(sent.length, 45);
   assert.ok(sent.filter((x) => x.msg).every((x) => x.msg.body === 'خصم 20% اليوم ☕' && x.msg.title === 'Mocha'));
   assert.equal((await db.get("SELECT COUNT(*) AS n FROM push_subs WHERE endpoint LIKE '%/dead'")).n, 0, 'الاشتراك المنتهي انحذف');

@@ -195,8 +195,9 @@ test('المهام الدورية ما بتشتغل للمحل المتوقف، 
     people.push(p.id);
   }
   await db.run(`UPDATE members SET last_visit = ?, created_at = ? WHERE id IN (${people.join(',')})`, t - 40 * DAY, t - 60 * DAY);
-  assert.equal((await cron(t)).winback, 30, 'سقف 30 إشعار بالتشغيلة');
-  assert.equal((await cron(t + 15 * 60 * 1000)).winback, 5, 'الباقي بالتشغيلة الجاية');
+  const runs = [];
+  for (let i = 0; i < 4; i++) runs.push((await cron(t + i * 5 * 60 * 1000)).winback);
+  assert.deepEqual(runs, [10, 10, 10, 5], 'سقف 10 إشعارات بالتشغيلة، والباقي بالجاية');
   // محل تاني خلصت تجربته: زبائنه ما بيوصلهم إشي
   const other = client();
   const { shop: s2 } = await signup(other, { shopName: 'Expired' });
@@ -206,7 +207,7 @@ test('المهام الدورية ما بتشتغل للمحل المتوقف، 
   const d = await fakeDevice();
   await g.post(`/api/cards/${token}/push`, { endpoint: 'https://web.push.apple.com/x2', keys: { p256dh: d.p256dh, auth: d.auth } });
   await db.run('UPDATE members SET last_visit = ?, created_at = ? WHERE token = ?', t - 40 * DAY, t - 60 * DAY, token);
-  assert.equal((await cron(t + 30 * 60 * 1000)).winback, 0);
+  assert.equal((await cron(t + 60 * 60 * 1000)).winback, 0);
 });
 
 test('التقارير وملف Excel: للمالك بس، والأرقام صح', async () => {

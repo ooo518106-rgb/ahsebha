@@ -469,8 +469,8 @@ function earnMessage(shop, before, after, perk, ref) {
   return { title: shop.name, body };
 }
 
-// الرسالة الجماعية بتنبعت على دفعات (Cloudflare بيحد عدد الطلبات الخارجية بكل طلب)
-const PUSH_BATCH = 40;
+// الرسالة الجماعية بتنبعت على دفعات صغيرة (Cloudflare بيحد وقت المعالجة بكل طلب)، والواجهة بتكمّل الدفعات لحالها
+const PUSH_BATCH = 10;
 async function broadcastBatch(c, id, cursor) {
   const b = await c.db.get('SELECT * FROM broadcasts WHERE id = ? AND shop_id = ?', id, c.shop.id);
   if (!b) fail(404, 'ما لقينا الرسالة');
@@ -489,9 +489,10 @@ async function broadcastContinue(c, id) {
   return json({ push: await broadcastBatch(c, Number(id), cursor) });
 }
 
-// ─── المهام الدورية (كل 15 دقيقة): هدايا عيد الميلاد، طلب التقييم، وتذكير الزبائن الغايبين ───
-// Cloudflare بيسمح بـ 50 طلب خارجي بكل تشغيلة (الخطة المجانية)، فبنبعت لحد 30 إشعار وبنكمّل بالتشغيلة الجاية
-const CRON_BUDGET = 30;
+// ─── المهام الدورية (كل 5 دقايق): هدايا عيد الميلاد، طلب التقييم، وتذكير الزبائن الغايبين ───
+// الخطة المجانية بـ Cloudflare بتعطي 10ms معالجة لكل تشغيلة، وتشفير الإشعار الواحد بياخد تقريباً 1ms،
+// فبنبعت لحد 10 إشعارات بالتشغيلة (120 بالساعة) وبنكمّل بالجاية
+const CRON_BUDGET = 10;
 const HOUR = 36e5;
 
 export async function runScheduled(ctx, now = Date.now()) {

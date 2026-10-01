@@ -72,7 +72,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   const db = await openDb(process.env.DB_PATH || 'loyalty.db');
   const port = Number(process.env.PORT) || 8787;
   createServer({ db, env: process.env }).listen(port, () => console.log(`نقاط الولاء شغّال على http://localhost:${port}`));
-  // نفس المهام الدورية اللي بيشغّلها Cloudflare كل 15 دقيقة
+  // نفس المهام الدورية اللي بيشغّلها Cloudflare كل 5 دقايق
   const tick = () => runScheduled({ db, env: process.env, waitUntil: (p) => Promise.resolve(p).catch((e) => console.error(e)) }).catch((e) => console.error('scheduled:', e));
-  setInterval(tick, 15 * 60 * 1000).unref();
+  setInterval(tick, 5 * 60 * 1000).unref();
 }
