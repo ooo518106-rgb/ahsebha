@@ -20,6 +20,7 @@ async function load(first = false) {
   lastBalance = member.balance;
   setBrand(shop.color);
   document.title = `بطاقة ${shop.name}`;
+  homeScreen(shop.logo, shop.name);
   const ios = isIOS();
   render(root, html`
     ${params.has('new') ? html`<div class="alert ok" style="margin-bottom:12px">أهلاً ${member.name}! هاي بطاقتك 🎉 ${(ios && !apple) ? '' : 'احفظها بالمحفظة عشان تطلعلك بسرعة.'}</div>` : ''}
@@ -40,6 +41,16 @@ async function load(first = false) {
       <p class="center small muted"><a href="/privacy">سياسة الخصوصية</a> · <button type="button" class="linkish" id="deleteCard">احذف بطاقتي وبياناتي</button></p>
       <p class="powered">بطاقات الولاء من <a href="/">نقاطك</a></p>
     </div>`);
+}
+
+// لما الزبون يضيف البطاقة للشاشة الرئيسية: أيقونتها شعار المحل واسمها اسم المحل
+function homeScreen(icon, title) {
+  let link = $('link[rel="apple-touch-icon"]');
+  if (!link) { link = document.createElement('link'); link.rel = 'apple-touch-icon'; document.head.append(link); }
+  if (link.href !== new URL(icon, location.href).href) link.href = icon;
+  let meta = $('meta[name="apple-mobile-web-app-title"]');
+  if (!meta) { meta = document.createElement('meta'); meta.name = 'apple-mobile-web-app-title'; document.head.append(meta); }
+  meta.content = title;
 }
 
 function forget() {
