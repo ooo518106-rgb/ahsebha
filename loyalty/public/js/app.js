@@ -317,6 +317,14 @@ function txnRow(t, withMember = false) {
     <span class="delta num ${plus ? 'plus' : 'minus'}">${plus ? '+' : ''}${fmt(t.delta)}</span></li>`;
 }
 
+// حالة إشعارات الويب عند الزبون: مفعّلة؟ وآخر إشعار وصل ولا لأ (ومع السبب لو ما وصل)
+function pushLine(p) {
+  if (!p || !p.devices) return html`<div class="small muted">🔕 ما فعّل إشعارات البطاقة</div>`;
+  const last = !p.lastAt ? 'لسا ما انبعتله إشعار'
+    : p.lastError ? html`آخر إشعار ما وصل ${ago(p.lastAt)} (<bdi>${p.lastError}</bdi>)` : `آخر إشعار انبعت ${ago(p.lastAt)} ✅`;
+  return html`<div class="small ${p.lastError ? 'error' : 'muted'}">🔔 الإشعارات مفعّلة${p.devices > 1 ? ` على ${p.devices} أجهزة` : ''} · ${last}</div>`;
+}
+
 async function memberDialog(id) {
   let d;
   try { d = await api(`/api/members/${id}`); } catch (e) { toast(e.message, 'bad'); return; }
@@ -325,6 +333,7 @@ async function memberDialog(id) {
     <div class="stack">
       <div class="small muted"><span class="num">${m.cardNo}</span> · <span class="num">${m.phone}</span> · من ${fmtDate(m.createdAt)} ${m.inWallet ? html` · <span class="badge ok">بالمحفظة</span>` : ''}</div>
       ${memberSummary(m)}
+      ${pushLine(d.push)}
       <button class="btn block" id="useMember" type="button">استخدمه بالكاشير</button>
       <details><summary class="btn ghost block">رابط البطاقة (واتساب / QR)</summary><div style="margin-top:10px">${cardLinkHTML(m, d.cardUrl)}</div></details>
       ${isOwner() ? html`<details><summary class="btn ghost block">تعديل الرصيد يدوياً</summary>

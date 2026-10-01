@@ -148,4 +148,7 @@ export const MIGRATIONS = [
   'ALTER TABLE shops ADD COLUMN paid INTEGER NOT NULL DEFAULT 0',
   'ALTER TABLE shops ADD COLUMN updated_at INTEGER',
   'ALTER TABLE members ADD COLUMN updated_at INTEGER',
+  // نتيجة آخر إشعار لكل جهاز (عشان صاحب المحل يشوف إذا وصل أو ليش ما وصل)
+  'ALTER TABLE push_subs ADD COLUMN last_at INTEGER',
+  'ALTER TABLE push_subs ADD COLUMN last_error TEXT',
 ];

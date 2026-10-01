@@ -30,3 +30,7 @@ WHATSAPP_NUMBER = "962798900911"
 # الأسرار بتنحط من لوحة Cloudflare (Settings ← Variables and Secrets ← Secret)، مش هون:
 #   GOOGLE_SERVICE_ACCOUNT = محتوى ملف JSON تبع حساب الخدمة
 #   SIGNUP_CODE (اختياري) = رمز بتعطيه للمحلات عشان تقدر تسجّل؛ بدونه التسجيل مفتوح للكل
+
+# سجلّ الأخطاء (بيبيّن بـ Cloudflare ← Workers ← loyalty ← Logs)
+[observability]
+enabled = true

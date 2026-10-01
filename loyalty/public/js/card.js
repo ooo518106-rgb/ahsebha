@@ -26,6 +26,8 @@ async function detectPush() {
     const reg = await navigator.serviceWorker.register('/sw.js');
     const sub = await reg.pushManager.getSubscription();
     pushState = sub && Notification.permission === 'granted' && flag() ? 'on' : 'off';
+    // بنذكّر السيرفر بالاشتراك كل مرة بتنفتح البطاقة (لو ضاع من عنده)
+    if (pushState === 'on') api(`/api/cards/${token}/push`, { method: 'POST', body: sub.toJSON() }).catch(() => {});
   } catch {
     pushState = 'unsupported';
   }
@@ -33,22 +35,49 @@ async function detectPush() {
 
 const keyBytes = (b64) => Uint8Array.from(atob(b64.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - (b64.length % 4)) % 4)), (ch) => ch.charCodeAt(0));
 
+let pushNote = null; // نتيجة الإشعار التجريبي: { ok, text }
+
+async function subscribe(reg) {
+  const { publicKey } = await api('/api/push/key');
+  return reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: keyBytes(publicKey) });
+}
+
+// بيبعت إشعار تجريبي لهالجهاز (وبيحفظ الاشتراك بالمرة)، وبيكتب شو صار
+async function testPush(retry = true) {
+  const reg = await navigator.serviceWorker.ready;
+  const sub = (await reg.pushManager.getSubscription()) || await subscribe(reg);
+  const r = await api(`/api/cards/${token}/push/test`, { method: 'POST', body: sub.toJSON() });
+  if (r.result === 'gone' && retry) {
+    // الاشتراك القديم انتهى: بنعمل واحد جديد وبنجرّب كمان مرة
+    await sub.unsubscribe().catch(() => {});
+    await subscribe(reg);
+    return testPush(false);
+  }
+  pushNote = r.result === 'ok'
+    ? { ok: true, text: '✅ انبعتلك إشعار تجريبي، لازم يطلعلك هلق. إذا ما شفته، اسحب من فوق الشاشة لتحت.' }
+    : { ok: false, text: html`❌ ما قدرنا نوصّل الإشعار (<bdi>${r.reason || 'خطأ'}</bdi>). صوّر هالشاشة وابعتها للمحل.` };
+  return r.result === 'ok';
+}
+
 async function enablePush() {
   // طلب الإذن أول إشي، جوّا الكبسة نفسها (الآيفون بيطلب هيك)
   const perm = await Notification.requestPermission();
   if (perm !== 'granted') { pushState = perm === 'denied' ? 'denied' : 'off'; draw(); return; }
   try {
-    const reg = await navigator.serviceWorker.register('/sw.js');
-    await navigator.serviceWorker.ready;
-    const { publicKey } = await api('/api/push/key');
-    const sub = (await reg.pushManager.getSubscription()) || await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: keyBytes(publicKey) });
-    await api(`/api/cards/${token}/push`, { method: 'POST', body: sub.toJSON() });
+    await navigator.serviceWorker.register('/sw.js');
+    await testPush();
     flag(true);
     pushState = 'on';
     toast('تفعّلت الإشعارات 🔔', 'ok');
   } catch (err) {
     toast(err.message || 'ما قدرنا نفعّل الإشعارات', 'bad');
   }
+  draw();
+}
+
+async function runTest(btn) {
+  btn.disabled = true;
+  try { await testPush(); } catch (err) { pushNote = { ok: false, text: `❌ ${err.message || 'ما زبط'}` }; }
   draw();
 }
 
@@ -60,6 +89,7 @@ async function disablePush() {
   } catch { /* بنطفيها محلياً على كل حال */ }
   flag(false);
   pushState = 'off';
+  pushNote = null;
   toast('وقّفنا الإشعارات', 'ok');
   draw();
 }
@@ -69,7 +99,10 @@ function pushPanel() {
     return html`<div class="panel small stack"><b>🔔 بدك يوصلك إشعار لما تنضافلك نقاط أو يكون في عرض؟</b>
       <button class="btn block" type="button" id="pushOn">فعّل الإشعارات</button></div>`;
   }
-  if (pushState === 'on') return html`<p class="center small muted">🔔 الإشعارات مفعّلة · <button type="button" class="linkish" id="pushOff">إيقاف</button></p>`;
+  if (pushState === 'on') {
+    return html`<p class="center small muted">🔔 الإشعارات مفعّلة · <button type="button" class="linkish" id="pushTest">جرّب إشعار</button> · <button type="button" class="linkish" id="pushOff">إيقاف</button></p>
+      ${pushNote ? html`<p class="alert ${pushNote.ok ? 'ok' : 'warn'} small">${pushNote.text}</p>` : ''}`;
+  }
   if (pushState === 'denied') return html`<p class="center small muted">🔕 الإشعارات مسكّرة لهالبطاقة. بتقدر تفتحها من إعدادات الجوال.</p>`;
   return '';
 }
@@ -145,6 +178,8 @@ root.addEventListener('click', (e) => {
   const on = e.target.closest('#pushOn');
   if (on) { on.disabled = true; enablePush(); }
   if (e.target.closest('#pushOff')) disablePush();
+  const t = e.target.closest('#pushTest');
+  if (t) runTest(t);
 });
 
 root.addEventListener('click', async (e) => {

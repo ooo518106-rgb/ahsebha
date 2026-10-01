@@ -53,7 +53,7 @@ test('توقيع VAPID صحيح، والاشتراك المنتهي بينعرف
   let seen;
   const fetchImpl = async (url, init) => { seen = init; return new Response(null, { status: 201 }); };
   const r = await sendPush({ endpoint: 'https://fcm.googleapis.com/fcm/send/abc', ...d }, { title: 'x' }, { vapid, subject: 'https://loyalty.test', fetchImpl });
-  assert.equal(r, 'ok');
+  assert.equal(r.result, 'ok');
   assert.equal(seen.headers['content-encoding'], 'aes128gcm');
   const m = /^vapid t=([^,]+), k=(.+)$/.exec(seen.headers.authorization);
   const [h, p, s] = m[1].split('.');
@@ -64,7 +64,66 @@ test('توقيع VAPID صحيح، والاشتراك المنتهي بينعرف
   assert.ok(await crypto.subtle.verify({ name: 'ECDSA', hash: 'SHA-256' }, pub, fromB64url(s), new TextEncoder().encode(`${h}.${p}`)));
   assert.deepEqual(JSON.parse(await d.decrypt(new Uint8Array(seen.body))), { title: 'x' });
   const gone = await sendPush({ endpoint: 'https://fcm.googleapis.com/x', ...d }, { title: 'x' }, { vapid, subject: 's', fetchImpl: async () => new Response(null, { status: 410 }) });
-  assert.equal(gone, 'gone');
+  assert.equal(gone.result, 'gone');
+  // سبب الرفض من Apple بيرجع مقروء
+  const bad = await sendPush({ endpoint: 'https://web.push.apple.com/x', ...d }, { title: 'x' }, { vapid, subject: 's', fetchImpl: async () => Response.json({ reason: 'BadJwtToken' }, { status: 403 }) });
+  assert.deepEqual(bad, { result: 'error', code: 403, reason: '403 BadJwtToken' });
+  const down = await sendPush({ endpoint: 'https://web.push.apple.com/x', ...d }, { title: 'x' }, { vapid, subject: 's', fetchImpl: async () => { throw new Error('network down'); } });
+  assert.deepEqual(down, { result: 'error', code: null, reason: 'network down' });
+});
+
+test('زر «جرّب إشعار»: بيحفظ الاشتراك وبيرجّع النتيجة، وصاحب المحل بيشوف حالة آخر إشعار', async () => {
+  const sent = [];
+  const devices = new Map();
+  let reply = () => new Response(null, { status: 201 });
+  const fetchImpl = async (url, init) => {
+    const d = devices.get(url);
+    sent.push({ url, msg: d ? JSON.parse(await d.decrypt(new Uint8Array(init.body))) : null });
+    return reply(url);
+  };
+  const { client } = await setup({ fetch: fetchImpl });
+  const owner = client();
+  const { shop } = await signup(owner, { shopName: 'Mocha' });
+  const guest = client();
+  const token = (await guest.post(`/api/shops/${shop.slug}/join`, { name: 'سارة', phone: '0791110000' })).data.token;
+  const id = (await owner.get(`/api/members/lookup?code=${token}`)).data.member.id;
+  assert.deepEqual((await owner.get(`/api/members/${id}`)).data.push, { devices: 0, lastAt: null, lastError: null });
+
+  const d = await fakeDevice();
+  const endpoint = 'https://web.push.apple.com/device-1';
+  devices.set(endpoint, d);
+  const sub = { endpoint, keys: { p256dh: d.p256dh, auth: d.auth } };
+  let r = await guest.post(`/api/cards/${token}/push/test`, sub);
+  assert.equal(r.status, 200);
+  assert.deepEqual(r.data, { result: 'ok', reason: null });
+  assert.equal(sent[0].msg.title, 'Mocha');
+  assert.match(sent[0].msg.body, /الإشعارات شغّالة/);
+  let p = (await owner.get(`/api/members/${id}`)).data.push;
+  assert.equal(p.devices, 1, 'الاشتراك انحفظ');
+  assert.ok(p.lastAt);
+  assert.equal(p.lastError, null);
+
+  // Apple رفض ← السبب بيطلع للزبون ولصاحب المحل
+  reply = () => Response.json({ reason: 'BadJwtToken' }, { status: 403 });
+  r = await guest.post(`/api/cards/${token}/push/test`, sub);
+  assert.deepEqual(r.data, { result: 'error', reason: '403 BadJwtToken' });
+  await owner.post(`/api/members/${id}/earn`, { amount: 5 });
+  await owner.flush();
+  p = (await owner.get(`/api/members/${id}`)).data.push;
+  assert.equal(p.lastError, '403 BadJwtToken');
+
+  // الجهاز ألغى الاشتراك ← بينحذف وبترجع 'gone' عشان البطاقة تعمل اشتراك جديد
+  reply = () => new Response(null, { status: 410 });
+  r = await guest.post(`/api/cards/${token}/push/test`, sub);
+  assert.equal(r.data.result, 'gone');
+  assert.equal((await owner.get(`/api/members/${id}`)).data.push.devices, 0);
+
+  // اشتراك مش صالح، وحد للتجارب
+  assert.equal((await guest.post(`/api/cards/${token}/push/test`, { endpoint: 'https://evil.example/x', keys: sub.keys })).status, 400);
+  reply = () => new Response(null, { status: 201 });
+  let last;
+  for (let i = 0; i < 8; i++) last = await guest.post(`/api/cards/${token}/push/test`, sub);
+  assert.equal(last.status, 429);
 });
 
 test('من البطاقة للإشعار: اشتراك، إشعار نقاط، رسالة جماعية على دفعات، وحذف المنتهي', async () => {

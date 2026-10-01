@@ -333,7 +333,8 @@ async function pushKey(c) {
   return json({ publicKey: (await vapidKeys(c)).publicKey });
 }
 
-async function cardPushSubscribe(c, token) {
+// بيحفظ اشتراك الجهاز (أو بيحدّثه) وبيرجّع الزبون والاشتراك
+async function saveSubscription(c, token) {
   const m = await c.db.get('SELECT * FROM members WHERE token = ?', token);
   if (!m) fail(404, 'ما لقينا هالبطاقة');
   await rateLimit(c, `pushsub:${c.ip}`, 30, 60 * MIN);
@@ -351,7 +352,28 @@ async function cardPushSubscribe(c, token) {
     // آخر 5 أجهزة لكل زبون
     ['DELETE FROM push_subs WHERE member_id = ? AND id NOT IN (SELECT id FROM push_subs WHERE member_id = ? ORDER BY id DESC LIMIT 5)', [m.id, m.id]],
   ]);
+  return { m, sub: await c.db.get('SELECT * FROM push_subs WHERE member_id = ? AND endpoint = ?', m.id, endpoint) };
+}
+
+async function cardPushSubscribe(c, token) {
+  await saveSubscription(c, token);
   return json({ ok: true }, 201);
+}
+
+// إشعار تجريبي لنفس الجهاز، والنتيجة بترجع فوراً للبطاقة (عشان نعرف إذا Apple/Google استلموه أو ليش رفضوه)
+async function cardPushTest(c, token) {
+  const { m, sub } = await saveSubscription(c, token);
+  await rateLimit(c, `pushtest:${m.id}`, 8, 60 * MIN, 'جرّبت كتير، استنى شوي وجرّب كمان مرة');
+  const shop = await c.db.get('SELECT * FROM shops WHERE id = ?', m.shop_id);
+  const r = await pushTo(c, [sub], () => ({
+    title: shop.name,
+    body: 'تمام! الإشعارات شغّالة ✅ رح يوصلك إشعار كل ما تنضافلك نقاط.',
+    icon: logoUrl(shop, c.origin),
+    url: `${c.origin}/c/${m.token}`,
+    tag: `test-${m.id}`,
+  }));
+  const x = r.results[0];
+  return json({ result: x.result, reason: x.reason });
 }
 
 async function cardPushUnsubscribe(c, token) {
@@ -361,16 +383,22 @@ async function cardPushUnsubscribe(c, token) {
   return json({ ok: true });
 }
 
-// بيبعت لكل اشتراك رسالته، وبيحذف الاشتراكات اللي انتهت
+// بيبعت لكل اشتراك رسالته، وبيسجّل النتيجة، وبيحذف الاشتراكات اللي انتهت
 async function pushTo(c, subs, messageFor) {
-  const out = { ok: 0, error: 0 };
+  const out = { ok: 0, error: 0, results: [] };
   if (!subs.length) return out;
   const vapid = await vapidKeys(c);
-  const opts = { vapid, subject: c.origin, fetchImpl: c.env.fetch || ((...a) => fetch(...a)) };
-  const results = await Promise.all(subs.map((s) => webpush.sendPush(s, messageFor(s), opts)));
-  const gone = subs.filter((s, i) => results[i] === 'gone').map((s) => s.endpoint);
-  for (const r of results) if (r === 'ok') out.ok++; else out.error++;
-  for (const endpoint of gone) await c.db.run('DELETE FROM push_subs WHERE endpoint = ?', endpoint);
+  const opts = { vapid, subject: c.env.VAPID_SUBJECT || c.origin, fetchImpl: c.env.fetch || ((...a) => fetch(...a)) };
+  out.results = await Promise.all(subs.map((s) => webpush.sendPush(s, messageFor(s), opts)));
+  const now = Date.now();
+  const writes = out.results.map((r, i) => {
+    if (r.result === 'ok') out.ok++; else out.error++;
+    if (r.result === 'error') console.error('web push:', new URL(subs[i].endpoint).host, r.reason);
+    return r.result === 'gone'
+      ? ['DELETE FROM push_subs WHERE endpoint = ?', [subs[i].endpoint]]
+      : ['UPDATE push_subs SET last_at = ?, last_error = ? WHERE id = ?', [now, r.reason, subs[i].id]];
+  });
+  await c.db.batch(writes);
   return out;
 }
 
@@ -787,7 +815,10 @@ async function memberDetail(c, id) {
      WHERE t.member_id = ? AND t.shop_id = ? ORDER BY t.created_at DESC, t.id DESC LIMIT 30`,
     m.id, c.shop.id,
   );
-  return json({ member: memberView(m, c.shop), txns, cardUrl: `${c.origin}/c/${m.token}` });
+  // الإشعارات: كم جهاز مفعّل، وشو صار بآخر إشعار
+  const subs = await c.db.all('SELECT last_at, last_error FROM push_subs WHERE member_id = ? ORDER BY last_at IS NULL, last_at DESC', m.id);
+  const push = { devices: subs.length, lastAt: subs[0]?.last_at || null, lastError: subs[0]?.last_error || null };
+  return json({ member: memberView(m, c.shop), txns, push, cardUrl: `${c.origin}/c/${m.token}` });
 }
 
 // كل حركة نقاط إلها مفتاح (idem) من الواجهة: لو انبعتت مرتين (نت ضعيف أو كبسة مكررة) بتنحسب مرة وحدة
@@ -1037,6 +1068,7 @@ const API = [
   ['GET', /^\/api\/site$/, site],
   ['GET', /^\/api\/push\/key$/, pushKey],
   ['POST', /^\/api\/cards\/([a-z2-9]{20})\/push$/, cardPushSubscribe],
+  ['POST', /^\/api\/cards\/([a-z2-9]{20})\/push\/test$/, cardPushTest],
   ['DELETE', /^\/api\/cards\/([a-z2-9]{20})\/push$/, cardPushUnsubscribe],
   ['POST', /^\/api\/leads$/, createLead],
   ['GET', /^\/api\/admin\/leads$/, adminLeads, 'staff'],

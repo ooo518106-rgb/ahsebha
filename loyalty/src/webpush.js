@@ -67,10 +67,10 @@ export async function encryptPayload(plaintext, p256dh, auth) {
   return concat(header, asPublic, cipher);
 }
 
-// بيرجّع: 'ok' | 'gone' (الاشتراك انتهى، احذفه) | 'error'
+// بيرجّع { result: 'ok' | 'gone' (الاشتراك انتهى، احذفه) | 'error', code, reason } — السبب من رد خدمة الإشعارات (Apple بترجّع {"reason": "..."})
 export async function sendPush(sub, message, { vapid, subject, fetchImpl = fetch, ttl = 86400 }) {
-  const body = await encryptPayload(JSON.stringify(message), sub.p256dh, sub.auth);
   try {
+    const body = await encryptPayload(JSON.stringify(message), sub.p256dh, sub.auth);
     const res = await fetchImpl(sub.endpoint, {
       method: 'POST',
       headers: {
@@ -82,9 +82,12 @@ export async function sendPush(sub, message, { vapid, subject, fetchImpl = fetch
       },
       body,
     });
-    if (res.status === 404 || res.status === 410) return 'gone';
-    return res.ok ? 'ok' : 'error';
-  } catch {
-    return 'error';
+    if (res.ok) return { result: 'ok', code: res.status, reason: null };
+    let reason = (await res.text().catch(() => '')).trim();
+    try { reason = JSON.parse(reason).reason || reason; } catch { /* نص عادي */ }
+    reason = `${res.status}${reason ? ` ${String(reason).slice(0, 100)}` : ''}`;
+    return { result: res.status === 404 || res.status === 410 ? 'gone' : 'error', code: res.status, reason };
+  } catch (e) {
+    return { result: 'error', code: null, reason: String(e && e.message || e).slice(0, 100) };
   }
 }
