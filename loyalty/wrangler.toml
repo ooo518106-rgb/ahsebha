@@ -20,7 +20,8 @@ database_name = "loyalty"
 database_id = "REPLACE_WITH_DATABASE_ID"
 
 [vars]
-# رقم المُصدِر من Google Pay & Wallet Console
+# رقم المُصدِر من Google Pay & Wallet Console (مش سري)
 GOOGLE_ISSUER_ID = ""
-# اختياري: رمز بتعطيه للمحلات عشان تقدر تسجّل (فاضي = التسجيل مفتوح للكل)
-SIGNUP_CODE = ""
+# الأسرار بتنحط من لوحة Cloudflare (Settings ← Variables and Secrets ← Secret)، مش هون:
+#   GOOGLE_SERVICE_ACCOUNT = محتوى ملف JSON تبع حساب الخدمة
+#   SIGNUP_CODE (اختياري) = رمز بتعطيه للمحلات عشان تقدر تسجّل؛ بدونه التسجيل مفتوح للكل

@@ -44,7 +44,7 @@ npx wrangler d1 create loyalty        # انسخ database_id لـ wrangler.toml
 npx wrangler deploy
 ```
 الجداول بتنعمل لحالها أول ما يشتغل السيرفر. بعد النشر بتقدر تربط دومين خاص من لوحة Cloudflare.
-`SIGNUP_CODE` بـ `wrangler.toml` اختياري: لو حطيت رمز، بس اللي بتعطيه الرمز بيقدر يسجّل محل. وبتبعتله الرابط هيك: `/?code=الرمز`.
+`SIGNUP_CODE` اختياري، وبينحط كـ Secret من لوحة Cloudflare: لو حطيت رمز، بس اللي بتعطيه الرمز بيقدر يسجّل محل. وبتبعتله الرابط هيك: `/?code=الرمز`.
 
 بتقدر كمان تشغّله على أي سيرفر فيه Node بـ `npm start` (مع `DB_PATH` على قرص دائم).
 
