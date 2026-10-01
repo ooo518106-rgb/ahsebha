@@ -1,6 +1,6 @@
 // تشغيل محلي أو على أي سيرفر Node 22+ (بدل Cloudflare):
 //   node --env-file=.env src/server.js
-// المتغيرات: PORT, DB_PATH, PUBLIC_URL, SIGNUP_CODE, CONTACT_EMAIL, GOOGLE_ISSUER_ID, GOOGLE_SERVICE_ACCOUNT
+// المتغيرات: PORT, DB_PATH, PUBLIC_URL, SIGNUP_CODE, CONTACT_EMAIL, WHATSAPP_NUMBER, GOOGLE_ISSUER_ID, GOOGLE_SERVICE_ACCOUNT
 import http from 'node:http';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { handle } from './app.js';
 import { sqlite } from './db.js';
-import { SCHEMA } from './schema.js';
+import { MIGRATIONS, SCHEMA } from './schema.js';
 
 const PUBLIC_DIR = path.resolve(fileURLToPath(new URL('../public', import.meta.url)));
 const MIME = {
@@ -31,7 +31,7 @@ export async function openDb(dbPath = ':memory:') {
   const raw = new DatabaseSync(dbPath);
   raw.exec('PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL;');
   const db = sqlite(raw);
-  await db.init(SCHEMA);
+  await db.init(SCHEMA, MIGRATIONS);
   return db;
 }
 

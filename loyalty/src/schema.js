@@ -95,3 +95,9 @@ export const SCHEMA = [
   'CREATE UNIQUE INDEX IF NOT EXISTS txns_idem ON txns(shop_id, idem)',
   'CREATE INDEX IF NOT EXISTS sessions_user ON sessions(user_id)',
 ];
+
+// تعديلات على جداول موجودة (بتنطبق مرة وحدة؛ لو العمود موجود بنتجاهل الخطأ)
+export const MIGRATIONS = [
+  'ALTER TABLE shops ADD COLUMN active_until INTEGER',
+  'ALTER TABLE shops ADD COLUMN paid INTEGER NOT NULL DEFAULT 0',
+];

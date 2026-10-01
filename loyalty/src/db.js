@@ -12,7 +12,12 @@ export function d1(DB) {
     run: async (sql, ...a) => meta(await stmt(sql, a).run()),
     // دفعة واحدة ذرّية: يا بتنجح كلها يا ولا وحدة
     batch: async (list) => (await DB.batch(list.map(([sql, a = []]) => stmt(sql, a)))).map(meta),
-    init: async (statements) => { await DB.batch(statements.map((s) => DB.prepare(s))); },
+    init: async (statements, migrations = []) => {
+      await DB.batch(statements.map((s) => DB.prepare(s)));
+      for (const m of migrations) {
+        try { await DB.prepare(m).run(); } catch (e) { if (!/duplicate column/i.test(String(e.message))) throw e; }
+      }
+    },
   };
 }
 
@@ -37,6 +42,11 @@ export function sqlite(db) {
         throw e;
       }
     },
-    init: async (statements) => { for (const s of statements) db.exec(s); },
+    init: async (statements, migrations = []) => {
+      for (const s of statements) db.exec(s);
+      for (const m of migrations) {
+        try { db.exec(m); } catch (e) { if (!/duplicate column/i.test(String(e.message))) throw e; }
+      }
+    },
   };
 }

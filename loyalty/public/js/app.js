@@ -19,6 +19,29 @@ async function loadMe() {
   $('#userName').textContent = me.user.name;
   $$('.owner-only').forEach((el) => el.classList.toggle('hidden', !isOwner()));
   $$('.admin-only').forEach((el) => el.classList.toggle('hidden', !me.user.isAdmin));
+  renderSubBanner();
+}
+
+// شريط الاشتراك: كم باقي من التجربة، أو إنه الاشتراك خلص (مع زر واتساب للتفعيل)
+function renderSubBanner() {
+  const box = $('#subBanner');
+  const sub = state.me.subscription;
+  const wa = state.me.whatsapp;
+  const link = (text) => (wa ? `https://wa.me/${wa}?text=${encodeURIComponent(text)}` : null);
+  const ask = `مرحبا، بدي أشترك بنقاطك لمحل ${state.shop.name}`;
+  let tpl = null;
+  if (sub.state === 'expired') {
+    tpl = html`<div class="alert bad sub-banner"><div><b>خلصت فترة ${sub.paid ? 'الاشتراك' : 'التجربة'} ⏳</b> الكاشير متوقف لحد ما تفعّل الاشتراك. زبائنك ونقاطهم محفوظين.</div>
+      ${link(ask) ? html`<a class="btn sm wa" href="${link(ask)}" target="_blank" rel="noopener">فعّل الاشتراك</a>` : ''}</div>`;
+  } else if (sub.state === 'trial' && isOwner()) {
+    tpl = html`<div class="alert warn sub-banner"><div>🎁 <b>تجربة مجانية:</b> باقي <b class="num">${sub.daysLeft}</b> ${sub.daysLeft === 1 ? 'يوم' : 'يوم'}. الاشتراك 15 دينار بالشهر أو 150 بالسنة.</div>
+      ${link(ask) ? html`<a class="btn sm wa" href="${link(ask)}" target="_blank" rel="noopener">اشترك</a>` : ''}</div>`;
+  } else if (sub.state === 'active' && sub.daysLeft <= 5 && isOwner()) {
+    tpl = html`<div class="alert warn sub-banner"><div>اشتراكك بيخلص بعد <b class="num">${sub.daysLeft}</b> يوم.</div>
+      ${link(`مرحبا، بدي أجدد اشتراك نقاطك لمحل ${state.shop.name}`) ? html`<a class="btn sm wa" href="${link(`مرحبا، بدي أجدد اشتراك نقاطك لمحل ${state.shop.name}`)}" target="_blank" rel="noopener">جدّد</a>` : ''}</div>`;
+  }
+  box.classList.toggle('hidden', !tpl);
+  if (tpl) render(box, tpl);
 }
 
 function applyShop() {
@@ -192,6 +215,11 @@ function showMember(m) {
   }
 }
 
+// لو السيرفر رد إنه الاشتراك خلص، منحدّث الشريط فوق
+async function onSubError(e) {
+  if (e.status === 402) { try { await loadMe(); } catch { /* بنضل على الرسالة */ } }
+}
+
 async function earn(m, body) {
   const btn = $('#earnBtn');
   btn.disabled = true;
@@ -204,6 +232,7 @@ async function earn(m, body) {
   } catch (e) {
     toast(e.message, 'bad');
     btn.disabled = false;
+    onSubError(e);
   }
 }
 
@@ -220,6 +249,7 @@ async function redeem(m) {
   } catch (e) {
     toast(e.message, 'bad');
     btn.disabled = false;
+    onSubError(e);
   }
 }
 
@@ -689,7 +719,13 @@ async function loadStaff(data) {
 
 // ─── لوحة مدير المنصة: طلبات الاشتراك والمحلات المشتركة ───
 const LEAD_STATUS = { new: ['جديد', 'warn'], contacted: ['تم التواصل', ''], won: ['اشترك ✅', 'ok'], lost: ['ما اشترك', 'bad'] };
-const TRIAL_DAYS = 14;
+const SUB_BADGE = {
+  owner: () => ['محل المنصة', 'ok'],
+  trial: (s) => [`تجربة: باقي ${s.daysLeft} يوم`, 'warn'],
+  active: (s) => [`مشترك لحد ${fmtDay(s.until)}`, 'ok'],
+  expired: (s) => [s.paid ? 'خلص الاشتراك' : 'خلصت التجربة', 'bad'],
+};
+const fmtDay = (ms) => new Intl.DateTimeFormat('ar-u-nu-latn', { dateStyle: 'medium' }).format(new Date(ms));
 
 async function admin() {
   render(view, html`<p class="center muted">جاري التحميل…</p>`);
@@ -702,8 +738,8 @@ async function admin() {
   const fresh = leads.filter((l) => l.status === 'new').length;
   render(view, html`
     ${signupOpen
-      ? html`<p class="alert warn">التسجيل مفتوح لأي حدا. عشان تسكّره، حط <b dir="ltr">SIGNUP_CODE</b> كـ Secret بإعدادات Cloudflare.</p>`
-      : html`<p class="alert ok">التسجيل مسكّر برمز ✅ ابعت للمحل الجديد: <span dir="ltr" class="num">${location.origin}/?code=رمزك</span></p>`}
+      ? html`<p class="alert ok">أي محل بيقدر يسجّل ويجرّب ${14} يوم مجاناً، وبعدها بيتوقف لحاله لحد ما تفعّله من هون بـ «+ شهر» أو «+ سنة».</p>`
+      : html`<p class="alert ok">التسجيل مسكّر برمز. ابعت للمحل الجديد: <span dir="ltr" class="num">${location.origin}/?code=رمزك</span></p>`}
     <div class="stats" style="margin-top:12px">
       <div class="stat"><b class="num">${fresh}</b><span class="small muted">طلبات جديدة</span></div>
       <div class="stat"><b class="num">${leads.length}</b><span class="small muted">كل الطلبات</span></div>
@@ -724,14 +760,25 @@ async function admin() {
     </section>
     <section class="panel">
       <h2>المحلات</h2>
-      ${shops.length ? html`<ul class="list">${shops.map((s) => {
-        const left = Math.ceil((s.createdAt + TRIAL_DAYS * 864e5 - Date.now()) / 864e5);
-        return html`<li><div class="main"><b>${s.name}</b>
-          <span class="small muted"><span dir="ltr">${s.ownerEmail || ''}</span> · من ${fmtDate(s.createdAt)} · آخر حركة ${ago(s.lastActivity)}</span></div>
-          <span class="small num">${fmt(s.members)} زبون</span>
-          <span class="badge ${left > 0 ? 'warn' : ''}">${left > 0 ? `تجربة: باقي ${left} يوم` : 'خلصت التجربة'}</span></li>`;
+      ${shops.length ? html`<ul class="list" id="shopList">${shops.map((s) => {
+        const [label, cls] = SUB_BADGE[s.subscription.state](s.subscription);
+        return html`<li style="align-items:flex-start"><div class="main"><b>${s.name} <span class="badge ${cls}">${label}</span></b>
+          <span class="small muted"><span dir="ltr">${s.ownerEmail || ''}</span> · ${fmt(s.members)} زبون · من ${fmtDate(s.createdAt)} · آخر حركة ${ago(s.lastActivity)}</span>
+          ${s.subscription.state === 'owner' ? '' : html`<div class="row" style="margin-top:6px">
+            <button class="btn sm" type="button" data-plan="month" data-shop="${s.id}">+ شهر</button>
+            <button class="btn sm soft" type="button" data-plan="year" data-shop="${s.id}">+ سنة</button>
+            ${s.subscription.state === 'expired' ? '' : html`<button class="btn sm ghost" type="button" data-plan="stop" data-shop="${s.id}">إيقاف</button>`}
+          </div>`}</div></li>`;
       })}</ul>` : html`<p class="muted">ما في محلات لسا.</p>`}
     </section>`);
+  $$('[data-plan]').forEach((b) => {
+    b.onclick = async () => {
+      const name = b.closest('li').querySelector('b').firstChild.textContent.trim();
+      const msg = { month: `تفعيل ${name} شهر إضافي؟`, year: `تفعيل ${name} سنة إضافية؟`, stop: `إيقاف ${name} هلأ؟ الكاشير عندهم رح يتوقف.` }[b.dataset.plan];
+      if (!confirm(msg)) return;
+      try { await api(`/api/admin/shops/${b.dataset.shop}/plan`, { method: 'POST', body: { action: b.dataset.plan } }); toast('انحفظ ✅', 'ok'); admin(); } catch (e) { toast(e.message, 'bad'); }
+    };
+  });
   $$('.lead-status').forEach((sel) => {
     sel.onchange = async () => {
       try { await api(`/api/admin/leads/${sel.dataset.id}`, { method: 'PUT', body: { status: sel.value } }); admin(); toast('انحفظ', 'ok'); } catch (e) { toast(e.message, 'bad'); }

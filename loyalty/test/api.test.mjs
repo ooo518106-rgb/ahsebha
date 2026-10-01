@@ -375,3 +375,74 @@ test('طلبات الاشتراك: من صفحة البيع، وبيشوفها �
   assert.equal(r.data.signupOpen, true);
   assert.ok(r.data.shops.every((s) => s.ownerEmail && typeof s.members === 'number'));
 });
+
+test('التجربة 14 يوم: بعدها المحل بيتوقف لحد ما مدير المنصة يفعّله', async () => {
+  const { db, client } = await setup();
+  const platform = client();
+  const { shop: platformShop } = await signup(platform, { shopName: 'Platform' });
+  const owner = client();
+  const { shop } = await signup(owner, { shopName: 'Trial Cafe' });
+
+  assert.equal((await platform.get('/api/me')).data.subscription.state, 'owner');
+  let me = (await owner.get('/api/me')).data;
+  assert.equal(me.subscription.state, 'trial');
+  assert.equal(me.subscription.daysLeft, 14);
+
+  const id = (await owner.post('/api/members', { name: 'زبون', phone: '0790000007' })).data.member.id;
+  const token = (await owner.get(`/api/members/${id}`)).data.member.token;
+  assert.equal((await owner.post(`/api/members/${id}/earn`, { amount: 10 })).status, 200);
+
+  // خلصت التجربة
+  await db.run('UPDATE shops SET active_until = ? WHERE id = ?', Date.now() - 1000, shop.id);
+  me = (await owner.get('/api/me')).data;
+  assert.equal(me.subscription.state, 'expired');
+  assert.equal((await owner.post(`/api/members/${id}/earn`, { amount: 10 })).status, 402);
+  assert.equal((await owner.post(`/api/members/${id}/redeem`, {})).status, 402);
+  assert.equal((await owner.post(`/api/members/${id}/adjust`, { delta: 5, note: 'هدية' })).status, 402);
+  assert.equal((await owner.post('/api/members', { name: 'جديد', phone: '0790000008' })).status, 402);
+  const guest = client();
+  assert.equal((await guest.post(`/api/shops/${shop.slug}/join`, { name: 'زبون', phone: '0790000009' })).status, 403);
+  assert.equal((await guest.get(`/api/shops/${shop.slug}/public`)).data.shop.paused, true);
+  // البيانات ضلت: الزبون بيشوف بطاقته، والمالك بيشوف زبائنه وبيقدر يحذف ويعدّل الإعدادات
+  assert.equal((await guest.get(`/api/cards/${token}`)).data.member.balance, 10);
+  assert.equal((await owner.get('/api/members')).data.total, 1);
+  assert.equal((await owner.put('/api/shop', { rewardName: 'كيكة' })).status, 200);
+
+  // صاحب محل عادي ما بيفعّل حاله
+  assert.equal((await owner.post(`/api/admin/shops/${shop.id}/plan`, { action: 'year' })).status, 403);
+  // مدير المنصة بيفعّل شهر
+  let r = await platform.post(`/api/admin/shops/${shop.id}/plan`, { action: 'month' });
+  assert.equal(r.status, 200);
+  const sub = r.data.shops.find((s) => s.id === shop.id).subscription;
+  assert.equal(sub.state, 'active');
+  assert.ok(sub.daysLeft >= 28 && sub.daysLeft <= 31, String(sub.daysLeft));
+  assert.equal((await owner.post(`/api/members/${id}/earn`, { amount: 10 })).status, 200);
+  assert.equal((await guest.get(`/api/shops/${shop.slug}/public`)).data.shop.paused, false);
+  // + سنة بتنضاف فوق الشهر
+  r = await platform.post(`/api/admin/shops/${shop.id}/plan`, { action: 'year' });
+  assert.ok(r.data.shops.find((s) => s.id === shop.id).subscription.daysLeft > 390);
+  // إيقاف
+  r = await platform.post(`/api/admin/shops/${shop.id}/plan`, { action: 'stop' });
+  assert.equal(r.data.shops.find((s) => s.id === shop.id).subscription.state, 'expired');
+  assert.equal((await platform.post(`/api/admin/shops/${shop.id}/plan`, { action: 'free' })).status, 400);
+
+  // محل المنصة ما بيخلص أبداً
+  await db.run('UPDATE shops SET active_until = ? WHERE id = ?', Date.now() - 1000, platformShop.id);
+  const pid = (await platform.post('/api/members', { name: 'زبون', phone: '0790000010' })).data.member.id;
+  assert.equal((await platform.post(`/api/members/${pid}/earn`, { amount: 5 })).status, 200);
+});
+
+test('ترحيل الجداول: الأعمدة الجديدة بتنضاف لقاعدة قديمة، والتشغيل مرتين ما بيكسر', async () => {
+  const { DatabaseSync } = await import('node:sqlite');
+  const { sqlite } = await import('../src/db.js');
+  const { SCHEMA, MIGRATIONS } = await import('../src/schema.js');
+  const raw = new DatabaseSync(':memory:');
+  // جدول المحلات بشكله القديم (قبل الاشتراكات)
+  raw.exec("CREATE TABLE shops (id INTEGER PRIMARY KEY, slug TEXT NOT NULL UNIQUE, name TEXT NOT NULL, created_at INTEGER NOT NULL)");
+  raw.exec("INSERT INTO shops (slug, name, created_at) VALUES ('old', 'Old', 1)");
+  const db = sqlite(raw);
+  await db.init(SCHEMA, MIGRATIONS);
+  await db.init(SCHEMA, MIGRATIONS);
+  const row = await db.get("SELECT active_until, paid FROM shops WHERE slug = 'old'");
+  assert.deepEqual(row, { active_until: null, paid: 0 });
+});

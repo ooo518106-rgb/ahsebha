@@ -118,6 +118,8 @@ input[type="radio"], input[type="checkbox"] { width: auto; min-height: 0; }
 .stepper output { min-width: 40px; text-align: center; font-size: 1.4rem; font-weight: 800; }
 .reward-ready { background: var(--ok-bg); color: var(--ok); border-radius: 12px; padding: 10px 12px; font-weight: 700; }
 
+.sub-banner { display: flex; align-items: center; gap: 10px; justify-content: space-between; flex-wrap: wrap; margin-top: 12px; }
+
 /* القوائم */
 .list { list-style: none; padding: 0; }
 .list li { display: flex; align-items: center; gap: 10px; padding: 10px 4px; border-bottom: 1px solid var(--border); }

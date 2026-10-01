@@ -27,7 +27,7 @@
         <h1>خلّي زبونك يرجعلك</h1>
         <p>بطاقة ولاء لمطعمك أو الكوفي شوب تبعك، بتنحفظ بمحفظة جوال الزبون جنب بطاقة البنك، وبتطلعله لحالها لما يقرّب من محلك. بدون تطبيق، وبدون كروت ورق بتضيع.</p>
         <div class="row hero-cta">
-          <a class="btn big light" href="#contact">جرّب 14 يوم مجاناً</a>
+          <a class="btn big light" href="#contact" data-start>جرّب 14 يوم مجاناً</a>
           <a class="btn big wa hidden" data-wa target="_blank" rel="noopener">واتساب</a>
         </div>
         <p class="small hero-note">بدون بطاقة بنك وبدون أي التزام.</p>
@@ -68,14 +68,14 @@
         <div class="plan">
           <h3>شهري</h3>
           <div class="price"><b class="num">15</b> دينار <span class="muted">/ بالشهر</span></div>
-          <a class="btn block soft" href="#contact">ابدأ التجربة</a>
+          <a class="btn block soft" href="#contact" data-start>ابدأ التجربة</a>
         </div>
         <div class="plan best">
           <span class="badge ok">وفّر 30 دينار</span>
           <h3>سنوي</h3>
           <div class="price"><b class="num">150</b> دينار <span class="muted">/ بالسنة</span></div>
           <p class="small muted">يعني شهرين ببلاش.</p>
-          <a class="btn block" href="#contact">ابدأ التجربة</a>
+          <a class="btn block" href="#contact" data-start>ابدأ التجربة</a>
         </div>
       </div>
       <ul class="checks">
@@ -98,8 +98,8 @@
     </section>
 
     <section class="section narrow" id="contact">
-      <h2 class="section-title">جرّب نقاطك 14 يوم مجاناً</h2>
-      <p class="center muted">اترك معلوماتك ومنرجعلك خلال يوم، أو احكينا مباشرة على واتساب.</p>
+      <h2 class="section-title" id="contactTitle">جرّب نقاطك 14 يوم مجاناً</h2>
+      <p class="center muted" id="contactLead">اترك معلوماتك ومنرجعلك خلال يوم، أو احكينا مباشرة على واتساب.</p>
       <form class="panel stack" id="leadForm" novalidate>
         <div class="field"><label for="l-shop">اسم المحل</label><input id="l-shop" name="shopName" required maxlength="60" placeholder="موكا كوفي هاوس"></div>
         <div class="row">
@@ -127,10 +127,10 @@
 
     <section class="section narrow" id="login">
       <div class="panel">
-        <h2 style="text-align:center">دخول المحلات</h2>
+        <h2 style="text-align:center" id="authTitle">دخول المحلات</h2>
         <div class="seg hidden" role="tablist" id="authTabs" style="margin-top:10px">
           <button type="button" data-mode="login" class="on">تسجيل الدخول</button>
-          <button type="button" data-mode="signup">فتح حساب جديد</button>
+          <button type="button" data-mode="signup">تجربة مجانية 14 يوم</button>
         </div>
         <form id="auth" class="stack" style="margin-top:14px" novalidate>
           <div class="signup-only field hidden"><label for="shopName">اسم المحل</label><input id="shopName" name="shopName" autocomplete="organization" placeholder="موكا كوفي هاوس">

@@ -196,6 +196,32 @@ function int(v, min, max, msg) {
   return n;
 }
 
+// ─── الاشتراك: 14 يوم تجربة، وبعدها المحل بيتوقف لحد ما مدير المنصة يفعّله ───
+export const TRIAL_DAYS = 14;
+const DAY = 864e5;
+
+// محل صاحب المنصة (أول حساب) ما بيخلص اشتراكه
+async function platformShopId(db) {
+  const row = await db.get('SELECT shop_id FROM users ORDER BY id LIMIT 1');
+  return row ? row.shop_id : null;
+}
+
+function subscriptionOf(shop, platformShop) {
+  if (shop.id === platformShop) return { state: 'owner', until: null, daysLeft: null };
+  const until = shop.active_until ?? shop.created_at + TRIAL_DAYS * DAY;
+  const left = until - Date.now();
+  if (left <= 0) return { state: 'expired', until, daysLeft: 0, paid: !!shop.paid };
+  return { state: shop.paid ? 'active' : 'trial', until, daysLeft: Math.ceil(left / DAY) };
+}
+
+async function subscription(c, shop) {
+  return subscriptionOf(shop, await platformShopId(c.db));
+}
+
+async function requireActive(c, shop = c.shop) {
+  if ((await subscription(c, shop)).state === 'expired') fail(402, 'خلصت فترة اشتراك محلك. تواصل معنا لتفعيله، وزبائنك ونقاطهم محفوظين.');
+}
+
 // حد لعدد الطلبات لكل مفتاح بنافذة زمنية؛ لما يتجاوز بيرجع 429
 async function rateLimit(c, key, max, windowMs, msg = 'طلبات كتير، جرّب بعد كم دقيقة') {
   const now = Date.now();
@@ -223,12 +249,15 @@ async function deleteMember(c, shop, m) {
 
 // ─── المسارات العامة (بدون تسجيل دخول) ───
 async function publicShop(c, slug) {
-  return json({ shop: publicShopView(await shopBySlug(c.db, slug), c.origin) });
+  const shop = await shopBySlug(c.db, slug);
+  const paused = (await subscription(c, shop)).state === 'expired';
+  return json({ shop: { ...publicShopView(shop, c.origin), paused } });
 }
 
 async function join(c, slug) {
   const shop = await shopBySlug(c.db, slug);
   if (c.body.website) fail(400, 'طلب غير صالح'); // فخ للبوتات
+  if ((await subscription(c, shop)).state === 'expired') fail(403, 'برنامج الولاء بهالمحل متوقف مؤقتاً.');
   // سقف لكل جهاز/شبكة، وسقف عام لكل محل (لو حدا غيّر الـ IP)
   await rateLimit(c, `join:${c.ip}`, 20, 10 * MIN);
   await rateLimit(c, `join-shop:${shop.id}`, 150, 10 * MIN, 'في ضغط على التسجيل هلأ، جرّب بعد شوي');
@@ -308,13 +337,38 @@ async function adminLeadStatus(c, id) {
 async function adminShops(c) {
   await requireAdmin(c);
   const shops = await c.db.all(
-    `SELECT s.id, s.name, s.slug, s.created_at AS createdAt,
+    `SELECT s.id, s.name, s.slug, s.created_at AS createdAt, s.active_until, s.paid, s.created_at,
        (SELECT COUNT(*) FROM members m WHERE m.shop_id = s.id) AS members,
        (SELECT MAX(t.created_at) FROM txns t WHERE t.shop_id = s.id) AS lastActivity,
        (SELECT u.email FROM users u WHERE u.shop_id = s.id AND u.role = 'owner' ORDER BY u.id LIMIT 1) AS ownerEmail
      FROM shops s ORDER BY s.created_at DESC LIMIT 500`,
   );
-  return json({ shops, signupOpen: !c.env.SIGNUP_CODE });
+  const platformShop = await platformShopId(c.db);
+  const out = shops.map(({ active_until, paid, created_at, ...s }) => ({ ...s, subscription: subscriptionOf({ id: s.id, active_until, paid, created_at }, platformShop) }));
+  return json({ shops: out, signupOpen: !c.env.SIGNUP_CODE });
+}
+
+// مدير المنصة بيفعّل اشتراك محل (+ شهر / + سنة) أو بيوقفه
+async function adminShopPlan(c, id) {
+  await requireAdmin(c);
+  const shop = await c.db.get('SELECT * FROM shops WHERE id = ?', Number(id));
+  if (!shop) fail(404, 'ما لقينا المحل');
+  const now = Date.now();
+  const current = shop.active_until ?? shop.created_at + TRIAL_DAYS * DAY;
+  let until;
+  let paid = 1;
+  if (c.body.action === 'month' || c.body.action === 'year') {
+    const d = new Date(Math.max(now, current));
+    if (c.body.action === 'month') d.setMonth(d.getMonth() + 1); else d.setFullYear(d.getFullYear() + 1);
+    until = d.getTime();
+  } else if (c.body.action === 'stop') {
+    until = now - 1000;
+    paid = 0;
+  } else {
+    fail(400, 'إجراء غير معروف');
+  }
+  await c.db.run('UPDATE shops SET active_until = ?, paid = ? WHERE id = ?', until, paid, shop.id);
+  return adminShops(c);
 }
 
 async function logo(c, shopId) {
@@ -348,7 +402,7 @@ async function signup(c) {
   for (let i = 0; ; i++) {
     try {
       await c.db.batch([
-        ['INSERT INTO shops (slug, name, country, currency, welcome_text, created_at) VALUES (?, ?, ?, ?, ?, ?)', [slug, shopName, country, CURRENCIES[country], `${shopName} ترحب بكم`, now]],
+        ['INSERT INTO shops (slug, name, country, currency, welcome_text, active_until, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)', [slug, shopName, country, CURRENCIES[country], `${shopName} ترحب بكم`, now + TRIAL_DAYS * DAY, now]],
         ['INSERT INTO users (shop_id, email, name, role, pw_hash, created_at) VALUES ((SELECT id FROM shops WHERE slug = ?), ?, ?, \'owner\', ?, ?)', [slug, email, ownerName, pw, now]],
       ]);
       break;
@@ -383,6 +437,8 @@ async function me(c) {
     user: { id: c.user.id, name: c.user.name, email: c.user.email, role: c.user.role, isAdmin: await isPlatformAdmin(c) },
     shop: shopView(c.shop, c.origin),
     google: googleStatus(c, c.shop),
+    subscription: await subscription(c, c.shop),
+    whatsapp: /^\d{8,15}$/.test(String(c.env.WHATSAPP_NUMBER || '')) ? String(c.env.WHATSAPP_NUMBER) : null,
     currencies: CURRENCIES,
   });
 }
@@ -414,6 +470,7 @@ async function listMembers(c) {
 }
 
 async function addMember(c) {
+  await requireActive(c);
   const name = readName(c.body.name);
   const phone = readPhone(c.body.phone);
   const existing = await c.db.get('SELECT id FROM members WHERE shop_id = ? AND phone = ?', c.shop.id, phone);
@@ -471,6 +528,7 @@ async function respondMember(c, id, extra = {}) {
 }
 
 async function earn(c, id) {
+  await requireActive(c);
   const m = await memberOf(c, id);
   const r = earnFor(c.shop, c.body);
   if (r.error) fail(400, r.error);
@@ -483,6 +541,7 @@ async function earn(c, id) {
 }
 
 async function redeem(c, id) {
+  await requireActive(c);
   const m = await memberOf(c, id);
   const cost = rewardCost(c.shop);
   const now = Date.now();
@@ -504,6 +563,7 @@ async function removeMember(c, id) {
 }
 
 async function adjust(c, id) {
+  await requireActive(c);
   const m = await memberOf(c, id);
   const delta = int(c.body.delta, -100000, 100000, 'اكتب عدد صحيح');
   if (!delta) fail(400, 'اكتب عدد غير الصفر');
@@ -627,6 +687,7 @@ async function syncNow(c) {
 }
 
 async function broadcast(c) {
+  await requireActive(c);
   const cfg = gw.googleConfig(c.env);
   if (!cfg) fail(400, 'Google Wallet مش مفعّل على السيرفر');
   const header = clean(c.body.header, 40) || c.shop.name;
@@ -681,6 +742,7 @@ const API = [
   ['GET', /^\/api\/admin\/leads$/, adminLeads, 'staff'],
   ['PUT', /^\/api\/admin\/leads\/(\d+)$/, adminLeadStatus, 'staff'],
   ['GET', /^\/api\/admin\/shops$/, adminShops, 'staff'],
+  ['POST', /^\/api\/admin\/shops\/(\d+)\/plan$/, adminShopPlan, 'staff'],
   ['POST', /^\/api\/auth\/signup$/, signup],
   ['POST', /^\/api\/auth\/login$/, loginRoute],
   ['POST', /^\/api\/auth\/logout$/, logout],

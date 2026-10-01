@@ -54,16 +54,32 @@ function setMode(m) {
   $$('#authTabs button').forEach((b) => b.classList.toggle('on', b.dataset.mode === m));
   $$('.signup-only').forEach((el) => el.classList.toggle('hidden', m !== 'signup' || (el.id === 'codeField' && signupOpen && !code)));
   $('#password').autocomplete = m === 'signup' ? 'new-password' : 'current-password';
-  $('#authBtn').textContent = m === 'signup' ? 'افتح حسابي' : 'دخول';
+  $('#authBtn').textContent = m === 'signup' ? 'ابدأ تجربتي المجانية' : 'دخول';
+  $('#authTitle').textContent = m === 'signup' ? 'ابدأ تجربتك المجانية' : 'دخول المحلات';
   $('#authError').textContent = '';
+}
+
+function startSignup() {
+  setMode('signup');
+  $('#login').scrollIntoView({ behavior: 'smooth' });
+  setTimeout(() => $('#shopName').focus({ preventScroll: true }), 400);
 }
 
 function setupAuth() {
   if (code) $('#code').value = code;
   const canSignup = signupOpen || !!code;
   $('#authTabs').classList.toggle('hidden', !canSignup);
-  setMode(code ? 'signup' : 'login');
-  if (code) $('#login').scrollIntoView({ behavior: 'smooth' });
+  setMode(code || location.hash === '#start' ? 'signup' : 'login');
+  if (code || location.hash === '#start') $('#login').scrollIntoView({ behavior: 'smooth' });
+  if (canSignup) {
+    // التجربة بتبلّش لحالها: زر «جرّب مجاناً» بيفتح التسجيل مباشرة، والفورم للي بده مساعدة
+    $$('[data-start]').forEach((a) => {
+      a.href = '#start';
+      a.addEventListener('click', (e) => { e.preventDefault(); startSignup(); });
+    });
+    $('#contactTitle').textContent = 'بدك نساعدك تبلّش؟';
+    $('#contactLead').textContent = 'اترك رقمك ومنتواصل معك نجهّز بطاقتك سوا، أو احكينا على واتساب.';
+  }
 }
 
 $$('#authTabs button').forEach((b) => b.addEventListener('click', () => setMode(b.dataset.mode)));

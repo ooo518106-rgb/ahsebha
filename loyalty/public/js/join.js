@@ -19,6 +19,14 @@ async function main() {
   setBrand(shop.color);
   document.title = `انضم لبطاقة ولاء ${shop.name}`;
   const existing = savedCards()[slug];
+  if (shop.paused) {
+    render(root, html`
+      <div class="brand-hero"><img src="${shop.logo}" alt=""><h1>${shop.name}</h1></div>
+      <div class="panel center"><p>برنامج الولاء بهالمحل متوقف مؤقتاً.</p>
+        ${existing ? html`<a class="btn block" style="margin-top:8px" href="/c/${existing}">افتح بطاقتي</a>` : ''}</div>
+      <p class="powered">بطاقات الولاء من <a href="/">نقاطك</a></p>`);
+    return;
+  }
   render(root, html`
     <div class="brand-hero">
       <img src="${shop.logo}" alt="">
