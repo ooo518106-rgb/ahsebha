@@ -191,6 +191,22 @@ test('الصلاحيات: الموظف بيسجّل نقاط بس ما بيغي�
   assert.equal((await staff.post(`/api/members/${id}/adjust`, { delta: 100, note: 'هدية' })).status, 403);
   assert.equal((await staff.get('/api/staff')).status, 403);
 
+  // الموظف ما بيشوف رقم الزبون: آخر 3 أرقام بس، والمالك بيشوفه كامل
+  const other = (await owner.post('/api/members', { name: 'سلمى', phone: '0791234567' })).data.member;
+  const masked = (await staff.get(`/api/members/${other.id}`)).data.member;
+  assert.equal(masked.phone, '••••567');
+  assert.equal(masked.phoneHidden, true);
+  assert.ok((await staff.get('/api/members')).data.members.every((m) => m.phoneHidden && !/\d{4}/.test(m.phone)), 'القائمة بدون أرقام');
+  assert.equal((await staff.get(`/api/members/lookup?code=0791234567`)).data.member.phone, '••••567', 'بيلاقيه برقمه بس ما بيشوفه');
+  assert.equal((await staff.post(`/api/members/${other.id}/earn`, { amount: 1 })).data.member.phone, '••••567');
+  assert.equal((await owner.get(`/api/members/${other.id}`)).data.member.phone, '0791234567');
+  // البحث بجزء من الرقم ممنوع للموظف (عشان ما يطلّع أرقام الناس رقم رقم)، وبالرقم الكامل مسموح
+  assert.equal((await staff.get('/api/members?q=07912')).data.total, 0);
+  assert.equal((await staff.get('/api/members?q=0791234567')).data.total, 1);
+  assert.equal((await owner.get('/api/members?q=07912')).data.total, 1);
+  // البطاقة اللي بينشئها الموظف بترجعله بالرقم اللي كتبه (ليبعتها عالواتساب)
+  assert.equal((await staff.post('/api/members', { name: 'جديد', phone: '0795550001' })).data.member.phone, '0795550001');
+
   // المالك بيحذف الموظف وجلسته بتنتهي
   const staffId = r.data.users.find((u) => u.role === 'staff').id;
   assert.equal((await owner.del(`/api/staff/${staffId}`)).status, 200);

@@ -297,7 +297,7 @@ function cardLinkHTML(m, url) {
     <div class="center"><div style="width:180px;margin:0 auto">${qrSVG(url, 'رابط بطاقة الزبون')}</div>
       <p class="small muted">خلي الزبون يمسح هاد الرمز بكاميرا جواله ليفتح بطاقته ويحفظها بالمحفظة</p></div>
     <div class="row">
-      <a class="btn grow" href="${waLink(m.phone, cardMessage(m, url))}" target="_blank" rel="noopener">واتساب</a>
+      ${m.phoneHidden ? '' : html`<a class="btn grow" href="${waLink(m.phone, cardMessage(m, url))}" target="_blank" rel="noopener">واتساب</a>`}
       <button class="btn ghost grow" type="button" data-copy="${url}">نسخ الرابط</button>
       <a class="btn ghost grow" href="${url}" target="_blank" rel="noopener">فتح</a>
     </div>`;
@@ -751,7 +751,7 @@ async function loadStaff(data) {
         <input name="email" type="email" placeholder="الإيميل" dir="ltr" required>
         <input name="password" type="password" placeholder="كلمة سر (8 حروف أو أكتر)" dir="ltr" minlength="8" required autocomplete="new-password">
         <button class="btn" type="submit">إضافة</button>
-        <p class="hint">الكاشير بيقدر يمسح ويضيف نقاط ويصرف مكافآت، بس ما بيقدر يغيّر الإعدادات أو يعدّل الرصيد يدوياً.</p>
+        <p class="hint">الكاشير بيقدر يمسح ويضيف نقاط ويصرف مكافآت وينشئ بطاقات. ما بيشوف رقم جوال الزبون (بس آخر 3 أرقام)، وما بيقدر يغيّر الإعدادات أو يعدّل الرصيد يدوياً أو يحذف زبائن. بيدخل من نفس الموقع بالإيميل وكلمة السر اللي بتعطيه ياهم.</p>
       </form></details>`);
   $$('[data-rm]', panel).forEach((b) => {
     b.onclick = async () => {

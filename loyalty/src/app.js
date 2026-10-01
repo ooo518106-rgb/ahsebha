@@ -64,11 +64,15 @@ function publicShopView(shop, origin) {
   };
 }
 
-function memberView(m, shop) {
+// الموظف ما بيشوف رقم الزبون كامل: آخر 3 أرقام بس (بيكفي ليتأكد إنه الزبون الصح)
+const maskPhone = (p) => `••••${String(p).slice(-3)}`;
+
+function memberView(m, shop, hidePhone = false) {
   return {
     id: m.id,
     name: m.name,
-    phone: m.phone,
+    phone: hidePhone ? maskPhone(m.phone) : m.phone,
+    phoneHidden: hidePhone,
     cardNo: m.card_no,
     token: m.token,
     balance: m.balance,
@@ -82,6 +86,9 @@ function memberView(m, shop) {
     stamps: shop.program_type === 'stamps' ? stampsLine(shop, m.balance) : null,
   };
 }
+
+// شكل الزبون حسب مين بيطلب: صاحب المحل بيشوف كل إشي، الموظف بدون الرقم
+const viewFor = (c, m) => memberView(m, c.shop, c.user?.role === 'staff');
 
 const logoUrl = (shop, origin) => `${origin}/media/logo/${shop.id}.png?v=${shop.logo_version}`;
 
@@ -589,6 +596,7 @@ async function cardInfo(c, token) {
   const shop = await c.db.get('SELECT * FROM shops WHERE id = ?', m.shop_id);
   const v = memberView(m, shop);
   delete v.phone;
+  delete v.phoneHidden;
   delete v.id;
   return json({ shop: publicShopView(shop, c.origin), member: v, google: !!gw.googleConfig(c.env), apple: !!(await appleConfig(c)) });
 }
@@ -780,13 +788,16 @@ async function listMembers(c) {
   if (q) {
     const like = `%${q.replace(/[\\%_]/g, (ch) => `\\${ch}`)}%`;
     const digits = normPhone(q);
-    where += " AND (name LIKE ? ESCAPE '\\' OR card_no = ?" + (digits.length >= 3 ? ' OR phone LIKE ?' : '') + ')';
+    // الموظف بيلاقي الزبون برقمه الكامل بس (ما بيقدر يدوّر بجزء من الرقم ويطلّع أرقام الناس)
+    const staff = c.user.role === 'staff';
+    const byPhone = staff ? digits.length >= 7 : digits.length >= 3;
+    where += " AND (name LIKE ? ESCAPE '\\' OR card_no = ?" + (byPhone ? (staff ? ' OR phone = ?' : ' OR phone LIKE ?') : '') + ')';
     a.push(like, q);
-    if (digits.length >= 3) a.push(`%${digits}%`);
+    if (byPhone) a.push(staff ? digits : `%${digits}%`);
   }
   const rows = await c.db.all(`SELECT * FROM members WHERE ${where} ORDER BY COALESCE(last_visit, created_at) DESC LIMIT 50 OFFSET ?`, ...a, offset);
   const total = await c.db.get(`SELECT COUNT(*) AS n FROM members WHERE ${where}`, ...a);
-  return json({ members: rows.map((m) => memberView(m, c.shop)), total: total.n });
+  return json({ members: rows.map((m) => viewFor(c, m)), total: total.n });
 }
 
 async function addMember(c) {
@@ -796,6 +807,7 @@ async function addMember(c) {
   const existing = await c.db.get('SELECT id FROM members WHERE shop_id = ? AND phone = ?', c.shop.id, phone);
   if (existing) return json({ error: 'هالرقم إله بطاقة من قبل', memberId: existing.id }, 409);
   const m = await createMember(c.db, c.shop, name, phone);
+  // الرقم كامل هون حتى للموظف: هو اللي كتبه، وبيلزمه ليبعت البطاقة للزبون عالواتساب
   return json({ member: memberView(m, c.shop), cardUrl: `${c.origin}/c/${m.token}` }, 201);
 }
 
@@ -812,7 +824,7 @@ async function lookup(c) {
     if (!m && digits.length >= 7) m = await c.db.get('SELECT * FROM members WHERE phone = ? AND shop_id = ?', digits, c.shop.id);
   }
   if (!m) fail(404, 'ما لقينا هالبطاقة عندكم');
-  return json({ member: memberView(m, c.shop) });
+  return json({ member: viewFor(c, m) });
 }
 
 async function memberDetail(c, id) {
@@ -825,7 +837,7 @@ async function memberDetail(c, id) {
   // الإشعارات: كم جهاز مفعّل، وشو صار بآخر إشعار
   const subs = await c.db.all('SELECT last_at, last_error FROM push_subs WHERE member_id = ? ORDER BY last_at IS NULL, last_at DESC', m.id);
   const push = { devices: subs.length, lastAt: subs[0]?.last_at || null, lastError: subs[0]?.last_error || null };
-  return json({ member: memberView(m, c.shop), txns, push, cardUrl: `${c.origin}/c/${m.token}` });
+  return json({ member: viewFor(c, m), txns, push, cardUrl: `${c.origin}/c/${m.token}` });
 }
 
 // كل حركة نقاط إلها مفتاح (idem) من الواجهة: لو انبعتت مرتين (نت ضعيف أو كبسة مكررة) بتنحسب مرة وحدة
@@ -852,7 +864,7 @@ async function respondMember(c, id, extra = {}, message = null) {
     const msg = message(fresh);
     if (msg) push = await notifyMember(c, fresh, { ...msg, icon: logoUrl(c.shop, c.origin) });
   }
-  return json({ member: memberView(fresh, c.shop), ...extra, ...(push ? { push } : {}) });
+  return json({ member: viewFor(c, fresh), ...extra, ...(push ? { push } : {}) });
 }
 
 async function earn(c, id) {
