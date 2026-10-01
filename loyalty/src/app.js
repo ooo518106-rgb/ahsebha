@@ -429,7 +429,7 @@ async function cardPushTest(c, token) {
   const shop = await c.db.get('SELECT * FROM shops WHERE id = ?', m.shop_id);
   const r = await pushTo(c, [sub], () => ({
     title: shop.name,
-    body: 'تمام! الإشعارات شغّالة ✅ رح يوصلك إشعار كل ما تنضافلك نقاط.',
+    body: isEn(m) ? 'All set! Notifications work ✅ You’ll be notified every time you earn points.' : 'تمام! الإشعارات شغّالة ✅ رح يوصلك إشعار كل ما تنضافلك نقاط.',
     icon: logoUrl(shop, c.origin),
     url: `${c.origin}/c/${m.token}`,
   }));
@@ -536,6 +536,16 @@ function earnMessage(shop, before, after, perk, ref) {
   const p0 = progress(shop, before.balance);
   const p1 = progress(shop, after.balance);
   const stamps = shop.program_type === 'stamps';
+  if (isEn(after)) {
+    const extras = [...perk.reasonsEn, ...(ref ? [`👥 +${ref.bonus} invite gift`] : [])];
+    const tail = extras.length ? ` (${extras.join(', ')})` : '';
+    const body = p1.available > p0.available
+      ? `🎁 Your reward is ready: ${shop.reward_name}! Ask for it on your next visit.${tail}`
+      : stamps
+        ? `You got ${delta} ${unitEn(shop, delta)} ☕${tail} You now have ${p1.toward}/${p1.cost}`
+        : `You earned ${delta} ${unitEn(shop, delta)} ☕${tail} Balance: ${after.balance}, ${p1.remaining} to go for ${shop.reward_name}`;
+    return { title: shop.name, body };
+  }
   const extras = [...perk.reasons, ...(ref ? [`👥 +${ref.bonus} هدية الدعوة`] : [])];
   const tail = extras.length ? ` (${extras.join('، ')})` : '';
   const body = p1.available > p0.available
@@ -627,9 +637,13 @@ async function birthdayJob(c, shopOf, now) {
     if (!res[res.length - 1].changes) continue;
     n++;
     const first = perks.firstName(m.name);
-    const body = gift <= 0 ? `كل سنة وإنت سالم يا ${first}! 🎉 من كل فريق ${shop.name}`
-      : gift === rewardCost(shop) ? `كل سنة وإنت سالم يا ${first}! 🎉 ${shop.reward_name} اليوم علينا، الهدية صارت بحسابك 🎁`
-        : `كل سنة وإنت سالم يا ${first}! 🎉 انضافلك ${gift} ${unitLabel(shop)} هدية عيدك 🎁`;
+    const body = isEn(m)
+      ? (gift <= 0 ? `Happy birthday, ${first}! 🎉 From all of us at ${shop.name}`
+        : gift === rewardCost(shop) ? `Happy birthday, ${first}! 🎉 ${shop.reward_name} is on us today, it’s already on your card 🎁`
+          : `Happy birthday, ${first}! 🎉 You got ${gift} ${unitEn(shop, gift)} as a birthday gift 🎁`)
+      : gift <= 0 ? `كل سنة وإنت سالم يا ${first}! 🎉 من كل فريق ${shop.name}`
+        : gift === rewardCost(shop) ? `كل سنة وإنت سالم يا ${first}! 🎉 ${shop.reward_name} اليوم علينا، الهدية صارت بحسابك 🎁`
+          : `كل سنة وإنت سالم يا ${first}! 🎉 انضافلك ${gift} ${unitLabel(shop)} هدية عيدك 🎁`;
     if (gift > 0 && m.gw_object && gw.googleConfig(c.env)) {
       c.budget -= 2;
       pushMember(c, shop, await c.db.get('SELECT * FROM members WHERE id = ?', m.id));
@@ -657,7 +671,8 @@ async function reviewAskJob(c, shopOf, now) {
     if (c.budget <= 0) break;
     const r = await c.db.run('UPDATE members SET review_ask_at = ? WHERE id = ? AND (review_ask_at IS NULL OR review_ask_at < ?)', now, m.id, now - 30 * DAY);
     if (!r.changes) continue;
-    if (await cronPush(c, shop, m, { body: `كيف كانت زيارتك لـ ${shop.name} اليوم؟ قيّمنا بكبسة ⭐`, url: `${c.origin}/c/${m.token}?rate=1` })) n++;
+    const body = isEn(m) ? `How was your visit to ${shop.name} today? Rate us in one tap ⭐` : `كيف كانت زيارتك لـ ${shop.name} اليوم؟ قيّمنا بكبسة ⭐`;
+    if (await cronPush(c, shop, m, { body, url: `${c.origin}/c/${m.token}?rate=1` })) n++;
   }
   return n;
 }
@@ -683,8 +698,9 @@ async function winbackJob(c, shopOf, now) {
     const r = await c.db.run('UPDATE members SET nudged_at = ?, boost_until = ? WHERE id = ? AND (nudged_at IS NULL OR nudged_at < COALESCE(last_visit, created_at))', now, boost, m.id);
     if (!r.changes) continue;
     const first = perks.firstName(m.name);
-    const text = (shop.winback_text || `اشتقنالك يا {الاسم} ☕ مرّ علينا قريب`).replaceAll('{الاسم}', first);
-    const body = shop.winback_double ? `${text} — نقاطك دبل لـ 3 أيام 🎁` : text;
+    const en = isEn(m) && !shop.winback_text;
+    const text = (shop.winback_text || (en ? 'We miss you, {الاسم} ☕ Come see us soon' : 'اشتقنالك يا {الاسم} ☕ مرّ علينا قريب')).replaceAll('{الاسم}', first);
+    const body = shop.winback_double ? `${text}${en ? ' — double points for 3 days 🎁' : ' — نقاطك دبل لـ 3 أيام 🎁'}` : text;
     if (await cronPush(c, shop, m, { body })) n++;
   }
   return n;
@@ -710,7 +726,9 @@ async function expiryJob(c, shopOf, now) {
     if (c.budget <= 0) break;
     await c.db.run('UPDATE members SET expiry_warned_at = ? WHERE id = ?', now, m.id);
     const days = Math.max(1, Math.round((m.ends - now) / DAY));
-    if (await cronPush(c, shop, m, { body: `⏳ عندك ${m.balance} ${unitLabel(shop)} بتنتهي بعد ${days} ${days === 1 ? 'يوم' : 'أيام'}. مرّ علينا واستعملها ☕` })) warned++;
+    const body = isEn(m) ? `⏳ Your ${m.balance} ${unitEn(shop, m.balance)} expire in ${days} day${days === 1 ? '' : 's'}. Drop by and use them ☕`
+      : `⏳ عندك ${m.balance} ${unitLabel(shop)} بتنتهي بعد ${days} ${days === 1 ? 'يوم' : 'أيام'}. مرّ علينا واستعملها ☕`;
+    if (await cronPush(c, shop, m, { body })) warned++;
   }
   const due = await c.db.all(
     `SELECT m.* FROM members m JOIN shops s ON s.id = m.shop_id WHERE s.expiry_months > 0 AND m.balance > 0 AND ${ends} <= ? LIMIT 100`, now,
@@ -796,13 +814,13 @@ function readPhone(v) {
 
 const DUPLICATE_PHONE = 'هالرقم مسجّل عنا من قبل. اطلب من الكاشير يبعتلك رابط بطاقتك.';
 
-async function createMember(db, shop, name, phone, { birthday = null, referredBy = null } = {}) {
+async function createMember(db, shop, name, phone, { birthday = null, referredBy = null, lang = 'ar' } = {}) {
   const now = Date.now();
   for (let i = 0; i < 6; i++) {
     try {
       const r = await db.run(
-        'INSERT INTO members (shop_id, token, card_no, name, phone, birthday, bday_set_at, referred_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        shop.id, randomToken(), randomDigits(8), name, phone, birthday, birthday ? now : null, referredBy, now,
+        'INSERT INTO members (shop_id, token, card_no, name, phone, birthday, bday_set_at, referred_by, lang, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        shop.id, randomToken(), randomDigits(8), name, phone, birthday, birthday ? now : null, referredBy, lang === 'en' ? 'en' : 'ar', now,
       );
       return db.get('SELECT * FROM members WHERE id = ?', r.lastId);
     } catch (e) {
@@ -931,7 +949,7 @@ async function join(c, slug) {
   const birthday = c.body.bdayDay || c.body.bdayMonth ? perks.readBirthday(c.body.bdayDay, c.body.bdayMonth) : null;
   if ((c.body.bdayDay || c.body.bdayMonth) && !birthday) fail(400, 'تاريخ الميلاد مش صحيح');
   const referrer = await referrerOf(c, shop, c.body.ref);
-  const m = await createMember(c.db, shop, readName(c.body.name), readPhone(c.body.phone), { birthday, referredBy: referrer ? referrer.id : null });
+  const m = await createMember(c.db, shop, readName(c.body.name), readPhone(c.body.phone), { birthday, referredBy: referrer ? referrer.id : null, lang: c.body.lang });
   return json({ token: m.token, url: `${c.origin}/c/${m.token}` }, 201);
 }
 
@@ -964,6 +982,13 @@ async function cardBirthday(c, token) {
   const r = await c.db.run('UPDATE members SET birthday = ?, bday_set_at = ? WHERE id = ? AND birthday IS NULL', md, Date.now(), m.id);
   if (!r.changes) fail(409, 'تاريخ ميلادك محفوظ من قبل. لتغييره احكي مع المحل.');
   return json({ ok: true, birthday: md });
+}
+
+async function cardLang(c, token) {
+  const lang = c.body.lang === 'en' ? 'en' : 'ar';
+  const r = await c.db.run('UPDATE members SET lang = ? WHERE token = ?', lang, token);
+  if (!r.changes) fail(404, 'ما لقينا هالبطاقة');
+  return json({ ok: true, lang });
 }
 
 // ─── التقييمات ───
@@ -1363,6 +1388,11 @@ function branchFor(c) {
   return b && branchesOf(c.shop).some((l) => l.id === b) ? b : null;
 }
 
+// إشعارات الزبون بلغته (عربي أو إنجليزي)
+const isEn = (m) => m && m.lang === 'en';
+const unitEn = (shop, n) => (shop.program_type === 'stamps' ? (n === 1 ? 'stamp' : 'stamps') : (n === 1 ? 'point' : 'points'));
+const unitFor = (shop, m, n) => (isEn(m) ? unitEn(shop, n) : unitLabel(shop));
+
 // ─── الحماية من تلاعب الموظفين (المالك مستثنى) ───
 const guardBig = (shop) => shop.guard_big ?? rewardCost(shop);
 
@@ -1421,7 +1451,8 @@ async function rewardReferral(c, m, now) {
     pushMember(c, c.shop, fresh);
     c.waitUntil(notifyMember(c, fresh, {
       title: c.shop.name,
-      body: `👥 صاحبك ${perks.firstName(m.name)} زارنا! انضافلك ${bonus} ${unitLabel(c.shop)} هدية الدعوة 🎉`,
+      body: isEn(fresh) ? `👥 Your friend ${perks.firstName(m.name)} visited us! You got ${bonus} ${unitEn(c.shop, bonus)} as an invite gift 🎉`
+        : `👥 صاحبك ${perks.firstName(m.name)} زارنا! انضافلك ${bonus} ${unitLabel(c.shop)} هدية الدعوة 🎉`,
       icon: logoUrl(c.shop, c.origin),
     }).catch(() => {}));
   }
@@ -1770,14 +1801,15 @@ async function couponBatch(c, id, cursor) {
   const cp = await c.db.get('SELECT * FROM coupons WHERE id = ? AND shop_id = ?', id, c.shop.id);
   if (!cp) fail(404, 'ما لقينا الكوبون');
   const subs = await c.db.all(
-    `SELECT p.*, m.token FROM push_subs p JOIN members m ON m.id = p.member_id JOIN member_coupons mc ON mc.member_id = p.member_id AND mc.coupon_id = ?
+    `SELECT p.*, m.token, m.lang FROM push_subs p JOIN members m ON m.id = p.member_id JOIN member_coupons mc ON mc.member_id = p.member_id AND mc.coupon_id = ?
      WHERE p.id > ? ORDER BY p.id LIMIT ?`, cp.id, cursor, PUSH_BATCH,
   );
   const days = Math.max(1, Math.round((cp.expires_at - cp.created_at) / DAY));
   const icon = logoUrl(c.shop, c.origin);
   const r = await pushTo(c, subs, (sub) => ({
     title: `🎟️ ${c.shop.name}`,
-    body: `${cp.title}${cp.details ? ` — ${cp.details}` : ''} · صالح ${days === 1 ? 'اليوم بس' : `${days} أيام`}، اعرض بطاقتك للكاشير`,
+    body: isEn(sub) ? `${cp.title}${cp.details ? ` — ${cp.details}` : ''} · valid ${days === 1 ? 'today only' : `${days} days`}, show your card at the counter`
+      : `${cp.title}${cp.details ? ` — ${cp.details}` : ''} · صالح ${days === 1 ? 'اليوم بس' : `${days} أيام`}، اعرض بطاقتك للكاشير`,
     icon, url: `${c.origin}/c/${sub.token}`, tag: `coupon-${cp.id}`,
   }));
   return { sent: r.ok, failed: r.error, next: subs.length === PUSH_BATCH ? subs[subs.length - 1].id : null };
@@ -1857,7 +1889,8 @@ async function topup(c, id) {
   const cur = c.shop.currency;
   return respondMember(c, m.id, { topup: { amount: amount / 1000, bonus: bonus / 1000 } }, (fresh) => ({
     title: c.shop.name,
-    body: `💳 انشحن رصيدك ${money(amount)} ${cur}${bonus ? ` + ${money(bonus)} هدية` : ''}. رصيدك صار ${money(fresh.credit)} ${cur}`,
+    body: isEn(fresh) ? `💳 Topped up ${money(amount)} ${cur}${bonus ? ` + ${money(bonus)} gift` : ''}. Your balance is ${money(fresh.credit)} ${cur}`
+      : `💳 انشحن رصيدك ${money(amount)} ${cur}${bonus ? ` + ${money(bonus)} هدية` : ''}. رصيدك صار ${money(fresh.credit)} ${cur}`,
   }));
 }
 
@@ -1876,7 +1909,8 @@ async function spend(c, id) {
   const cur = c.shop.currency;
   return respondMember(c, m.id, { spent: amount / 1000 }, (fresh) => ({
     title: c.shop.name,
-    body: `💳 انخصم ${money(amount)} ${cur} من رصيدك. باقي ${money(fresh.credit)} ${cur}`,
+    body: isEn(fresh) ? `💳 ${money(amount)} ${cur} paid from your balance. ${money(fresh.credit)} ${cur} left`
+      : `💳 انخصم ${money(amount)} ${cur} من رصيدك. باقي ${money(fresh.credit)} ${cur}`,
   }));
 }
 
@@ -1974,6 +2008,7 @@ const API = [
   ['POST', /^\/api\/cards\/([a-z2-9]{20})\/delete$/, deleteCard],
   ['POST', /^\/api\/cards\/([a-z2-9]{20})\/birthday$/, cardBirthday],
   ['POST', /^\/api\/cards\/([a-z2-9]{20})\/review$/, cardReview],
+  ['POST', /^\/api\/cards\/([a-z2-9]{20})\/lang$/, cardLang],
   ['GET', /^\/api\/site$/, site],
   ['GET', /^\/api\/push\/key$/, pushKey],
   ['POST', /^\/api\/cards\/([a-z2-9]{20})\/push$/, cardPushSubscribe],

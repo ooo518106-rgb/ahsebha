@@ -1,5 +1,8 @@
 // صفحة بطاقة الزبون: QR للكاشير + زر الحفظ بمحفظة Google، وبتتحدّث لحالها لما تنضاف نقاط
-import { $, api, cardHTML, html, isIOS, render, setBrand, toast } from './common.js';
+import { $, api, cardHTML, html, isIOS, raw, render, setBrand, toast } from './common.js';
+import { LANG, applyLang, fmtDate, ruleText, setLang, t } from './i18n.js';
+
+applyLang();
 
 const token = location.pathname.split('/')[2];
 const params = new URLSearchParams(location.search);
@@ -54,8 +57,8 @@ async function testPush(retry = true) {
     return testPush(false);
   }
   pushNote = r.result === 'ok'
-    ? { ok: true, text: '✅ انبعتلك إشعار تجريبي، لازم يطلعلك هلق. إذا ما شفته، اسحب من فوق الشاشة لتحت.' }
-    : { ok: false, text: html`❌ ما قدرنا نوصّل الإشعار (<bdi>${r.reason || 'خطأ'}</bdi>). صوّر هالشاشة وابعتها للمحل.` };
+    ? { ok: true, text: t('pushTestOk') }
+    : { ok: false, text: t('pushTestBad', { reason: r.reason || t('error') }) };
   return r.result === 'ok';
 }
 
@@ -68,16 +71,16 @@ async function enablePush() {
     await testPush();
     flag(true);
     pushState = 'on';
-    toast('تفعّلت الإشعارات 🔔', 'ok');
+    toast(t('pushEnabled'), 'ok');
   } catch (err) {
-    toast(err.message || 'ما قدرنا نفعّل الإشعارات', 'bad');
+    toast(err.message || t('pushFailed'), 'bad');
   }
   draw();
 }
 
 async function runTest(btn) {
   btn.disabled = true;
-  try { await testPush(); } catch (err) { pushNote = { ok: false, text: `❌ ${err.message || 'ما زبط'}` }; }
+  try { await testPush(); } catch (err) { pushNote = { ok: false, text: `❌ ${err.message || t('error')}` }; }
   draw();
 }
 
@@ -90,20 +93,20 @@ async function disablePush() {
   flag(false);
   pushState = 'off';
   pushNote = null;
-  toast('وقّفنا الإشعارات', 'ok');
+  toast(t('pushStopped'), 'ok');
   draw();
 }
 
 function pushPanel() {
   if (pushState === 'off') {
-    return html`<div class="panel small stack"><b>🔔 بدك يوصلك إشعار لما تنضافلك نقاط أو يكون في عرض؟</b>
-      <button class="btn block" type="button" id="pushOn">فعّل الإشعارات</button></div>`;
+    return html`<div class="panel small stack"><b>${t('pushAsk')}</b>
+      <button class="btn block" type="button" id="pushOn">${t('pushOn')}</button></div>`;
   }
   if (pushState === 'on') {
-    return html`<p class="center small muted">🔔 الإشعارات مفعّلة · <button type="button" class="linkish" id="pushTest">جرّب إشعار</button> · <button type="button" class="linkish" id="pushOff">إيقاف</button></p>
+    return html`<p class="center small muted">${t('pushIsOn')} · <button type="button" class="linkish" id="pushTest">${t('pushTest')}</button> · <button type="button" class="linkish" id="pushOff">${t('pushOff')}</button></p>
       ${pushNote ? html`<p class="alert ${pushNote.ok ? 'ok' : 'warn'} small">${pushNote.text}</p>` : ''}`;
   }
-  if (pushState === 'denied') return html`<p class="center small muted">🔕 الإشعارات مسكّرة لهالبطاقة. بتقدر تفتحها من إعدادات الجوال.</p>`;
+  if (pushState === 'denied') return html`<p class="center small muted">${t('pushDenied')}</p>`;
   return '';
 }
 
@@ -124,7 +127,7 @@ async function load(first = false, quiet = false) {
     if (first) render(root, html`<div class="panel center" style="margin-top:60px"><h1>😕</h1><p>${e.message}</p></div>`);
     return;
   }
-  if (!quiet && lastBalance !== null && data.member.balance > lastBalance) toast(`+${data.member.balance - lastBalance} ${data.shop.unit} 🎉`, 'ok');
+  if (!quiet && lastBalance !== null && data.member.balance > lastBalance) toast(`+${data.member.balance - lastBalance} ${t(data.shop.programType === 'stamps' ? 'unitStamp' : 'unitPoint')} 🎉`, 'ok');
   lastBalance = data.member.balance;
   // ما بنعيد الرسم إذا ما تغيّر إشي (عشان ما يضيع اللي الزبون عم يكتبه)
   const sig = JSON.stringify(data);
@@ -137,67 +140,79 @@ async function load(first = false, quiet = false) {
 // ─── العروض على البطاقة: المستوى، نقاط دبل، عيد الميلاد، التقييم، ادعُ صاحبك ───
 let lastSig = null;
 let rate = null; // { stars } لما يختار نجوم أقل من 4 ويكتب ملاحظة، أو { done, googleUrl }
-const MONTHS = ['كانون الثاني', 'شباط', 'آذار', 'نيسان', 'أيار', 'حزيران', 'تموز', 'آب', 'أيلول', 'تشرين الأول', 'تشرين الثاني', 'كانون الأول'];
-const fmtDay = (ms) => new Intl.DateTimeFormat('ar-u-nu-latn', { weekday: 'long' }).format(new Date(ms));
+const fmtDay = (ms) => fmtDate(ms, { weekday: 'long', day: 'numeric', month: 'long' });
+const first = (name) => String(name).trim().split(/\s+/)[0];
+const unitOf = (shop) => t(shop.programType === 'stamps' ? 'unitStamp' : 'unitPoint');
+const LINKS = ['instagram', 'tiktok', 'facebook', 'whatsapp', 'website'];
 
-function perksPanels(shop, member, refUrl, canRate) {
-  const unit = shop.programType === 'stamps' ? 'ختم' : 'نقطة';
-  const t = member.tier;
+function perksPanels(shop, member, refUrl, canRate, coupons) {
+  const unit = unitOf(shop);
+  const tier = member.tier;
   return html`
-    ${member.birthdayToday ? html`<div class="alert ok center">🎂 كل سنة وإنت سالم يا ${member.name.split(' ')[0]}! 🎉</div>` : ''}
-    ${shop.boostNow > 1 ? html`<div class="alert ok center">⏰ هلق نقاطك ×${shop.boostNow} على كل طلب!</div>`
-      : member.boostUntil ? html`<div class="alert ok center">🎁 اشتقنالك! نقاطك دبل لحد ${fmtDay(member.boostUntil)}</div>` : ''}
-    ${t ? html`<div class="panel small tier tier-${t.key}"><b>${t.icon} مستواك: ${t.name}</b>${t.mult > 1 ? html` · نقاطك ×${t.mult}` : ''}
-      ${t.next ? html`<div class="muted" style="margin-top:4px">باقي <span class="num">${t.next.visitsLeft}</span> ${t.next.visitsLeft === 1 ? 'زيارة' : 'زيارات'} وبتصير ${t.next.icon} ${t.next.name}</div>` : ''}</div>` : ''}
-    ${rate && rate.done ? html`<div class="panel small center stack"><b>شكراً إلك 🙏</b>
-        ${rate.googleUrl ? html`<p class="muted">بتساعدنا كتير إذا كتبت تقييمك على Google ⭐</p><a class="btn block" href="${rate.googleUrl}" target="_blank" rel="noopener">قيّمنا على Google</a>` : html`<p class="muted">وصل كلامك لـ ${shop.name}.</p>`}</div>`
-      : canRate ? html`<div class="panel small center stack" id="ratePanel"><b>كيف كانت زيارتك اليوم؟</b>
-        <div class="stars" role="group" aria-label="التقييم">${[1, 2, 3, 4, 5].map((n) => html`<button type="button" data-star="${n}" class="${rate && rate.stars >= n ? 'on' : ''}" aria-label="${n} من 5">★</button>`)}</div>
-        ${rate && rate.stars ? html`<textarea id="rateNote" rows="2" maxlength="500" placeholder="شو اللي ما عجبك؟ رح يوصل لصاحب المحل بس"></textarea>
-          <button class="btn block" type="button" id="rateSend">ابعت</button>` : ''}</div>` : ''}
-    ${shop.bdayOn && !member.birthday ? html`<form class="panel small stack" id="bdayForm"><b>🎂 شو تاريخ ميلادك؟</b>
-        <span class="muted">${shop.bdayGift > 0 ? `بنهديك ${shop.bdayGift >= shop.cost ? shop.rewardName : `${shop.bdayGift} ${unit}`} يوم عيدك 🎁` : 'عشان نعايدك يوم عيدك 🎉'}</span>
-        <div class="row tight"><select name="day" class="grow" required aria-label="اليوم"><option value="">اليوم</option>${Array.from({ length: 31 }, (_, i) => html`<option>${i + 1}</option>`)}</select>
-          <select name="month" class="grow" required aria-label="الشهر"><option value="">الشهر</option>${MONTHS.map((m, i) => html`<option value="${i + 1}">${m}</option>`)}</select>
-          <button class="btn" type="submit">حفظ</button></div></form>` : ''}
-    ${refUrl ? html`<div class="panel small stack"><b>👥 ادعُ صاحبك</b>
-        <span class="muted">لما يزورنا أول مرة، بتاخدوا انتو التنين <b class="num">${shop.refBonus}</b> ${unit} هدية.</span>
-        <div class="row"><button class="btn grow" type="button" id="shareRef">ابعتله الدعوة</button>
-          <button class="btn ghost" type="button" id="copyRef">نسخ الرابط</button></div></div>` : ''}`;
+    ${member.birthdayToday ? html`<div class="alert ok center">${t('bdayToday', { name: first(member.name) })}</div>` : ''}
+    ${shop.boostNow > 1 ? html`<div class="alert ok center">${t('boostNow', { m: shop.boostNow })}</div>`
+      : member.boostUntil ? html`<div class="alert ok center">${t('boostUntil', { day: fmtDay(member.boostUntil) })}</div>` : ''}
+    ${coupons.map((cp) => html`<div class="panel small coupon-card"><b>${t('coupon', { title: cp.title })}</b>${cp.details ? html`<div>${cp.details}</div>` : ''}
+      <div class="muted">${t('couponUntil', { day: fmtDay(cp.expiresAt) })}</div></div>`)}
+    ${shop.creditOn || member.credit > 0 ? html`<div class="panel small row" style="justify-content:space-between"><b>${t('credit', { amount: member.credit, cur: shop.currency })}</b><span class="muted">${t('creditHint')}</span></div>` : ''}
+    ${member.expiresAt ? html`<p class="small muted center">${t('expires', { day: fmtDate(member.expiresAt) })}</p>` : ''}
+    ${tier ? html`<div class="panel small tier tier-${tier.key}"><b>${t('tier', { icon: tier.icon, name: LANG === 'en' ? { bronze: 'Bronze', silver: 'Silver', gold: 'Gold' }[tier.key] : tier.name })}</b>${tier.mult > 1 ? t('tierMult', { m: tier.mult }) : ''}
+      ${tier.next ? html`<div class="muted" style="margin-top:4px">${t('tierNext', { n: tier.next.visitsLeft, visits: t(tier.next.visitsLeft === 1 ? 'visit1' : 'visitN'), icon: tier.next.icon, name: LANG === 'en' ? (tier.key === 'bronze' ? 'Silver' : 'Gold') : tier.next.name })}</div>` : ''}</div>` : ''}
+    ${rate && rate.done ? html`<div class="panel small center stack"><b>${t('thanks')}</b>
+        ${rate.googleUrl ? html`<p class="muted">${t('googleAsk')}</p><a class="btn block" href="${rate.googleUrl}" target="_blank" rel="noopener">${t('googleBtn')}</a>` : html`<p class="muted">${t('feedbackSent', { shop: shop.name })}</p>`}</div>`
+      : canRate ? html`<div class="panel small center stack" id="ratePanel"><b>${t('rateAsk')}</b>
+        <div class="stars" role="group" aria-label="${t('rateAsk')}">${[1, 2, 3, 4, 5].map((n) => html`<button type="button" data-star="${n}" class="${rate && rate.stars >= n ? 'on' : ''}" aria-label="${n}/5">★</button>`)}</div>
+        ${rate && rate.stars ? html`<textarea id="rateNote" rows="2" maxlength="500" placeholder="${t('rateNote')}"></textarea>
+          <button class="btn block" type="button" id="rateSend">${t('send')}</button>` : ''}</div>` : ''}
+    ${shop.bdayOn && !member.birthday ? html`<form class="panel small stack" id="bdayForm"><b>${t('bdayAsk')}</b>
+        <span class="muted">${shop.bdayGift > 0 ? t('bdayGift', { gift: shop.bdayGift >= shop.cost ? shop.rewardName : `${shop.bdayGift} ${unit}` }) : t('bdayGreet')}</span>
+        <div class="row tight"><select name="day" class="grow" required aria-label="${t('day')}"><option value="">${t('day')}</option>${Array.from({ length: 31 }, (_, i) => html`<option>${i + 1}</option>`)}</select>
+          <select name="month" class="grow" required aria-label="${t('month')}"><option value="">${t('month')}</option>${t('months').map((m, i) => html`<option value="${i + 1}">${m}</option>`)}</select>
+          <button class="btn" type="submit">${t('save')}</button></div></form>` : ''}
+    ${refUrl ? html`<div class="panel small stack"><b>${t('invite')}</b>
+        <span class="muted">${t('inviteHint', { n: shop.refBonus, unit })}</span>
+        <div class="row"><button class="btn grow" type="button" id="shareRef">${t('inviteSend')}</button>
+          <button class="btn ghost" type="button" id="copyRef">${t('copyLink')}</button></div></div>` : ''}`;
+}
+
+function linksRow(shop) {
+  const items = LINKS.filter((k) => shop.links && shop.links[k]);
+  if (!items.length) return '';
+  return html`<div class="panel small stack"><b>${t('links')}</b><div class="row">${items.map((k) => html`<a class="btn ghost sm" href="${shop.links[k]}" target="_blank" rel="noopener">${t(k)}</a>`)}</div></div>`;
 }
 
 function inviteText() {
   const { shop, refUrl } = lastData;
-  return `تعال انضم لبطاقة الولاء تبعت ${shop.name} ☕ وبأول زيارة بناخد انا وإنت هدية 🎁\n${refUrl}`;
+  return t('inviteText', { shop: shop.name, url: refUrl });
 }
 
 function draw() {
   if (!lastData || deleted) return;
-  const { shop, member, google, apple, refUrl, canRate } = lastData;
+  const { shop, member, google, apple, refUrl, canRate, coupons = [] } = lastData;
   setBrand(shop.color);
-  document.title = `بطاقة ${shop.name}`;
+  document.title = t('cardTitle', { shop: shop.name });
   homeScreen(shop.logo, shop.name);
   const ios = isIOS();
   render(root, html`
-    ${params.has('new') ? html`<div class="alert ok" style="margin-bottom:12px">أهلاً ${member.name}! هاي بطاقتك 🎉 ${(ios && !apple) ? '' : 'احفظها بالمحفظة عشان تطلعلك بسرعة.'}</div>` : ''}
-    ${params.get('gw') === 'off' ? html`<div class="alert warn" style="margin-bottom:12px">الحفظ بمحفظة Google لسا مش مفعّل. اعرض هالصفحة للكاشير.</div>` : ''}
-    ${params.get('apple') === 'off' ? html`<div class="alert warn" style="margin-bottom:12px">الحفظ بـ Apple Wallet لسا مش مفعّل. اعرض هالصفحة للكاشير.</div>` : ''}
-    ${cardHTML(shop, member)}
+    <p class="lang-switch"><button type="button" class="linkish" id="langBtn">${t('langSwitch')}</button></p>
+    ${params.has('new') ? html`<div class="alert ok" style="margin-bottom:12px">${t('welcomeNew', { name: member.name })} ${(ios && !apple) ? '' : t('saveToWallet')}</div>` : ''}
+    ${params.get('gw') === 'off' ? html`<div class="alert warn" style="margin-bottom:12px">${t('gwOff')}</div>` : ''}
+    ${params.get('apple') === 'off' ? html`<div class="alert warn" style="margin-bottom:12px">${t('appleOff')}</div>` : ''}
+    ${cardHTML(shop, member, { tr: t })}
     <div class="stack" style="margin-top:16px">
-      ${perksPanels(shop, member, refUrl, canRate)}
-      ${google && !ios ? html`<a class="gw-button" href="/c/${token}/google"><img src="/img/google-wallet-button-ar.svg" alt="الإضافة إلى محفظة Google" width="309" height="50"></a>` : ''}
+      ${perksPanels(shop, member, refUrl, canRate, coupons)}
+      ${google && !ios ? html`<a class="gw-button" href="/c/${token}/google">${LANG === 'en' ? html`<img src="/img/google-wallet-button-en.svg" alt="${t('gwAlt')}" width="283" height="50">` : html`<img src="/img/google-wallet-button-ar.svg" alt="${t('gwAlt')}" width="309" height="50">`}</a>` : ''}
       ${ios && apple ? html`<a class="gw-button" href="/c/${token}/apple"><img class="apple-badge" src="/img/add-to-apple-wallet.svg" alt="Add to Apple Wallet" width="160" height="50"></a>` : ''}
-      ${ios && !standalone ? html`<div class="panel small">
-          <b>على الآيفون:</b> كبس على <b>مشاركة ⬆️</b> وبعدين <b>«إضافة إلى الشاشة الرئيسية»</b>، وافتح البطاقة من الأيقونة: بتفتح بسرعة وبتقدر تفعّل إشعارات النقاط والعروض 🔔
-        </div>` : ''}
+      ${ios && !standalone ? html`<div class="panel small">${raw(t('iosTip'))}</div>` : ''}
       ${pushPanel()}
       <div class="panel small">
-        <b>${shop.rule}</b>
-        <p class="muted" style="margin-top:4px">اعرض الـ QR للكاشير مع كل طلب. ${(google && !ios) || (apple && ios) ? 'بعد ما تحفظها بالمحفظة بتلاقيها جنب بطاقاتك، وبتطلعلك لحالها لما تقرّب من المحل.' : ''}${apple && ios ? ' وعلى الآيفون بتفتحها بكبستين على الزر الجانبي.' : ''}</p>
+        <b>${ruleText(shop)}</b>
+        <p class="muted" style="margin-top:4px">${t('showQr')} ${(google && !ios) || (apple && ios) ? t('walletHint') : ''}${apple && ios ? t('iosSide') : ''}</p>
       </div>
-      <p class="center small muted">زياراتك: <span class="num">${member.visits}</span> · المكافآت اللي أخدتها: <span class="num">${member.redeemed}</span></p>
-      <p class="center small muted"><a href="/privacy">سياسة الخصوصية</a> · <button type="button" class="linkish" id="deleteCard">احذف بطاقتي وبياناتي</button></p>
-      <p class="powered">بطاقات الولاء من <a href="/">نقاطك</a></p>
+      ${linksRow(shop)}
+      <p class="center small muted">${t('visits', { v: member.visits, r: member.redeemed })}</p>
+      <p class="center small muted"><a href="/privacy">${t('privacy')}</a> · <button type="button" class="linkish" id="deleteCard">${t('deleteCard')}</button></p>
+      <p class="powered">${t('powered')} <a href="/">نقاطك</a></p>
     </div>`);
 }
 
@@ -260,7 +275,14 @@ root.addEventListener('click', async (e) => {
     return;
   }
   if (e.target.closest('#copyRef')) {
-    try { await navigator.clipboard.writeText(lastData.refUrl); toast('انسخ الرابط ✅', 'ok'); } catch { prompt('انسخ الرابط:', lastData.refUrl); }
+    try { await navigator.clipboard.writeText(lastData.refUrl); toast(t('copied'), 'ok'); } catch { prompt(t('copyLink'), lastData.refUrl); }
+  }
+  if (e.target.closest('#langBtn')) {
+    const next = LANG === 'ar' ? 'en' : 'ar';
+    setLang(next);
+    // الإشعارات كمان بتصير بنفس اللغة
+    await api(`/api/cards/${token}/lang`, { method: 'POST', body: { lang: next } }).catch(() => {});
+    location.reload();
   }
 });
 
@@ -270,19 +292,19 @@ root.addEventListener('submit', async (e) => {
   const f = new FormData(e.target);
   try {
     await api(`/api/cards/${token}/birthday`, { method: 'POST', body: { day: f.get('day'), month: f.get('month') } });
-    toast('انحفظ تاريخ ميلادك 🎂', 'ok');
+    toast(t('bdaySaved'), 'ok');
     await load();
   } catch (err) { toast(err.message, 'bad'); }
 });
 
 root.addEventListener('click', async (e) => {
   if (!e.target.closest('#deleteCard')) return;
-  if (!confirm('أكيد بدك تحذف بطاقتك؟ رح تنمسح نقاطك وكل سجلك عند هالمحل نهائياً، وما في رجعة.')) return;
+  if (!confirm(t('deleteConfirm'))) return;
   try {
     await api(`/api/cards/${token}/delete`, { method: 'POST' });
     deleted = true;
     forget();
-    render(root, html`<div class="panel center" style="margin-top:60px"><h1>👋</h1><p>انحذفت بطاقتك وكل بياناتك. إذا كانت محفوظة بالمحفظة، رح تتوقف لحالها.</p></div>`);
+    render(root, html`<div class="panel center" style="margin-top:60px"><h1>👋</h1><p>${t('deleted')}</p></div>`);
   } catch (err) {
     toast(err.message, 'bad');
   }

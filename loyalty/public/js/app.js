@@ -4,7 +4,8 @@ import { generateKeyAndCsr } from './csr.js';
 import { parseLatLng } from './rules.js';
 import { startCameraScan } from './scan.js';
 
-const state = { me: null, shop: null, google: null, member: null, key: newKey(), stopScan: null };
+const state = { me: null, shop: null, google: null, member: null, key: newKey(), stopScan: null, branch: (() => { try { return localStorage.getItem('nq_branch') || ''; } catch { return ''; } })() };
+const branchName = (id) => (state.shop.locations.find((l) => l.id === id) || {}).name || '';
 const view = $('#view');
 const isOwner = () => state.me && state.me.user.role === 'owner';
 const CALLING = { JO: '962', PS: '970', SA: '966', AE: '971', KW: '965', QA: '974', BH: '973', OM: '968', EG: '20', IQ: '964', LB: '961', SY: '963', TR: '90', US: '1' };
@@ -112,6 +113,9 @@ function cashier() {
         </form>
         <p class="hint">قارئ QR موصول بالكمبيوتر؟ خلّي المؤشر بالخانة وامسح.</p>
         <button class="btn soft block" id="newBtn" type="button">+ زبون جديد</button>
+        ${state.me.user.branchId ? html`<p class="small muted center">📍 فرعك: <b>${branchName(state.me.user.branchId)}</b></p>`
+          : isOwner() && state.shop.locations.length > 1 ? html`<label class="small">📍 الفرع: <select id="branchSel" style="width:auto">
+              <option value="">بدون</option>${state.shop.locations.map((l) => html`<option value="${l.id}" ${l.id === state.branch ? 'selected' : ''}>${l.name}</option>`)}</select></label>` : ''}
       </section>
       <section id="memberPanel"></section>
     </div>`);
@@ -132,6 +136,8 @@ function cashier() {
   };
   $('#findForm').onsubmit = (e) => { e.preventDefault(); const v = $('#code').value.trim(); if (v) findMember(v); };
   $('#newBtn').onclick = () => newMemberDialog();
+  const bs = $('#branchSel');
+  if (bs) bs.onchange = () => { state.branch = bs.value; try { localStorage.setItem('nq_branch', bs.value); } catch { /* اختياري */ } };
 }
 
 async function findMember(code, fromCamera = false) {
@@ -197,8 +203,17 @@ function showMember(m) {
             <div class="small muted" id="preview">&nbsp;</div>
           </form>`}
       <button class="btn ${m.progress.available ? 'big' : 'ghost'} block" id="redeemBtn" type="button" ${m.progress.available ? '' : 'disabled'}>🎁 صرف المكافأة: ${s.rewardName}</button>
+      <div id="memberCoupons"></div>
+      ${s.perks.creditOn || m.credit > 0 ? html`<div class="credit-box stack">
+          <div class="row" style="justify-content:space-between"><b>💳 الرصيد</b><b class="num">${fmt(m.credit)} ${s.currency}</b></div>
+          <div class="row"><input class="grow num" id="creditAmt" type="number" inputmode="decimal" min="0" step="0.001" placeholder="المبلغ">
+            <button class="btn ghost" type="button" id="spendBtn" ${m.credit > 0 ? '' : 'disabled'}>ادفع من الرصيد</button>
+            ${s.perks.creditOn ? html`<button class="btn soft" type="button" id="topupBtn">اشحن${s.perks.creditBonus ? ` +${s.perks.creditBonus}%` : ''}</button>` : ''}</div>
+        </div>` : ''}
       <button class="btn ghost block" id="openMember" type="button">ملف الزبون ورابط بطاقته</button>
     </div>`);
+  loadMemberCoupons(m);
+  bindCredit(m);
 
   $('#closeMember').onclick = () => { state.member = null; showMember(null); };
   $('#openMember').onclick = () => memberDialog(m.id);
@@ -219,6 +234,46 @@ function showMember(m) {
     $('#earnForm').onsubmit = (e) => { e.preventDefault(); earn(m, { amount: amount.value }); };
     if (matchMedia('(pointer: fine)').matches) amount.focus();
   }
+}
+
+// كوبونات الزبون عند الكاشير، وكل كوبون بينصرف مرة وحدة
+async function loadMemberCoupons(m) {
+  if (!$('#memberCoupons')) return;
+  let r;
+  try { r = await api(`/api/members/${m.id}/coupons`); } catch { return; }
+  const box = $('#memberCoupons');
+  if (!box || (state.member && state.member.id !== m.id)) return;
+  render(box, r.coupons.length ? html`<div class="stack">${r.coupons.map((cp) => html`<div class="coupon row"><div class="grow"><b>🎟️ ${cp.title}</b>${cp.details ? html`<div class="small muted">${cp.details}</div>` : ''}<div class="small muted">لحد ${fmtDay(cp.expiresAt)}</div></div>
+      <button class="btn sm" type="button" data-use="${cp.id}">صرف ✓</button></div>`)}</div>` : '');
+  $$('[data-use]', box).forEach((b) => {
+    b.onclick = async () => {
+      if (!confirm('صرف هالكوبون للزبون؟')) return;
+      try { await api(`/api/members/${m.id}/coupons/${b.dataset.use}/use`, { method: 'POST' }); toast('انصرف الكوبون ✅', 'ok'); loadMemberCoupons(m); } catch (e) { toast(e.message, 'bad'); }
+    };
+  });
+}
+
+// الرصيد المدفوع: شحن (مع الهدية) ودفع منه
+function bindCredit(m) {
+  const amt = $('#creditAmt');
+  if (!amt) return;
+  const go = async (kind) => {
+    const v = Number(amt.value);
+    if (!(v > 0)) { toast('اكتب المبلغ', 'bad'); amt.focus(); return; }
+    const cur = state.shop.currency;
+    if (!confirm(kind === 'topup' ? `شحن ${v} ${cur} لـ ${m.name}${state.shop.perks.creditBonus ? ` (+${state.shop.perks.creditBonus}% هدية)` : ''}؟` : `دفع ${v} ${cur} من رصيد ${m.name}؟`)) return;
+    try {
+      const r = await api(`/api/members/${m.id}/credit/${kind}`, { method: 'POST', body: { amount: v, key: newKey(), branch: state.branch } });
+      state.member = r.member;
+      toast(kind === 'topup' ? `انشحن ✅ رصيده ${fmt(r.member.credit)} ${cur}` : `انخصم ✅ باقي ${fmt(r.member.credit)} ${cur}`, 'ok');
+      if (r.push) pushToast(r.push);
+      showMember(r.member);
+      if (kind === 'spend' && state.shop.programType === 'points' && $('#amount')) { $('#amount').value = v; $('#amount').dispatchEvent(new Event('input')); $('#amount').focus(); }
+    } catch (e) { toast(e.message, 'bad'); }
+  };
+  $('#spendBtn').onclick = () => go('spend');
+  const t = $('#topupBtn');
+  if (t) t.onclick = () => go('topup');
 }
 
 // شارات الزبون عند الكاشير: عيد ميلاده، مستواه، والعروض الشغّالة
@@ -248,7 +303,7 @@ async function earn(m, body) {
   const btn = $('#earnBtn');
   btn.disabled = true;
   try {
-    const r = await api(`/api/members/${m.id}/earn`, { method: 'POST', body: { ...body, key: state.key } });
+    const r = await api(`/api/members/${m.id}/earn`, { method: 'POST', body: { ...body, key: state.key, branch: state.branch } });
     state.key = newKey();
     state.member = r.member;
     toast(r.duplicate ? 'هاي الحركة انسجلت قبل' : `+${fmt(r.delta)} ${state.shop.unit} لـ ${m.name}${r.reasons && r.reasons.length ? ` (${r.reasons.join('، ')})` : ''}`, 'ok');
@@ -274,7 +329,7 @@ async function redeem(m) {
   const btn = $('#redeemBtn');
   btn.disabled = true;
   try {
-    const r = await api(`/api/members/${m.id}/redeem`, { method: 'POST', body: { key: state.key } });
+    const r = await api(`/api/members/${m.id}/redeem`, { method: 'POST', body: { key: state.key, branch: state.branch } });
     state.key = newKey();
     state.member = r.member;
     toast(`🎁 انصرفت المكافأة لـ ${m.name}`, 'ok');
@@ -353,7 +408,7 @@ function txnRow(t, withMember = false) {
   const plus = t.delta > 0;
   return html`<li class="${withMember ? 'click' : ''}" data-member="${withMember ? t.memberId : ''}">
     <div class="main"><b>${withMember ? t.member : KIND[t.kind]}${t.kind === 'redeem' ? ' 🎁' : ''}</b>
-      <span class="small muted">${withMember ? `${KIND[t.kind]} · ` : ''}${t.amount ? `${fmt(t.amount)} ${state.shop.currency} · ` : ''}${t.note ? `${t.note} · ` : ''}${t.by || ''} · ${ago(t.at)}</span></div>
+      <span class="small muted">${withMember ? `${KIND[t.kind]} · ` : ''}${t.amount ? `${fmt(t.amount)} ${state.shop.currency} · ` : ''}${t.note ? `${t.note} · ` : ''}${t.branch && state.shop.locations.length > 1 ? `📍 ${branchName(t.branch)} · ` : ''}${t.by || ''} · ${ago(t.at)}</span></div>
     <span class="delta num ${plus ? 'plus' : 'minus'}">${plus ? '+' : ''}${fmt(t.delta)}</span></li>`;
 }
 
@@ -373,7 +428,10 @@ async function memberDialog(id) {
     <div class="stack">
       <div class="small muted"><span class="num">${m.cardNo}</span> · <span class="num">${m.phone}</span> · من ${fmtDate(m.createdAt)} ${m.inWallet ? html` · <span class="badge ok">بالمحفظة</span>` : ''}</div>
       ${memberSummary(m)}
+      ${m.expiresAt ? html`<div class="small muted">⏳ نقاطه بتنتهي ${fmtDay(m.expiresAt)} إذا ما زار</div>` : ''}
+      ${m.birthday ? html`<div class="small muted">🎂 عيد ميلاده: ${Number(m.birthday.slice(3))}/${Number(m.birthday.slice(0, 2))}</div>` : ''}
       ${pushLine(d.push)}
+      ${state.shop.perks.creditOn || m.credit > 0 ? html`<details id="creditHist"><summary class="btn ghost block">💳 الرصيد: ${fmt(m.credit)} ${state.shop.currency}</summary><div class="small muted" style="margin-top:8px">جاري التحميل…</div></details>` : ''}
       <button class="btn block" id="useMember" type="button">استخدمه بالكاشير</button>
       <details><summary class="btn ghost block">رابط البطاقة (واتساب / QR)</summary><div style="margin-top:10px">${cardLinkHTML(m, d.cardUrl)}</div></details>
       ${isOwner() ? html`<details><summary class="btn ghost block">تعديل الرصيد يدوياً</summary>
@@ -386,6 +444,16 @@ async function memberDialog(id) {
       ${isOwner() ? html`<button class="btn ghost block" id="delMember" type="button" style="color:var(--bad)">حذف الزبون وكل بياناته</button>` : ''}
     </div>`);
   bindCopy(body);
+  const ch = $('#creditHist', body);
+  if (ch) ch.ontoggle = async () => {
+    if (!ch.open || ch.dataset.loaded) return;
+    ch.dataset.loaded = '1';
+    try {
+      const r = await api(`/api/members/${m.id}/credit`);
+      render(ch.querySelector('div'), r.history.length ? html`<ul class="list">${r.history.map((x) => html`<li><div class="main"><b>${x.kind === 'topup' ? `شحن ${fmt(x.amount)}${x.bonus ? ` + ${fmt(x.bonus)} هدية` : ''}` : `دفع ${fmt(x.amount)}`}</b>
+        <span class="small muted">${x.by || ''} · ${ago(x.at)}</span></div></li>`)}</ul>` : html`<p>ما في حركات رصيد.</p>`);
+    } catch (e) { render(ch.querySelector('div'), html`<p class="alert bad">${e.message}</p>`); }
+  };
   $('#useMember', body).onclick = () => { $('#dlg').close(); selectMember(m); };
   const del = $('#delMember', body);
   if (del) del.onclick = async () => {
@@ -515,10 +583,17 @@ async function loadReports() {
       <div class="stat"><b class="num">${fmt(t.pushDevices || 0)}</b><span class="small muted">جهاز مفعّل الإشعارات</span></div>
       <div class="stat"><b class="num">${fmt(t.referred || 0)}</b><span class="small muted">إجوا بدعوة صاحب</span></div>
       <div class="stat"><b class="num">${fmt(t.birthdays || 0)}</b><span class="small muted">سجّلوا عيد ميلادهم</span></div>
+      ${state.shop.perks.creditOn || r.credit.outstanding ? html`<div class="stat"><b class="num">${fmt(r.credit.outstanding)}</b><span class="small muted">رصيد الزبائن (${state.shop.currency})</span></div>
+        <div class="stat"><b class="num">${fmt(r.credit.topups)}</b><span class="small muted">شحن آخر 30 يوم</span></div>` : ''}
     </div>
     <div class="grid2" style="align-items:start;margin-top:14px">
       <section class="panel stack"><h3>أكتر ساعات فيها زيارات</h3>${columns(r.byHour, r.byHour.map((_, h) => hourLabel(h)), { tick: (h) => h % 3 === 0, unit: ' زيارة', tip: (l) => `الساعة ${l}` })}</section>
       <section class="panel stack"><h3>الزيارات حسب أيام الأسبوع</h3>${columns(r.byWeekday, WEEKDAYS, { unit: ' زيارة' })}</section>
+      ${state.shop.locations.length > 1 && r.byBranch.length ? html`<section class="panel stack"><h3>الزيارات حسب الفرع</h3>${(() => {
+        const rows = r.byBranch.map((b) => ({ name: b.id ? branchName(b.id) || 'فرع محذوف' : 'بدون فرع', n: b.n })).sort((a, b) => b.n - a.n);
+        const max = Math.max(...rows.map((x) => x.n));
+        return html`<div class="hbars">${rows.map((x) => html`<div class="hbar wide"><span>${x.name}</span><div class="track"><i style="width:${Math.round((x.n / max) * 100)}%"></i></div><b class="num">${fmt(x.n)}</b></div>`)}</div>`;
+      })()}</section>` : ''}
       <section class="panel stack"><h3>زبائن جدد كل أسبوع</h3>${columns(r.newByWeek, weeks, { tick: (i) => i === 0 || i === 7 || i === 4, unit: ' زبون' })}</section>
       <section class="panel stack"><h3>التقييمات</h3>
         ${g.total ? html`<div class="hbars">${[5, 4, 3, 2, 1].map((n) => html`<div class="hbar"><span>${n} ★</span><div class="track"><i style="width:${Math.round((g.counts[n - 1] / Math.max(...g.counts)) * 100)}%"></i></div><b class="num">${fmt(g.counts[n - 1])}</b></div>`)}</div>`
@@ -686,6 +761,16 @@ async function settings() {
           <p class="hint">صورة مربعة PNG أو JPG، والأفضل 660×660.</p>
         </section>
         <section class="panel stack"><h2>محفظة Google</h2><div id="gpanel">${googlePanel()}</div></section>
+        <form class="panel stack" id="linksForm">
+          <h2>🔗 روابط المحل على البطاقة</h2>
+          <input name="instagram" placeholder="إنستغرام: @mocha.jo" dir="ltr" value="${(s.links.instagram || '').replace('https://instagram.com/', '@')}">
+          <input name="tiktok" placeholder="تيك توك: @mocha.jo" dir="ltr" value="${(s.links.tiktok || '').replace('https://www.tiktok.com/', '')}">
+          <input name="facebook" placeholder="فيسبوك: mochajo" dir="ltr" value="${(s.links.facebook || '').replace('https://facebook.com/', '')}">
+          <input name="whatsapp" placeholder="واتساب المحل: 079xxxxxxx" dir="ltr" inputmode="tel" value="${(s.links.whatsapp || '').replace('https://wa.me/', '+')}">
+          <input name="website" placeholder="الموقع: https://..." dir="ltr" value="${s.links.website || ''}">
+          <p class="hint">بتطلع أزرار على بطاقة الزبون. فاضي = ما بيطلع.</p>
+          <button class="btn" type="submit">حفظ</button>
+        </form>
         <section class="panel stack" id="alertsPanel"></section>
         <form class="panel stack" id="guardForm">
           <h2>🛡️ الحماية من تلاعب الكاشير</h2>
@@ -808,6 +893,14 @@ async function settings() {
 
   loadBilling();
   drawAlerts();
+  $('#linksForm').onsubmit = async (e) => {
+    e.preventDefault();
+    try {
+      const r = await api('/api/shop/links', { method: 'PUT', body: Object.fromEntries(new FormData(e.target)) });
+      state.shop = r.shop;
+      toast('انحفظت الروابط ✅', 'ok');
+    } catch (err) { toast(err.message, 'bad'); }
+  };
   $('#guardForm').onsubmit = async (e) => {
     e.preventDefault();
     try {
@@ -864,6 +957,7 @@ function offers() {
     <div class="grid2" style="align-items:start">
       <div>
         <section class="panel stack">${broadcastPanel()}</section>
+        <section class="panel stack" id="couponsPanel"><h2>🎟️ كوبونات</h2><p class="muted small">جاري التحميل…</p></section>
         <form class="panel stack" data-perks="boosts">
           <h2>⏰ نقاط دبل بأوقات معيّنة</h2>
           <p class="hint">مثلاً كل يوم أحد، أو من 2 لـ 5 العصر لما المحل فاضي. الزبون بيشوف العرض على بطاقته، والكاشير بيشوفه وهو بيضيف النقاط.</p>
@@ -907,6 +1001,21 @@ function offers() {
           <p class="hint">كل زبون عنده رابط دعوة على بطاقته. لما صاحبه ينضم منه ويزوركم أول مرة، الاتنين بياخدوا الهدية (لحد 10 دعوات بالشهر لكل زبون).</p>
           <button class="btn" type="submit">حفظ</button>
         </form>
+        <form class="panel stack" data-perks="credit">
+          <h2>💳 رصيد مدفوع مسبقاً</h2>
+          <label class="check"><input type="checkbox" name="creditOn" ${p.creditOn ? 'checked' : ''}> مفعّل</label>
+          <div class="field"><label for="p-cb">هدية الشحن (%)</label><input id="p-cb" name="creditBonus" type="number" min="0" max="100" step="1" value="${p.creditBonus}" class="num">
+            <div class="hint">مثلاً 10%: بيدفع 20 وبياخد رصيد 22.</div></div>
+          <p class="hint">الزبون بيدفع مسبقاً عند الكاشير، والرصيد بيطلع على بطاقته، وبيدفع منه بالزيارات الجاية. مع كل شحن أو دفع بيوصله إشعار، فما حدا بيقدر يصرف من رصيده بدون ما يعرف.</p>
+          <button class="btn" type="submit">حفظ</button>
+        </form>
+        <form class="panel stack" data-perks="expiry">
+          <h2>⏳ صلاحية النقاط</h2>
+          <div class="field"><label for="p-ex">النقاط بتنتهي إذا الزبون ما زار لمدة</label>
+            <select id="p-ex" name="expiryMonths">${[[0, 'ما بتنتهي'], [6, '6 أشهر'], [12, 'سنة'], [24, 'سنتين']].map(([v, l]) => html`<option value="${v}" ${v === p.expiryMonths ? 'selected' : ''}>${l}</option>`)}</select></div>
+          <p class="hint">قبل أسبوع من انتهاء النقاط بيوصله تذكير «مرّ علينا واستعملها». لما تفعّلها، العدّ بيبلّش من اليوم، فنقاط الزبائن القدام ما بتنمسح فجأة.</p>
+          <button class="btn" type="submit">حفظ</button>
+        </form>
         <form class="panel stack" data-perks="tiers">
           <h2>🥇 مستويات الزبائن</h2>
           <label class="check"><input type="checkbox" name="tiersOn" ${p.tiersOn ? 'checked' : ''}> مفعّلة</label>
@@ -920,6 +1029,7 @@ function offers() {
       </div>
     </div>`);
   bindBroadcast();
+  loadCoupons();
 
   const drawBoosts = () => {
     render($('#boosts'), boosts.length ? html`${boosts.map((b, i) => html`<div class="boost" data-i="${i}">
@@ -962,6 +1072,8 @@ function offers() {
         review: { reviewOn: on('reviewOn'), reviewUrl: f.get('reviewUrl') },
         ref: { refBonus: f.get('refBonus') },
         tiers: { tiersOn: on('tiersOn'), tierSilver: f.get('tierSilver'), tierGold: f.get('tierGold') },
+        credit: { creditOn: on('creditOn'), creditBonus: f.get('creditBonus') },
+        expiry: { expiryMonths: f.get('expiryMonths') },
       }[kind];
       const btn = form.querySelector('button[type=submit]');
       btn.disabled = true;
@@ -1086,6 +1198,58 @@ async function drawAlerts(note = null) {
   };
 }
 
+
+// ─── الكوبونات (تبويب العروض) ───
+async function loadCoupons() {
+  const box = $('#couponsPanel');
+  if (!box) return;
+  let r;
+  try { r = await api('/api/coupons'); } catch (e) { render(box, html`<h2>🎟️ كوبونات</h2><p class="alert bad">${e.message}</p>`); return; }
+  const now = Date.now();
+  render(box, html`<h2>🎟️ كوبونات</h2>
+    <p class="hint">عرض لمجموعة زبائن: بيطلع على بطاقاتهم وبيوصلهم إشعار، والكاشير بيصرفه لكل زبون مرة وحدة.</p>
+    <form class="stack" id="couponForm">
+      <input name="title" placeholder="العرض، مثلاً: خصم 20% على الكيك" maxlength="60" required>
+      <input name="details" placeholder="تفاصيل (اختياري): مع أي مشروب" maxlength="200">
+      <div class="row">
+        <select name="segment" class="grow" aria-label="لمين">${r.segments.map((g) => html`<option value="${g.key}">${g.name} (${g.count})</option>`)}</select>
+        <select name="days" class="grow" aria-label="المدة">${[[1, 'اليوم بس'], [3, '3 أيام'], [7, 'أسبوع'], [14, 'أسبوعين'], [30, 'شهر']].map(([v, l]) => html`<option value="${v}" ${v === 7 ? 'selected' : ''}>${l}</option>`)}</select>
+      </div>
+      <button class="btn" type="submit">ابعت الكوبون</button>
+    </form>
+    ${r.coupons.length ? html`<ul class="list">${r.coupons.map((cp) => html`<li><div class="main"><b>${cp.title}</b>
+        <span class="small muted">${cp.segmentName} · انصرف ${fmt(cp.used)} من ${fmt(cp.issued)} · ${cp.expiresAt > now ? `لحد ${fmtDay(cp.expiresAt)}` : 'خلص'}</span></div>
+        ${cp.expiresAt > now ? html`<button class="btn ghost sm" type="button" data-stop="${cp.id}">إيقاف</button>` : ''}</li>`)}</ul>` : ''}`);
+  const form = $('#couponForm', box);
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    const f = Object.fromEntries(new FormData(form));
+    const seg = r.segments.find((g) => g.key === f.segment);
+    if (!confirm(`تبعت «${f.title}» لـ ${seg.count} زبون؟`)) return;
+    const btn = form.querySelector('button[type=submit]');
+    btn.disabled = true;
+    try {
+      const x = await api('/api/coupons', { method: 'POST', body: f });
+      let sent = x.push.sent;
+      let next = x.push.next;
+      while (next) {
+        btn.textContent = `جاري الإرسال… ${sent}`;
+        const y = await api(`/api/coupons/${x.id}/continue`, { method: 'POST', body: { cursor: next } });
+        sent += y.push.sent;
+        next = y.push.next;
+      }
+      toast(`انبعت الكوبون لـ ${x.issued} زبون (${sent} إشعار) ✅`, 'ok');
+      loadCoupons();
+    } catch (err) { toast(err.message, 'bad'); btn.disabled = false; btn.textContent = 'ابعت الكوبون'; }
+  };
+  $$('[data-stop]', box).forEach((b) => {
+    b.onclick = async () => {
+      if (!confirm('توقف هالكوبون؟ رح يختفي من بطاقات الزبائن.')) return;
+      try { await api(`/api/coupons/${b.dataset.stop}`, { method: 'DELETE' }); loadCoupons(); } catch (e) { toast(e.message, 'bad'); }
+    };
+  });
+}
+
 async function loadStaff(data) {
   const panel = $('#staffPanel');
   if (!panel) return;
@@ -1094,6 +1258,8 @@ async function loadStaff(data) {
   render(panel, html`
     <h2>الموظفين</h2>
     <ul class="list">${users.map((u) => html`<li><div class="main"><b>${u.name}</b><span class="small muted" dir="ltr">${u.email}</span></div>
+      ${u.role === 'staff' && state.shop.locations.length ? html`<select class="staff-branch" data-id="${u.id}" aria-label="الفرع" style="width:auto;min-height:34px;padding:4px 8px">
+        <option value="">كل الفروع</option>${state.shop.locations.map((l) => html`<option value="${l.id}" ${l.id === u.branchId ? 'selected' : ''}>${l.name}</option>`)}</select>` : ''}
       <span class="badge ${u.role === 'owner' ? 'ok' : ''}">${u.role === 'owner' ? 'المالك' : 'كاشير'}</span>
       ${u.role === 'staff' ? html`<button class="btn ghost sm" type="button" data-rm="${u.id}" aria-label="حذف">✕</button>` : ''}</li>`)}</ul>
     <details><summary class="btn soft block">+ أضف كاشير</summary>
@@ -1108,6 +1274,11 @@ async function loadStaff(data) {
     b.onclick = async () => {
       if (!confirm('تحذف هالموظف؟')) return;
       try { loadStaff(await api(`/api/staff/${b.dataset.rm}`, { method: 'DELETE' })); } catch (e) { toast(e.message, 'bad'); }
+    };
+  });
+  $$('.staff-branch', panel).forEach((sel) => {
+    sel.onchange = async () => {
+      try { loadStaff(await api(`/api/staff/${sel.dataset.id}`, { method: 'PUT', body: { branchId: sel.value || null } })); toast('انحفظ ✅', 'ok'); } catch (err) { toast(err.message, 'bad'); }
     };
   });
   $('#staffForm', panel).onsubmit = async (e) => {

@@ -90,15 +90,22 @@ export function tierOf(shop, visits) {
 // نقاط دبل (بالوقت) ورجعة الزبون الغايب ما بيتجمّعوا: بناخد الأعلى. المستوى بيضرب فوقهم (للنقاط بس).
 export function applyPerks(shop, member, baseDelta, ms = Date.now()) {
   const reasons = [];
+  const reasonsEn = [];
   const happy = activeBoost(shop, ms);
   const comeback = member.boost_until && member.boost_until > ms ? 2 : 1;
   const timeMult = Math.max(happy, comeback);
-  if (timeMult > 1) reasons.push(happy >= comeback ? `⏰ نقاط ×${happy}` : '💤 رجعتك ×2');
+  if (timeMult > 1) {
+    reasons.push(happy >= comeback ? `⏰ نقاط ×${happy}` : '💤 رجعتك ×2');
+    reasonsEn.push(happy >= comeback ? `⏰ points ×${happy}` : '💤 welcome back ×2');
+  }
   const tier = tierOf(shop, member.visits);
   const tierMult = tier ? tier.mult : 1;
-  if (tierMult > 1) reasons.push(`${tier.icon} ${tier.name} ×${tierMult}`);
+  if (tierMult > 1) {
+    reasons.push(`${tier.icon} ${tier.name} ×${tierMult}`);
+    reasonsEn.push(`${tier.icon} ${tier.key === 'gold' ? 'Gold' : 'Silver'} ×${tierMult}`);
+  }
   const delta = shop.program_type === 'stamps' ? baseDelta * timeMult : Math.floor(baseDelta * timeMult * tierMult + 1e-9);
-  return { delta, base: baseDelta, reasons };
+  return { delta, base: baseDelta, reasons, reasonsEn };
 }
 
 // ─── عيد الميلاد ───

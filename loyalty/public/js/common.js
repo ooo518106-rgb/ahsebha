@@ -84,11 +84,16 @@ export function stampsHTML(cost, filled) {
   return html`<div class="stamps" aria-label="${filled} من ${cost}">${Array.from({ length: cost }, (_, i) => html`<i class="${i < filled ? 'on' : ''}">${i < filled ? '✓' : ''}</i>`)}</div>`;
 }
 
-// شكل البطاقة نفسه بصفحة الزبون وبمعاينة الإعدادات
-export function cardHTML(shop, member, { qr = true } = {}) {
+// شكل البطاقة نفسه بصفحة الزبون وبمعاينة الإعدادات. tr = دالة الترجمة (صفحة الزبون)، وبدونها عربي
+const CARD_AR = { name: 'الاسم', points: 'النقاط', stamps: 'الأختام', unitPoint: 'نقطة', unitStamp: 'ختم', ready1: '🎁 عندك مكافأة جاهزة: {reward}', readyN: '🎁 عندك {n} مكافآت جاهزة: {reward}', remaining: 'باقي {n} {unit} لـ {reward}' };
+const fill = (s, v) => s.replace(/\{(\w+)\}/g, (_, k) => v[k] ?? '');
+export function cardHTML(shop, member, { qr = true, tr = (k, v = {}) => fill(CARD_AR[k], v) } = {}) {
   const p = member.progress;
   const stamps = shop.programType === 'stamps';
   const filled = p.available && !p.toward ? p.cost : p.toward;
+  const status = p.available
+    ? (p.available > 1 ? tr('readyN', { n: p.available, reward: shop.rewardName }) : tr('ready1', { reward: shop.rewardName }))
+    : tr('remaining', { n: p.remaining, unit: tr(stamps ? 'unitStamp' : 'unitPoint'), reward: shop.rewardName });
   return html`
     <div class="loyalty-card" style="--c:${shop.color}">
       <div class="lc-head">
@@ -96,14 +101,14 @@ export function cardHTML(shop, member, { qr = true } = {}) {
         <div class="lc-name">${shop.name}</div>
       </div>
       <div class="lc-row">
-        <div><div class="lc-label">الاسم</div><div class="lc-value">${member.name}</div></div>
-        <div style="text-align:left"><div class="lc-label">${stamps ? 'الأختام' : 'النقاط'}</div><div class="lc-value num">${stamps ? `${filled}/${p.cost}` : fmt(member.balance)}</div></div>
+        <div><div class="lc-label">${tr('name')}</div><div class="lc-value">${member.name}</div></div>
+        <div class="lc-end"><div class="lc-label">${tr(stamps ? 'stamps' : 'points')}</div><div class="lc-value num">${stamps ? `${filled}/${p.cost}` : fmt(member.balance)}</div></div>
       </div>
       <div style="margin-top:12px">
         ${stamps ? stampsHTML(p.cost, filled) : html`<div class="bar"><i style="width:${p.pct}%"></i></div>`}
-        <div class="small" style="margin-top:6px;opacity:.9">${p.available ? `🎁 عندك ${p.available > 1 ? `${p.available} مكافآت` : 'مكافأة'} جاهزة: ${shop.rewardName}` : `باقي ${p.remaining} ${stamps ? 'ختم' : 'نقطة'} لـ ${shop.rewardName}`}</div>
+        <div class="small" style="margin-top:6px;opacity:.9">${status}</div>
       </div>
-      ${qr ? html`<div class="lc-qr">${qrSVG(member.token, 'رمز بطاقة الولاء')}</div><div class="lc-cardno num">${member.cardNo}</div>` : ''}
+      ${qr ? html`<div class="lc-qr">${qrSVG(member.token, 'QR')}</div><div class="lc-cardno num">${member.cardNo}</div>` : ''}
     </div>`;
 }
 

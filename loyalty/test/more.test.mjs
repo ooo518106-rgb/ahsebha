@@ -259,3 +259,20 @@ test('روابط المحل والفروع: الروابط بتتصحّح، وا
   assert.equal(byBranch.find((x) => x.id === abdoun.id).n, 1);
   assert.equal((await st.get('/api/me')).data.user.branchId, swe.id);
 });
+
+test('الإنجليزي: الزبون اللي اختار English بتوصله الإشعارات بالإنجليزي، وبيقدر يرجع للعربي', async () => {
+  const p = await platform();
+  const { owner, device, to } = p;
+  const john = await p.customer('John Smith', '0791110010', { lang: 'en' });
+  const dev = await device(john.guest, `/api/cards/${john.token}/push`, 'john');
+  await owner.post(`/api/members/${john.id}/earn`, { amount: 10 });
+  assert.equal(to(dev)[0].body, 'You earned 10 points ☕ Balance: 10, 90 to go for مشروب مجاني');
+  await owner.put('/api/shop/perks', { creditOn: true });
+  await owner.post(`/api/members/${john.id}/credit/topup`, { amount: 10 });
+  assert.match(to(dev)[1].body, /^💳 Topped up 10 JOD \+ 1 gift. Your balance is 11 JOD$/);
+  assert.equal((await john.guest.post(`/api/cards/${john.token}/lang`, { lang: 'ar' })).status, 200);
+  await p.db.run('UPDATE members SET last_visit = ? WHERE id = ?', Date.now() - 3600e3, john.id);
+  await owner.post(`/api/members/${john.id}/earn`, { amount: 10 });
+  assert.match(to(dev)[2].body, /^انضافلك 10 نقطة/);
+  assert.equal((await p.client().post('/api/cards/aaaaaaaaaaaaaaaaaaaa/lang', { lang: 'en' })).status, 404);
+});

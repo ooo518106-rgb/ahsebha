@@ -292,3 +292,14 @@ table.mini td { padding: 3px 6px; border-bottom: 1px solid var(--border); }
 .hbar .track i { display: block; height: 100%; background: var(--brand); border-start-end-radius: 4px; border-end-end-radius: 4px; }
 .hbar b { color: var(--muted); font-weight: 700; }
 code.alias { font-size: 1.15rem; font-weight: 800; background: var(--bg, #f6f4f1); border: 1px dashed var(--border); border-radius: 8px; padding: 4px 10px; letter-spacing: .03em; }
+
+/* الكوبونات والرصيد عند الكاشير */
+.coupon { border: 1px dashed var(--brand); border-radius: 10px; padding: 8px 10px; }
+.credit-box { border: 1px solid var(--border); border-radius: 10px; padding: 10px; }
+.hbar.wide { grid-template-columns: 90px 1fr 36px; }
+.loyalty-card .lc-end { text-align: end; }
+.lang-switch { text-align: end; margin: -4px 0 8px; font-size: .85rem; }
+.coupon-card { border: 2px dashed var(--brand); }
+
+/* صفحات الزبون بالإنجليزي (من اليسار لليمين) */
+html[dir="ltr"] body, html[dir="ltr"] .stamps { direction: ltr; }
