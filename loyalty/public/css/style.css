@@ -263,3 +263,14 @@ dialog .dlg-body { padding: 16px; }
 .tier-gold { border-color: #eab308; }
 .tier-silver { border-color: #a8a29e; }
 .row.tight > .grow { flex-basis: 90px; }
+
+/* تبويب العروض */
+.check { display: flex; align-items: center; gap: 8px; font-weight: 700; }
+.boost { border: 1px solid var(--border); border-radius: 10px; padding: 10px; display: grid; gap: 8px; }
+.boost + .boost { margin-top: 8px; }
+.boost .row label { display: flex; align-items: center; gap: 6px; }
+.boost input[type="time"] { width: auto; }
+.boost select { width: auto; }
+.days { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { border: 1px solid var(--border); background: var(--card); color: var(--ink, inherit); border-radius: 999px; padding: 4px 10px; font: inherit; font-size: .85rem; cursor: pointer; min-height: 0; }
+.chip.on { background: var(--brand); border-color: var(--brand); color: var(--brand-ink); }

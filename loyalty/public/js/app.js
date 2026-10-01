@@ -52,12 +52,12 @@ function applyShop() {
   document.title = `${state.shop.name} — نقاطك`;
 }
 
-const VIEWS = { cashier, members, activity, join: joinView, settings, admin };
+const VIEWS = { cashier, members, activity, join: joinView, offers, settings, admin };
 function route() {
   stopCamera();
   $('#dlg').onclose = null;
   let tab = location.hash.slice(1) || 'cashier';
-  if (!VIEWS[tab] || (tab === 'settings' && !isOwner()) || (tab === 'admin' && !state.me.user.isAdmin)) tab = 'cashier';
+  if (!VIEWS[tab] || ((tab === 'settings' || tab === 'offers') && !isOwner()) || (tab === 'admin' && !state.me.user.isAdmin)) tab = 'cashier';
   $$('#tabs a').forEach((a) => a.classList.toggle('on', a.dataset.tab === tab));
   VIEWS[tab]();
 }
@@ -182,6 +182,7 @@ function showMember(m) {
         <div class="grow" style="flex:1;min-width:0"><b>${m.name}</b><div class="small muted"><span class="num">${m.cardNo}</span> · <span class="num">${m.phone}</span></div></div>
         <button class="btn ghost sm" id="closeMember" type="button" aria-label="إلغاء">✕</button>
       </div>
+      ${memberBadges(m)}
       ${memberSummary(m)}
       ${stamps
         ? html`<div class="row"><div class="stepper"><button class="btn ghost" type="button" id="minus">−</button><output id="count">1</output><button class="btn ghost" type="button" id="plus">+</button></div>
@@ -207,13 +208,32 @@ function showMember(m) {
     $('#earnBtn').onclick = () => earn(m, { count });
   } else {
     const amount = $('#amount');
+    const { mult, label } = perkMult(m);
     amount.oninput = () => {
-      const pts = Math.floor(Number(amount.value) * s.pointsPerUnit + 1e-9);
-      $('#preview').textContent = pts > 0 ? `+${fmt(pts)} نقطة` : ' ';
+      const pts = Math.floor(Math.floor(Number(amount.value) * s.pointsPerUnit + 1e-9) * mult + 1e-9);
+      $('#preview').textContent = pts > 0 ? `+${fmt(pts)} نقطة${label}` : ' ';
     };
     $('#earnForm').onsubmit = (e) => { e.preventDefault(); earn(m, { amount: amount.value }); };
     if (matchMedia('(pointer: fine)').matches) amount.focus();
   }
+}
+
+// شارات الزبون عند الكاشير: عيد ميلاده، مستواه، والعروض الشغّالة
+function memberBadges(m) {
+  const b = [];
+  if (m.birthdayToday) b.push(html`<span class="chip on">🎂 عيد ميلاده اليوم!</span>`);
+  if (m.tier) b.push(html`<span class="chip">${m.tier.icon} ${m.tier.name}</span>`);
+  if (state.shop.perks.boostNow > 1) b.push(html`<span class="chip on">⏰ نقاط ×${state.shop.perks.boostNow} هلق</span>`);
+  else if (m.boostUntil) b.push(html`<span class="chip on">💤 راجع بعد غيبة: ×2</span>`);
+  return b.length ? html`<div class="days">${b}</div>` : '';
+}
+
+// تقدير المضاعفة للمعاينة (السيرفر هو اللي بيحسب النهائي)
+function perkMult(m) {
+  const time = Math.max(state.shop.perks.boostNow || 1, m.boostUntil && m.boostUntil > Date.now() ? 2 : 1);
+  const tier = m.tier ? m.tier.mult : 1;
+  const mult = time * tier;
+  return { mult, label: mult > 1 ? ` (×${mult})` : '' };
 }
 
 // لو السيرفر رد إنه الاشتراك خلص، منحدّث الشريط فوق
@@ -228,7 +248,8 @@ async function earn(m, body) {
     const r = await api(`/api/members/${m.id}/earn`, { method: 'POST', body: { ...body, key: state.key } });
     state.key = newKey();
     state.member = r.member;
-    toast(r.duplicate ? 'هاي الحركة انسجلت قبل' : `+${fmt(r.delta)} ${state.shop.unit} لـ ${m.name}`, 'ok');
+    toast(r.duplicate ? 'هاي الحركة انسجلت قبل' : `+${fmt(r.delta)} ${state.shop.unit} لـ ${m.name}${r.reasons && r.reasons.length ? ` (${r.reasons.join('، ')})` : ''}`, 'ok');
+    if (r.refBonus) toast(`👥 +${fmt(r.refBonus)} هدية الدعوة إله ولصاحبه`, 'ok');
     if (r.push) pushToast(r.push);
     showMember(r.member);
   } catch (e) {
@@ -598,7 +619,6 @@ async function settings() {
           </div>
           <p class="hint">صورة مربعة PNG أو JPG، والأفضل 660×660.</p>
         </section>
-        <section class="panel stack">${broadcastPanel()}</section>
         <section class="panel stack"><h2>محفظة Google</h2><div id="gpanel">${googlePanel()}</div></section>
         <section class="panel stack" id="staffPanel"><h2>الموظفين</h2><p class="muted small">جاري التحميل…</p></section>
         <form class="panel stack" id="pwForm">
@@ -709,6 +729,17 @@ async function settings() {
   }
   bindGoogle();
 
+  $('#pwForm').onsubmit = async (e) => {
+    e.preventDefault();
+    try { await api('/api/me/password', { method: 'PUT', body: Object.fromEntries(new FormData(e.target)) }); e.target.reset(); toast('تغيّرت كلمة السر ✅', 'ok'); } catch (err) { toast(err.message, 'bad'); }
+  };
+
+  refresh();
+  drawLocs();
+  loadStaff();
+}
+
+function bindBroadcast() {
   const bc = $('#bc');
   bc.onsubmit = async (e) => {
     e.preventDefault();
@@ -732,15 +763,130 @@ async function settings() {
     btn.disabled = false;
     btn.textContent = 'ابعت الإشعار';
   };
+}
 
-  $('#pwForm').onsubmit = async (e) => {
-    e.preventDefault();
-    try { await api('/api/me/password', { method: 'PUT', body: Object.fromEntries(new FormData(e.target)) }); e.target.reset(); toast('تغيّرت كلمة السر ✅', 'ok'); } catch (err) { toast(err.message, 'bad'); }
+// ─── العروض: رسالة لكل الزبائن، نقاط دبل، عيد الميلاد، الغايبين، التقييمات، ادعُ صاحبك، المستويات ───
+const DAYS = ['أحد', 'اتنين', 'تلاتا', 'أربعا', 'خميس', 'جمعة', 'سبت'];
+
+function offers() {
+  const s = state.shop;
+  const p = s.perks;
+  const unit = s.unit;
+  let boosts = p.boosts.map((b) => ({ ...b, days: [...b.days] }));
+  render(view, html`
+    <div class="grid2" style="align-items:start">
+      <div>
+        <section class="panel stack">${broadcastPanel()}</section>
+        <form class="panel stack" data-perks="boosts">
+          <h2>⏰ نقاط دبل بأوقات معيّنة</h2>
+          <p class="hint">مثلاً كل يوم أحد، أو من 2 لـ 5 العصر لما المحل فاضي. الزبون بيشوف العرض على بطاقته، والكاشير بيشوفه وهو بيضيف النقاط.</p>
+          ${p.boostNow > 1 ? html`<p class="alert ok small">شغّال هلق: النقاط ×${p.boostNow}</p>` : ''}
+          <div id="boosts"></div>
+          <button class="btn ghost" type="button" id="addBoost">+ أضف وقت</button>
+          <button class="btn" type="submit">حفظ</button>
+        </form>
+        <form class="panel stack" data-perks="bday">
+          <h2>🎂 هدية عيد الميلاد</h2>
+          <label class="check"><input type="checkbox" name="bdayOn" ${p.bdayOn ? 'checked' : ''}> مفعّلة</label>
+          <div class="field"><label for="p-bday">الهدية (${unit})</label><input id="p-bday" name="bdayGift" type="number" min="0" step="1" value="${p.bdayGift}" class="num">
+            <div class="hint">${s.cost} ${unit} = ${s.rewardName} كامل. حط 0 إذا بدك معايدة بس بدون هدية.</div></div>
+          <p class="hint">الزبون بيكتب تاريخ ميلاده لما ينضم أو من بطاقته. يوم عيده (من 9 الصبح) بتنضاف الهدية لرصيده وبيوصله إشعار. التاريخ لازم يكون محفوظ من أسبوعين على الأقل.</p>
+          <button class="btn" type="submit">حفظ</button>
+        </form>
+        <form class="panel stack" data-perks="winback">
+          <h2>💤 تذكير الزبائن اللي غابوا</h2>
+          <div class="field"><label for="p-wb">بعد كم يوم غياب؟</label>
+            <select id="p-wb" name="winbackDays">${[0, 14, 21, 30, 45, 60, 90].map((d) => html`<option value="${d}" ${d === p.winbackDays ? 'selected' : ''}>${d ? `${d} يوم` : 'موقّف'}</option>`)}</select></div>
+          <div class="field"><label for="p-wbt">الرسالة</label><input id="p-wbt" name="winbackText" maxlength="120" value="${p.winbackText}" placeholder="اشتقنالك يا {الاسم} ☕ مرّ علينا قريب">
+            <div class="hint">{الاسم} بيتبدّل باسم الزبون.</div></div>
+          <label class="check"><input type="checkbox" name="winbackDouble" ${p.winbackDouble ? 'checked' : ''}> نقاطه دبل لـ 3 أيام لما يرجع</label>
+          <p class="hint">بيوصل مرة وحدة لكل غيبة، للي مفعّلين الإشعارات، بين 11 الصبح و 8 المسا.</p>
+          <button class="btn" type="submit">حفظ</button>
+        </form>
+      </div>
+      <div>
+        <form class="panel stack" data-perks="review">
+          <h2>⭐ التقييم بعد الزيارة</h2>
+          <label class="check"><input type="checkbox" name="reviewOn" ${p.reviewOn ? 'checked' : ''}> مفعّل</label>
+          <div class="field"><label for="p-rv">رابط تقييم محلك على Google</label><input id="p-rv" name="reviewUrl" dir="ltr" value="${p.reviewUrl}" placeholder="https://g.page/r/...">
+            <div class="hint">من <b>Google Business Profile</b> ← «اطلب تقييمات» (Ask for reviews) ← انسخ الرابط.</div></div>
+          <p class="hint">بعد الزيارة بساعة بيوصل الزبون «كيف كانت زيارتك؟». اللي بيعطي 4 أو 5 نجوم بنطلب منه يقيّم على Google، واللي أقل بيوصلك كلامه إنت بس (بتشوفه بـ 📊 النشاط).</p>
+          <button class="btn" type="submit">حفظ</button>
+        </form>
+        <form class="panel stack" data-perks="ref">
+          <h2>👥 ادعُ صاحبك</h2>
+          <div class="field"><label for="p-ref">هدية الدعوة لكل واحد (${unit})</label><input id="p-ref" name="refBonus" type="number" min="0" step="1" value="${p.refBonus}" class="num">
+            <div class="hint">حط 0 لتوقيفها.</div></div>
+          <p class="hint">كل زبون عنده رابط دعوة على بطاقته. لما صاحبه ينضم منه ويزوركم أول مرة، الاتنين بياخدوا الهدية (لحد 10 دعوات بالشهر لكل زبون).</p>
+          <button class="btn" type="submit">حفظ</button>
+        </form>
+        <form class="panel stack" data-perks="tiers">
+          <h2>🥇 مستويات الزبائن</h2>
+          <label class="check"><input type="checkbox" name="tiersOn" ${p.tiersOn ? 'checked' : ''}> مفعّلة</label>
+          <div class="row">
+            <div class="field grow"><label for="p-ts">🥈 فضي بعد (زيارة)</label><input id="p-ts" name="tierSilver" type="number" min="2" step="1" value="${p.tierSilver}" class="num"></div>
+            <div class="field grow"><label for="p-tg">🥇 ذهبي بعد (زيارة)</label><input id="p-tg" name="tierGold" type="number" min="3" step="1" value="${p.tierGold}" class="num"></div>
+          </div>
+          <p class="hint">${s.programType === 'stamps' ? 'ببرنامج الأختام المستوى شارة على البطاقة بس.' : 'الفضي بياخد نقاط ×1.25 والذهبي ×1.5 على كل طلب.'} الزبون بيشوف مستواه وكم باقيله على بطاقته.</p>
+          <button class="btn" type="submit">حفظ</button>
+        </form>
+      </div>
+    </div>`);
+  bindBroadcast();
+
+  const drawBoosts = () => {
+    render($('#boosts'), boosts.length ? html`${boosts.map((b, i) => html`<div class="boost" data-i="${i}">
+        <div class="days">${DAYS.map((d, k) => html`<button type="button" class="chip ${b.days.includes(k) ? 'on' : ''}" data-day="${k}">${d}</button>`)}</div>
+        <div class="row">
+          <label class="small">من <input type="time" data-f="from" value="${b.from}"></label>
+          <label class="small">لحد <input type="time" data-f="to" value="${b.to}"></label>
+          <select data-f="mult" aria-label="المضاعفة"><option value="2" ${b.mult === 2 ? 'selected' : ''}>×2</option><option value="3" ${b.mult === 3 ? 'selected' : ''}>×3</option></select>
+          <button class="btn ghost sm" type="button" data-rm="${i}" aria-label="حذف">✕</button>
+        </div></div>`)}` : html`<p class="muted small">ما في أوقات لسا.</p>`);
   };
+  drawBoosts();
+  $('#boosts').onclick = (e) => {
+    const box = e.target.closest('.boost');
+    if (!box) return;
+    const b = boosts[Number(box.dataset.i)];
+    const day = e.target.closest('[data-day]');
+    if (day) { const k = Number(day.dataset.day); b.days = b.days.includes(k) ? b.days.filter((x) => x !== k) : [...b.days, k]; drawBoosts(); }
+    if (e.target.closest('[data-rm]')) { boosts.splice(Number(box.dataset.i), 1); drawBoosts(); }
+  };
+  $('#boosts').oninput = (e) => {
+    const box = e.target.closest('.boost');
+    const f = e.target.dataset.f;
+    if (!box || !f) return;
+    boosts[Number(box.dataset.i)][f] = f === 'mult' ? Number(e.target.value) : e.target.value;
+  };
+  $('#addBoost').onclick = () => { boosts.push({ days: [0], from: '14:00', to: '17:00', mult: 2 }); drawBoosts(); };
 
-  refresh();
-  drawLocs();
-  loadStaff();
+  // كل قسم بيبعت حقوله بس
+  $$('form[data-perks]').forEach((form) => {
+    form.onsubmit = async (e) => {
+      e.preventDefault();
+      const kind = form.dataset.perks;
+      const f = new FormData(form);
+      const on = (k) => f.get(k) === 'on';
+      const body = {
+        boosts: { boosts },
+        bday: { bdayOn: on('bdayOn'), bdayGift: f.get('bdayGift') },
+        winback: { winbackDays: f.get('winbackDays'), winbackText: f.get('winbackText'), winbackDouble: on('winbackDouble') },
+        review: { reviewOn: on('reviewOn'), reviewUrl: f.get('reviewUrl') },
+        ref: { refBonus: f.get('refBonus') },
+        tiers: { tiersOn: on('tiersOn'), tierSilver: f.get('tierSilver'), tierGold: f.get('tierGold') },
+      }[kind];
+      const btn = form.querySelector('button[type=submit]');
+      btn.disabled = true;
+      try {
+        const r = await api('/api/shop/perks', { method: 'PUT', body });
+        state.shop = r.shop;
+        toast('انحفظ ✅', 'ok');
+        if (kind === 'boosts') offers();
+      } catch (err) { toast(err.message, 'bad'); }
+      btn.disabled = false;
+    };
+  });
 }
 
 async function loadStaff(data) {
