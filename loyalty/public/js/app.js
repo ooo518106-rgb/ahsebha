@@ -502,12 +502,17 @@ function googlePanel() {
       <span class="small muted">${g.syncedAt ? `آخر مزامنة ${ago(g.syncedAt)}` : ''}</span>
       <button class="btn ghost sm" id="syncBtn" type="button">زامن هلأ</button></div>
     ${g.error ? html`<p class="alert bad small">${g.error}</p>` : ''}
+`;
+}
+
+function broadcastPanel() {
+  const n = state.me.pushCount || 0;
+  return html`<h2>رسالة لكل الزبائن 🔔</h2>
     <form class="stack" id="bc">
-      <h3 style="font-size:1rem;margin-top:8px">رسالة لكل الزبائن 🔔</h3>
       <input name="header" placeholder="العنوان (اختياري): ${state.shop.name}" maxlength="40">
       <textarea name="body" rows="2" placeholder="مثلاً: خصم 20% على كل المشروبات اليوم ☕" maxlength="300" required></textarea>
       <button class="btn soft" type="submit">ابعت الإشعار</button>
-      <p class="hint">بتوصل كإشعار للي حافظين البطاقة بمحفظة Google. Google بتحدد كم إشعار مسموح باليوم، فخليها للعروض المهمة.</p>
+      <p class="hint">بتوصل لـ <b class="num">${n}</b> ${n === 1 ? 'زبون' : 'زبون'} فعّلوا الإشعارات${state.google.enabled ? '، وللي حافظين البطاقة بمحفظة Google' : ''}. مسموح 3 رسائل باليوم، فخليها للعروض المهمة.</p>
     </form>`;
 }
 
@@ -568,6 +573,7 @@ async function settings() {
           </div>
           <p class="hint">صورة مربعة PNG أو JPG، والأفضل 660×660.</p>
         </section>
+        <section class="panel stack">${broadcastPanel()}</section>
         <section class="panel stack"><h2>محفظة Google</h2><div id="gpanel">${googlePanel()}</div></section>
         <section class="panel stack" id="staffPanel"><h2>الموظفين</h2><p class="muted small">جاري التحميل…</p></section>
         <form class="panel stack" id="pwForm">
@@ -675,14 +681,32 @@ async function settings() {
       render($('#gpanel'), googlePanel());
       bindGoogle();
     };
-    const bc = $('#bc');
-    if (bc) bc.onsubmit = async (e) => {
-      e.preventDefault();
-      if (!confirm('تبعت هالإشعار لكل الزبائن؟')) return;
-      try { await api('/api/broadcast', { method: 'POST', body: Object.fromEntries(new FormData(bc)) }); bc.reset(); toast('انبعتت الرسالة ✅', 'ok'); } catch (err) { toast(err.message, 'bad'); }
-    };
   }
   bindGoogle();
+
+  const bc = $('#bc');
+  bc.onsubmit = async (e) => {
+    e.preventDefault();
+    if (!confirm('تبعت هالإشعار لكل الزبائن؟')) return;
+    const btn = bc.querySelector('button[type=submit]');
+    btn.disabled = true;
+    try {
+      const r = await api('/api/broadcast', { method: 'POST', body: Object.fromEntries(new FormData(bc)) });
+      let sent = r.push.sent;
+      let next = r.push.next;
+      while (next) {
+        btn.textContent = `جاري الإرسال… ${sent}`;
+        const x = await api(`/api/broadcast/${r.id}/continue`, { method: 'POST', body: { cursor: next } });
+        sent += x.push.sent;
+        next = x.push.next;
+      }
+      bc.reset();
+      const gmsg = r.google === 'ok' ? ' + محفظة Google' : r.google ? ' (محفظة Google ما زبطت)' : '';
+      toast(`انبعتت الرسالة لـ ${sent} جهاز${gmsg} ✅`, r.google && r.google !== 'ok' ? 'bad' : 'ok');
+    } catch (err) { toast(err.message, 'bad'); }
+    btn.disabled = false;
+    btn.textContent = 'ابعت الإشعار';
+  };
 
   $('#pwForm').onsubmit = async (e) => {
     e.preventDefault();

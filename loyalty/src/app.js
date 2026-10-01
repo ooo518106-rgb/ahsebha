@@ -4,6 +4,7 @@ import * as auth from './auth.js';
 import * as apple from './apple.js';
 import { pemToDer } from '../public/js/asn1.js';
 import * as gw from './gwallet.js';
+import * as webpush from './webpush.js';
 import { defaultLogoPng } from './png.js';
 import { earnFor, progress, rewardCost, rewardRule, stampsLine, unitLabel } from '../public/js/rules.js';
 import { b64ToBytes, bytesToB64, clean, fail, HttpError, isUniqueError, json, normPhone, randomDigits, randomToken } from './util.js';
@@ -175,6 +176,26 @@ function pkpassResponse(bytes, updated, extra = {}) {
   });
 }
 
+// تعريف «تطبيق» البطاقة لما تنضاف للشاشة الرئيسية (لازم للإشعارات على الآيفون)
+async function cardManifest(c, token) {
+  const m = TOKEN_RE.test(token) ? await c.db.get('SELECT * FROM members WHERE token = ?', token) : null;
+  if (!m) return notFound(c);
+  const shop = await c.db.get('SELECT * FROM shops WHERE id = ?', m.shop_id);
+  const body = {
+    name: `بطاقة ${shop.name}`,
+    short_name: shop.name,
+    start_url: `/c/${token}`,
+    scope: '/',
+    display: 'standalone',
+    dir: 'rtl',
+    lang: 'ar',
+    background_color: '#f6f4f1',
+    theme_color: shop.color,
+    icons: [{ src: logoUrl(shop, c.origin), sizes: '256x256', type: 'image/png', purpose: 'any' }],
+  };
+  return new Response(JSON.stringify(body), { headers: { 'content-type': 'application/manifest+json; charset=utf-8', 'cache-control': 'no-cache' } });
+}
+
 async function appleSave(c, token) {
   const m = TOKEN_RE.test(token) ? await c.db.get('SELECT * FROM members WHERE token = ?', token) : null;
   if (!m) return notFound(c);
@@ -297,6 +318,101 @@ async function adminAppleCert(c) {
   return adminApple(c);
 }
 
+// ─── إشعارات الويب ───
+async function vapidKeys(c) {
+  let row = await c.db.get('SELECT * FROM push_config WHERE id = 1');
+  if (!row) {
+    const k = await webpush.generateVapidKeys();
+    await c.db.run('INSERT OR IGNORE INTO push_config (id, public_key, private_key, created_at) VALUES (1, ?, ?, ?)', k.publicKey, k.privateKey, Date.now());
+    row = await c.db.get('SELECT * FROM push_config WHERE id = 1');
+  }
+  return { publicKey: row.public_key, privateKey: row.private_key };
+}
+
+async function pushKey(c) {
+  return json({ publicKey: (await vapidKeys(c)).publicKey });
+}
+
+async function cardPushSubscribe(c, token) {
+  const m = await c.db.get('SELECT * FROM members WHERE token = ?', token);
+  if (!m) fail(404, 'ما لقينا هالبطاقة');
+  await rateLimit(c, `pushsub:${c.ip}`, 30, 60 * MIN);
+  const endpoint = String(c.body.endpoint || '');
+  const keys = c.body.keys || {};
+  const p256dh = String(keys.p256dh || '');
+  const authKey = String(keys.auth || '');
+  if (!webpush.validEndpoint(endpoint)) fail(400, 'اشتراك الإشعارات مش صالح');
+  let ok = false;
+  try { ok = webpush.fromB64url(p256dh).length === 65 && webpush.fromB64url(authKey).length === 16; } catch { ok = false; }
+  if (!ok) fail(400, 'اشتراك الإشعارات مش صالح');
+  await c.db.batch([
+    [`INSERT INTO push_subs (shop_id, member_id, endpoint, p256dh, auth, created_at) VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT(endpoint, member_id) DO UPDATE SET p256dh = excluded.p256dh, auth = excluded.auth`, [m.shop_id, m.id, endpoint, p256dh, authKey, Date.now()]],
+    // آخر 5 أجهزة لكل زبون
+    ['DELETE FROM push_subs WHERE member_id = ? AND id NOT IN (SELECT id FROM push_subs WHERE member_id = ? ORDER BY id DESC LIMIT 5)', [m.id, m.id]],
+  ]);
+  return json({ ok: true }, 201);
+}
+
+async function cardPushUnsubscribe(c, token) {
+  const m = await c.db.get('SELECT id FROM members WHERE token = ?', token);
+  if (!m) fail(404, 'ما لقينا هالبطاقة');
+  await c.db.run('DELETE FROM push_subs WHERE member_id = ? AND endpoint = ?', m.id, String(c.body.endpoint || ''));
+  return json({ ok: true });
+}
+
+// بيبعت لكل اشتراك رسالته، وبيحذف الاشتراكات اللي انتهت
+async function pushTo(c, subs, messageFor) {
+  const out = { ok: 0, error: 0 };
+  if (!subs.length) return out;
+  const vapid = await vapidKeys(c);
+  const opts = { vapid, subject: c.origin, fetchImpl: c.env.fetch || ((...a) => fetch(...a)) };
+  const results = await Promise.all(subs.map((s) => webpush.sendPush(s, messageFor(s), opts)));
+  const gone = subs.filter((s, i) => results[i] === 'gone').map((s) => s.endpoint);
+  for (const r of results) if (r === 'ok') out.ok++; else out.error++;
+  for (const endpoint of gone) await c.db.run('DELETE FROM push_subs WHERE endpoint = ?', endpoint);
+  return out;
+}
+
+function notifyMember(c, member, message) {
+  c.waitUntil((async () => {
+    const subs = await c.db.all('SELECT * FROM push_subs WHERE member_id = ?', member.id);
+    await pushTo(c, subs, () => ({ ...message, url: `${c.origin}/c/${member.token}` }));
+  })().catch((e) => console.error('web push:', e.message)));
+}
+
+function earnMessage(shop, before, after, delta) {
+  const p0 = progress(shop, before.balance);
+  const p1 = progress(shop, after.balance);
+  const stamps = shop.program_type === 'stamps';
+  const body = p1.available > p0.available
+    ? `🎁 مكافأتك جاهزة: ${shop.reward_name}! اطلبها بزيارتك الجاية.`
+    : stamps
+      ? `انضافلك ${delta === 1 ? 'ختم' : `${delta} أختام`} ☕ صار عندك ${p1.toward}/${p1.cost}`
+      : `انضافلك ${delta} نقطة ☕ رصيدك صار ${after.balance}، وباقي ${p1.remaining} لـ ${shop.reward_name}`;
+  return { title: shop.name, body, tag: `card-${after.id}` };
+}
+
+// الرسالة الجماعية بتنبعت على دفعات (Cloudflare بيحد عدد الطلبات الخارجية بكل طلب)
+const PUSH_BATCH = 40;
+async function broadcastBatch(c, id, cursor) {
+  const b = await c.db.get('SELECT * FROM broadcasts WHERE id = ? AND shop_id = ?', id, c.shop.id);
+  if (!b) fail(404, 'ما لقينا الرسالة');
+  const subs = await c.db.all(
+    'SELECT p.*, m.token FROM push_subs p JOIN members m ON m.id = p.member_id WHERE p.shop_id = ? AND p.id > ? ORDER BY p.id LIMIT ?',
+    c.shop.id, cursor, PUSH_BATCH,
+  );
+  const icon = logoUrl(c.shop, c.origin);
+  const r = await pushTo(c, subs, (s) => ({ title: b.header, body: b.body, icon, url: `${c.origin}/c/${s.token}`, tag: `broadcast-${b.id}` }));
+  return { sent: r.ok, failed: r.error, next: subs.length === PUSH_BATCH ? subs[subs.length - 1].id : null };
+}
+
+async function broadcastContinue(c, id) {
+  await requireActive(c);
+  const cursor = int(c.body.cursor, 0, Number.MAX_SAFE_INTEGER, 'مؤشر غلط');
+  return json({ push: await broadcastBatch(c, Number(id), cursor) });
+}
+
 // ─── مساعدات ───
 async function shopBySlug(db, slug) {
   const shop = await db.get('SELECT * FROM shops WHERE slug = ?', String(slug).toLowerCase());
@@ -404,6 +520,7 @@ const MIN = 60 * 1000;
 async function deleteMember(c, shop, m) {
   await c.db.batch([
     ['DELETE FROM txns WHERE member_id = ? AND shop_id = ?', [m.id, shop.id]],
+    ['DELETE FROM push_subs WHERE member_id = ?', [m.id]],
     ['DELETE FROM members WHERE id = ? AND shop_id = ?', [m.id, shop.id]],
     ['DELETE FROM apple_regs WHERE serial = ?', [m.token]],
   ]);
@@ -605,6 +722,7 @@ async function me(c) {
     shop: shopView(c.shop, c.origin),
     google: googleStatus(c, c.shop),
     subscription: await subscription(c, c.shop),
+    pushCount: (await c.db.get('SELECT COUNT(DISTINCT member_id) AS n FROM push_subs WHERE shop_id = ?', c.shop.id)).n,
     whatsapp: /^\d{8,15}$/.test(String(c.env.WHATSAPP_NUMBER || '')) ? String(c.env.WHATSAPP_NUMBER) : null,
     currencies: CURRENCIES,
   });
@@ -688,9 +806,13 @@ async function seenKey(c, key) {
   return !!(k && (await c.db.get('SELECT id FROM txns WHERE shop_id = ? AND idem = ?', c.shop.id, k)));
 }
 
-async function respondMember(c, id, extra = {}) {
+async function respondMember(c, id, extra = {}, message = null) {
   const fresh = await c.db.get('SELECT * FROM members WHERE id = ?', id);
   if (!extra.duplicate) pushMember(c, c.shop, fresh);
+  if (!extra.duplicate && message) {
+    const msg = message(fresh);
+    if (msg) notifyMember(c, fresh, { ...msg, icon: logoUrl(c.shop, c.origin) });
+  }
   return json({ member: memberView(fresh, c.shop), ...extra });
 }
 
@@ -704,7 +826,7 @@ async function earn(c, id) {
     ['INSERT INTO txns (shop_id, member_id, kind, delta, amount, user_id, idem, created_at) VALUES (?, ?, \'earn\', ?, ?, ?, ?, ?)', [c.shop.id, m.id, r.delta, r.amount, c.user.id, idemKey(c.body.key), now]],
     ['UPDATE members SET balance = balance + ?, lifetime = lifetime + ?, visits = visits + 1, last_visit = ?, updated_at = ? WHERE id = ? AND shop_id = ?', [r.delta, r.delta, now, now, m.id, c.shop.id]],
   ]);
-  return respondMember(c, m.id, res ? { delta: r.delta } : { duplicate: true });
+  return respondMember(c, m.id, res ? { delta: r.delta } : { duplicate: true }, (fresh) => earnMessage(c.shop, m, fresh, r.delta));
 }
 
 async function redeem(c, id) {
@@ -855,23 +977,29 @@ async function syncNow(c) {
   return json({ google: { ...googleStatus(c, shop), lastSync: r } });
 }
 
+// رسالة لكل الزبائن: لحاملي البطاقة بمحفظة Google، وللي فعّلوا إشعارات الويب
 async function broadcast(c) {
   await requireActive(c);
-  const cfg = gw.googleConfig(c.env);
-  if (!cfg) fail(400, 'Google Wallet مش مفعّل على السيرفر');
   const header = clean(c.body.header, 40) || c.shop.name;
   const body = clean(c.body.body, 300);
   if (body.length < 2) fail(400, 'اكتب نص الرسالة');
-  if (!c.shop.gw_synced_at) {
-    const s = await syncClass(c, c.shop);
-    if (!s.ok) fail(502, s.error);
+  await rateLimit(c, `broadcast:${c.shop.id}`, 3, 24 * 60 * MIN, 'مسموح 3 رسائل باليوم، عشان ما ينزعجوا الزبائن');
+  const r = await c.db.run('INSERT INTO broadcasts (shop_id, header, body, created_at) VALUES (?, ?, ?, ?)', c.shop.id, header, body, Date.now());
+  let google = null;
+  const cfg = gw.googleConfig(c.env);
+  if (cfg) {
+    try {
+      if (!c.shop.gw_synced_at) {
+        const sync = await syncClass(c, c.shop);
+        if (!sync.ok) throw new Error(sync.error);
+      }
+      await gw.addClassMessage(cfg, c.shop.id, { header, body });
+      google = 'ok';
+    } catch (e) {
+      google = e.message;
+    }
   }
-  try {
-    await gw.addClassMessage(cfg, c.shop.id, { header, body });
-  } catch (e) {
-    fail(502, e.message);
-  }
-  return json({ ok: true });
+  return json({ id: r.lastId, google, push: await broadcastBatch(c, r.lastId, 0) });
 }
 
 // ─── الموظفين ───
@@ -907,6 +1035,9 @@ const API = [
   ['GET', /^\/api\/cards\/([a-z2-9]{20})$/, cardInfo],
   ['POST', /^\/api\/cards\/([a-z2-9]{20})\/delete$/, deleteCard],
   ['GET', /^\/api\/site$/, site],
+  ['GET', /^\/api\/push\/key$/, pushKey],
+  ['POST', /^\/api\/cards\/([a-z2-9]{20})\/push$/, cardPushSubscribe],
+  ['DELETE', /^\/api\/cards\/([a-z2-9]{20})\/push$/, cardPushUnsubscribe],
   ['POST', /^\/api\/leads$/, createLead],
   ['GET', /^\/api\/admin\/leads$/, adminLeads, 'staff'],
   ['PUT', /^\/api\/admin\/leads\/(\d+)$/, adminLeadStatus, 'staff'],
@@ -933,6 +1064,7 @@ const API = [
   ['PUT', /^\/api\/shop\/logo$/, updateLogo, 'owner'],
   ['POST', /^\/api\/shop\/sync$/, syncNow, 'owner'],
   ['POST', /^\/api\/broadcast$/, broadcast, 'owner'],
+  ['POST', /^\/api\/broadcast\/(\d+)\/continue$/, broadcastContinue, 'owner'],
   ['GET', /^\/api\/staff$/, listStaff, 'owner'],
   ['POST', /^\/api\/staff$/, addStaff, 'owner'],
   ['DELETE', /^\/api\/staff\/(\d+)$/, removeStaff, 'owner'],
@@ -1010,6 +1142,7 @@ export async function handle(req, ctx) {
     if (/^\/j\/[a-z0-9-]{3,40}\/?$/.test(p)) return await page(c, '/join.html');
     if ((m = p.match(/^\/c\/([a-z2-9]{20})\/google$/))) return await googleSave(c, m[1]);
     if ((m = p.match(/^\/c\/([a-z2-9]{20})\/apple$/))) return await appleSave(c, m[1]);
+    if ((m = p.match(/^\/c\/([a-z2-9]{20})\/manifest\.webmanifest$/))) return await cardManifest(c, m[1]);
     if (/^\/c\/[a-z2-9]{20}\/?$/.test(p)) return await page(c, '/card.html');
     if (/\.html$/.test(p)) return notFound(c);
     const res = await c.asset(p);

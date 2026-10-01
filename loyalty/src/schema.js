@@ -108,6 +108,32 @@ export const SCHEMA = [
     PRIMARY KEY (device_id, serial)
   )`,
   'CREATE INDEX IF NOT EXISTS apple_regs_serial ON apple_regs(serial)',
+  // إشعارات الويب: مفاتيح VAPID للمنصة، واشتراكات أجهزة الزبائن، والرسائل الجماعية
+  `CREATE TABLE IF NOT EXISTS push_config (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    public_key TEXT NOT NULL,
+    private_key TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS push_subs (
+    id INTEGER PRIMARY KEY,
+    shop_id INTEGER NOT NULL REFERENCES shops(id),
+    member_id INTEGER NOT NULL REFERENCES members(id),
+    endpoint TEXT NOT NULL,
+    p256dh TEXT NOT NULL,
+    auth TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    UNIQUE (endpoint, member_id)
+  )`,
+  'CREATE INDEX IF NOT EXISTS push_subs_member ON push_subs(member_id)',
+  'CREATE INDEX IF NOT EXISTS push_subs_shop ON push_subs(shop_id, id)',
+  `CREATE TABLE IF NOT EXISTS broadcasts (
+    id INTEGER PRIMARY KEY,
+    shop_id INTEGER NOT NULL REFERENCES shops(id),
+    header TEXT NOT NULL,
+    body TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+  )`,
   'CREATE INDEX IF NOT EXISTS leads_time ON leads(created_at)',
   'CREATE INDEX IF NOT EXISTS members_shop ON members(shop_id, created_at)',
   'CREATE INDEX IF NOT EXISTS txns_shop_time ON txns(shop_id, created_at)',

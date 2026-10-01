@@ -137,5 +137,8 @@ test('لو Google رفضت: الخطأ بيبيّن بالإعدادات، ور�
   assert.equal(jwt.payload.payload.loyaltyClasses[0].id, `3388.loy_s${shop.id}`);
   assert.equal(jwt.payload.payload.loyaltyObjects[0].accountName, 'سارة');
 
-  assert.equal((await c.post('/api/broadcast', { body: 'مرحبا' })).status, 502);
+  // الرسالة بتضل تنبعت لإشعارات الويب، وخطأ Google بيرجع بالرد
+  const bc = await c.post('/api/broadcast', { body: 'مرحبا' });
+  assert.equal(bc.status, 200);
+  assert.match(bc.data.google, /Invalid logo/);
 });

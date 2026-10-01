@@ -6,6 +6,73 @@ const params = new URLSearchParams(location.search);
 const root = $('#root');
 let lastBalance = null;
 let deleted = false;
+let lastData = null;
+
+// ─── إشعارات الويب ───
+const standalone = matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+const pushSupported = 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+const pushFlag = `loy_push_${token}`;
+let pushState = 'unknown'; // off | on | denied | install | unsupported
+
+function flag(v) {
+  try { if (v === undefined) return localStorage.getItem(pushFlag) === '1'; if (v) localStorage.setItem(pushFlag, '1'); else localStorage.removeItem(pushFlag); } catch { return false; }
+  return v;
+}
+
+async function detectPush() {
+  if (!pushSupported) { pushState = isIOS() && !standalone ? 'install' : 'unsupported'; return; }
+  if (Notification.permission === 'denied') { pushState = 'denied'; return; }
+  try {
+    const reg = await navigator.serviceWorker.register('/sw.js');
+    const sub = await reg.pushManager.getSubscription();
+    pushState = sub && Notification.permission === 'granted' && flag() ? 'on' : 'off';
+  } catch {
+    pushState = 'unsupported';
+  }
+}
+
+const keyBytes = (b64) => Uint8Array.from(atob(b64.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - (b64.length % 4)) % 4)), (ch) => ch.charCodeAt(0));
+
+async function enablePush() {
+  // طلب الإذن أول إشي، جوّا الكبسة نفسها (الآيفون بيطلب هيك)
+  const perm = await Notification.requestPermission();
+  if (perm !== 'granted') { pushState = perm === 'denied' ? 'denied' : 'off'; draw(); return; }
+  try {
+    const reg = await navigator.serviceWorker.register('/sw.js');
+    await navigator.serviceWorker.ready;
+    const { publicKey } = await api('/api/push/key');
+    const sub = (await reg.pushManager.getSubscription()) || await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: keyBytes(publicKey) });
+    await api(`/api/cards/${token}/push`, { method: 'POST', body: sub.toJSON() });
+    flag(true);
+    pushState = 'on';
+    toast('تفعّلت الإشعارات 🔔', 'ok');
+  } catch (err) {
+    toast(err.message || 'ما قدرنا نفعّل الإشعارات', 'bad');
+  }
+  draw();
+}
+
+async function disablePush() {
+  try {
+    const reg = await navigator.serviceWorker.getRegistration();
+    const sub = reg && await reg.pushManager.getSubscription();
+    if (sub) await api(`/api/cards/${token}/push`, { method: 'DELETE', body: { endpoint: sub.endpoint } });
+  } catch { /* بنطفيها محلياً على كل حال */ }
+  flag(false);
+  pushState = 'off';
+  toast('وقّفنا الإشعارات', 'ok');
+  draw();
+}
+
+function pushPanel() {
+  if (pushState === 'off') {
+    return html`<div class="panel small stack"><b>🔔 بدك يوصلك إشعار لما تنضافلك نقاط أو يكون في عرض؟</b>
+      <button class="btn block" type="button" id="pushOn">فعّل الإشعارات</button></div>`;
+  }
+  if (pushState === 'on') return html`<p class="center small muted">🔔 الإشعارات مفعّلة · <button type="button" class="linkish" id="pushOff">إيقاف</button></p>`;
+  if (pushState === 'denied') return html`<p class="center small muted">🔕 الإشعارات مسكّرة لهالبطاقة. بتقدر تفتحها من إعدادات الجوال.</p>`;
+  return '';
+}
 
 async function load(first = false) {
   let data;
@@ -15,9 +82,15 @@ async function load(first = false) {
     if (first) render(root, html`<div class="panel center" style="margin-top:60px"><h1>😕</h1><p>${e.message}</p></div>`);
     return;
   }
-  const { shop, member, google, apple } = data;
-  if (lastBalance !== null && member.balance > lastBalance) toast(`+${member.balance - lastBalance} ${shop.unit} 🎉`, 'ok');
-  lastBalance = member.balance;
+  if (lastBalance !== null && data.member.balance > lastBalance) toast(`+${data.member.balance - lastBalance} ${data.shop.unit} 🎉`, 'ok');
+  lastBalance = data.member.balance;
+  lastData = data;
+  draw();
+}
+
+function draw() {
+  if (!lastData || deleted) return;
+  const { shop, member, google, apple } = lastData;
   setBrand(shop.color);
   document.title = `بطاقة ${shop.name}`;
   homeScreen(shop.logo, shop.name);
@@ -30,9 +103,10 @@ async function load(first = false) {
     <div class="stack" style="margin-top:16px">
       ${google && !ios ? html`<a class="gw-button" href="/c/${token}/google"><img src="/img/google-wallet-button-ar.svg" alt="الإضافة إلى محفظة Google" width="309" height="50"></a>` : ''}
       ${ios && apple ? html`<a class="gw-button" href="/c/${token}/apple"><img class="apple-badge" src="/img/add-to-apple-wallet.svg" alt="Add to Apple Wallet" width="160" height="50"></a>` : ''}
-      ${ios && !apple ? html`<div class="panel small">
-          <b>على الآيفون:</b> بطاقة Apple Wallet جاية قريباً. لهلأ، كبس على <b>مشاركة ⬆️</b> وبعدين <b>«إضافة إلى الشاشة الرئيسية»</b> عشان تفتحها بسرعة.
+      ${ios && !standalone ? html`<div class="panel small">
+          <b>على الآيفون:</b> كبس على <b>مشاركة ⬆️</b> وبعدين <b>«إضافة إلى الشاشة الرئيسية»</b>، وافتح البطاقة من الأيقونة: بتفتح بسرعة وبتقدر تفعّل إشعارات النقاط والعروض 🔔
         </div>` : ''}
+      ${pushPanel()}
       <div class="panel small">
         <b>${shop.rule}</b>
         <p class="muted" style="margin-top:4px">اعرض الـ QR للكاشير مع كل طلب. ${(google && !ios) || (apple && ios) ? 'بعد ما تحفظها بالمحفظة بتلاقيها جنب بطاقاتك، وبتطلعلك لحالها لما تقرّب من المحل.' : ''}${apple && ios ? ' وعلى الآيفون بتفتحها بكبستين على الزر الجانبي.' : ''}</p>
@@ -45,6 +119,12 @@ async function load(first = false) {
 
 // لما الزبون يضيف البطاقة للشاشة الرئيسية: أيقونتها شعار المحل واسمها اسم المحل
 function homeScreen(icon, title) {
+  if (!$('link[rel="manifest"]')) {
+    const man = document.createElement('link');
+    man.rel = 'manifest';
+    man.href = `/c/${token}/manifest.webmanifest`;
+    document.head.append(man);
+  }
   let link = $('link[rel="apple-touch-icon"]');
   if (!link) { link = document.createElement('link'); link.rel = 'apple-touch-icon'; document.head.append(link); }
   if (link.href !== new URL(icon, location.href).href) link.href = icon;
@@ -61,6 +141,12 @@ function forget() {
   } catch { /* اختياري */ }
 }
 
+root.addEventListener('click', (e) => {
+  const on = e.target.closest('#pushOn');
+  if (on) { on.disabled = true; enablePush(); }
+  if (e.target.closest('#pushOff')) disablePush();
+});
+
 root.addEventListener('click', async (e) => {
   if (!e.target.closest('#deleteCard')) return;
   if (!confirm('أكيد بدك تحذف بطاقتك؟ رح تنمسح نقاطك وكل سجلك عند هالمحل نهائياً، وما في رجعة.')) return;
@@ -74,6 +160,7 @@ root.addEventListener('click', async (e) => {
   }
 });
 
+await detectPush();
 await load(true);
 if (params.has('new') || params.has('gw') || params.has('apple')) history.replaceState(null, '', location.pathname);
 // تحديث كل 15 ثانية والصفحة مفتوحة، عشان الزبون يشوف نقاطه وهو عالكاونتر
