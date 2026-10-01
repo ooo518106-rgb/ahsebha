@@ -1746,7 +1746,6 @@ async function broadcast(c) {
   const header = clean(c.body.header, 40) || c.shop.name;
   const body = clean(c.body.body, 300);
   if (body.length < 2) fail(400, 'اكتب نص الرسالة');
-  await rateLimit(c, `broadcast:${c.shop.id}`, 3, 24 * 60 * MIN, 'مسموح 3 رسائل باليوم، عشان ما ينزعجوا الزبائن');
   const r = await c.db.run('INSERT INTO broadcasts (shop_id, header, body, created_at) VALUES (?, ?, ?, ?)', c.shop.id, header, body, Date.now());
   let google = null;
   const cfg = gw.googleConfig(c.env);
@@ -1763,6 +1762,18 @@ async function broadcast(c) {
     }
   }
   return json({ id: r.lastId, google, push: await broadcastBatch(c, r.lastId, 0) });
+}
+
+// تجربة الرسالة على أجهزة صاحب المحل بس (ما بتنحسب من رسائل اليوم)
+async function broadcastTest(c) {
+  const header = clean(c.body.header, 40) || c.shop.name;
+  const body = clean(c.body.body, 300);
+  if (body.length < 2) fail(400, 'اكتب نص الرسالة');
+  const subs = await c.db.all('SELECT * FROM user_push_subs WHERE user_id = ?', c.user.id);
+  if (!subs.length) fail(400, 'عشان توصلك التجربة، فعّل «🔔 تنبيهات إلك» من الإعدادات على جوالك أول.');
+  await rateLimit(c, `bctest:${c.user.id}`, 10, 60 * MIN, 'جرّبت كتير، استنى شوي');
+  const r = await pushTo(c, subs, () => ({ title: header, body, icon: logoUrl(c.shop, c.origin), url: `${c.origin}/app#offers` }), 'user_push_subs');
+  return json({ sent: r.ok, failed: r.error, reason: (r.results.find((x) => x.result !== 'ok') || {}).reason || null });
 }
 
 // ─── الكوبونات: عرض لمجموعة زبائن، وكل زبون بيصرفه مرة وحدة عند الكاشير ───
@@ -1795,7 +1806,6 @@ async function createCoupon(c) {
   const seg = SEGMENTS[c.body.segment];
   if (!seg) fail(400, 'اختار لمين الكوبون');
   const days = int(c.body.days, 1, 90, 'مدة الكوبون لازم تكون بين يوم و 90 يوم');
-  await rateLimit(c, `coupon:${c.shop.id}`, 5, 24 * 60 * MIN, 'مسموح 5 كوبونات باليوم');
   const now = Date.now();
   const r = await c.db.run('INSERT INTO coupons (shop_id, title, details, segment, expires_at, created_at) VALUES (?, ?, ?, ?, ?, ?)',
     c.shop.id, title, clean(c.body.details, 200), c.body.segment, now + days * DAY, now);
@@ -2129,6 +2139,7 @@ const API = [
   ['POST', /^\/api\/shop\/sync$/, syncNow, 'owner'],
   ['POST', /^\/api\/broadcast$/, broadcast, 'owner'],
   ['POST', /^\/api\/broadcast\/(\d+)\/continue$/, broadcastContinue, 'owner'],
+  ['POST', /^\/api\/broadcast\/test$/, broadcastTest, 'owner'],
   ['GET', /^\/api\/coupons$/, listCoupons, 'owner'],
   ['POST', /^\/api\/coupons$/, createCoupon, 'owner'],
   ['POST', /^\/api\/coupons\/(\d+)\/continue$/, couponContinue, 'owner'],

@@ -697,8 +697,12 @@ function broadcastPanel() {
     <form class="stack" id="bc">
       <input name="header" placeholder="العنوان (اختياري): ${state.shop.name}" maxlength="40">
       <textarea name="body" rows="2" placeholder="مثلاً: خصم 20% على كل المشروبات اليوم ☕" maxlength="300" required></textarea>
-      <button class="btn soft" type="submit">ابعت الإشعار</button>
-      <p class="hint">بتوصل لـ <b class="num">${n}</b> ${n === 1 ? 'زبون' : 'زبون'} فعّلوا الإشعارات${state.google.enabled ? '، وللي حافظين البطاقة بمحفظة Google' : ''}. مسموح 3 رسائل باليوم، فخليها للعروض المهمة.</p>
+      <div class="row">
+        <button class="btn ghost grow" type="button" id="bcTest">جرّب على جوالي أول</button>
+        <button class="btn soft grow" type="submit">ابعت لكل الزبائن</button>
+      </div>
+      <p class="hint">بتوصل لـ <b class="num">${n}</b> زبون فعّلوا الإشعارات${state.google.enabled ? '، وللي حافظين البطاقة بمحفظة Google' : ''}.
+        «جرّب على جوالي» بتوصلك إنت بس (لازم تكون مفعّل «🔔 تنبيهات إلك»). ما في حد للرسائل، بس كترها بيزعج الزبائن وممكن يسكّروا الإشعارات.</p>
     </form>`;
 }
 
@@ -941,7 +945,15 @@ function bindBroadcast() {
       toast(`انبعتت الرسالة لـ ${sent} جهاز${gmsg} ✅`, r.google && r.google !== 'ok' ? 'bad' : 'ok');
     } catch (err) { toast(err.message, 'bad'); }
     btn.disabled = false;
-    btn.textContent = 'ابعت الإشعار';
+    btn.textContent = 'ابعت لكل الزبائن';
+  };
+  $('#bcTest').onclick = async () => {
+    const f = Object.fromEntries(new FormData(bc));
+    if (!f.body || f.body.trim().length < 2) { toast('اكتب نص الرسالة', 'bad'); return; }
+    try {
+      const r = await api('/api/broadcast/test', { method: 'POST', body: f });
+      toast(r.sent ? 'انبعتت التجربة لجوالك إنت بس 📱 شوفها' : `ما وصلت التجربة (${r.reason || 'خطأ'})`, r.sent ? 'ok' : 'bad');
+    } catch (err) { toast(err.message, 'bad'); }
   };
 }
 

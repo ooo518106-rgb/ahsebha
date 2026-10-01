@@ -164,10 +164,10 @@ test('من البطاقة للإشعار: اشتراك، إشعار نقاط، �
   assert.equal(sent.length, 45);
   assert.ok(sent.filter((x) => x.msg).every((x) => x.msg.body === 'خصم 20% اليوم ☕' && x.msg.title === 'Mocha'));
   assert.equal((await db.get("SELECT COUNT(*) AS n FROM push_subs WHERE endpoint LIKE '%/dead'")).n, 0, 'الاشتراك المنتهي انحذف');
-  // 3 رسائل باليوم
+  // ما في حد يومي للرسائل
   await owner.post('/api/broadcast', { body: 'تانية' });
   await owner.post('/api/broadcast', { body: 'تالتة' });
-  assert.equal((await owner.post('/api/broadcast', { body: 'رابعة' })).status, 429);
+  assert.equal((await owner.post('/api/broadcast', { body: 'رابعة' })).status, 200);
 
   // إيقاف الإشعارات، وحذف البطاقة بيحذف الاشتراك
   assert.equal((await guest.req('DELETE', `/api/cards/${token}/push`, { endpoint })).status, 200);

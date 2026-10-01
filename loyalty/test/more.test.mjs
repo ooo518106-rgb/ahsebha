@@ -314,3 +314,18 @@ test('المندوبين: رابط المندوب بيربط المحل فيه،
   assert.equal((await client().get(`/partner/${token}`)).status, 200);
   assert.equal((await db.get("SELECT COUNT(*) AS n FROM payments WHERE payer = 'تفعيل يدوي'")).n, 1);
 });
+
+test('تجربة الرسالة على جوال صاحب المحل بس، والرسائل لكل الزبائن بدون حد', async () => {
+  const p = await platform();
+  const { owner, device, to } = p;
+  assert.equal((await owner.post('/api/broadcast/test', { body: 'خصم اليوم' })).status, 400, 'لازم يفعّل التنبيهات أول');
+  const ownerDev = await device(owner, '/api/me/push', 'owner-bc');
+  const sara = await p.customer('سارة', '0791110011');
+  const custDev = await device(sara.guest, `/api/cards/${sara.token}/push`, 'sara-bc');
+  const r = await owner.post('/api/broadcast/test', { header: 'عرض', body: 'خصم اليوم 20%' });
+  assert.equal(r.data.sent, 1);
+  assert.deepEqual(to(ownerDev).map((m) => m.body), ['خصم اليوم 20%']);
+  assert.equal(to(custDev).length, 0, 'الزبائن ما وصلهم إشي');
+  for (let i = 0; i < 5; i++) assert.equal((await owner.post('/api/broadcast', { body: `رسالة ${i}` })).status, 200);
+  assert.equal(to(custDev).length, 5);
+});
