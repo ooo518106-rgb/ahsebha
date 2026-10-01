@@ -107,6 +107,4 @@ export function cardHTML(shop, member, { qr = true } = {}) {
     </div>`;
 }
 
-export const WALLET_ICON = raw('<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="5" width="20" height="15" rx="3" fill="#fff"/><rect x="2" y="5" width="20" height="4" fill="#4285f4"/><rect x="2" y="9" width="20" height="3" fill="#34a853"/><rect x="2" y="12" width="20" height="3" fill="#fbbc04"/><rect x="2" y="15" width="20" height="2" fill="#ea4335"/><circle cx="17" cy="17" r="2.2" fill="#000"/></svg>');
-
 export const isIOS = () => /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);

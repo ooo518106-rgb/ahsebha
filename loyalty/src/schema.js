@@ -70,6 +70,12 @@ export const SCHEMA = [
     idem TEXT,
     created_at INTEGER NOT NULL
   )`,
+  // عدّاد طلبات بسيط ضد السبام: مفتاح لكل (نوع الطلب + IP + نافذة زمنية)
+  `CREATE TABLE IF NOT EXISTS rate_hits (
+    k TEXT PRIMARY KEY,
+    n INTEGER NOT NULL,
+    expires_at INTEGER NOT NULL
+  )`,
   'CREATE INDEX IF NOT EXISTS members_shop ON members(shop_id, created_at)',
   'CREATE INDEX IF NOT EXISTS txns_shop_time ON txns(shop_id, created_at)',
   'CREATE INDEX IF NOT EXISTS txns_member ON txns(member_id, created_at)',

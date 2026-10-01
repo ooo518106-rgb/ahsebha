@@ -35,6 +35,7 @@ async function main() {
       <p class="error" id="err" role="alert"></p>
       <button class="btn big block" type="submit">أعطيني بطاقتي</button>
       <p class="small muted center">بتنحفظ بمحفظة الجوال، وبتطلعلك لحالها لما تكون قريب من ${shop.name}.</p>
+      <p class="small muted center">لما تنضم بتوافق على <a href="/privacy" target="_blank" rel="noopener">سياسة الخصوصية</a>. منحفظ اسمك ورقمك ونقاطك بس، وبتقدر تحذفهم بأي وقت.</p>
     </form>`);
 
   $('#join').addEventListener('submit', async (e) => {

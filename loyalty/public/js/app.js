@@ -302,9 +302,21 @@ async function memberDialog(id) {
         </form></details>` : ''}
       <h3 style="font-size:1rem">آخر الحركات</h3>
       ${d.txns.length ? html`<ul class="list">${d.txns.map((t) => txnRow(t))}</ul>` : html`<p class="muted small">ما في حركات لسا</p>`}
+      ${isOwner() ? html`<button class="btn ghost block" id="delMember" type="button" style="color:var(--bad)">حذف الزبون وكل بياناته</button>` : ''}
     </div>`);
   bindCopy(body);
   $('#useMember', body).onclick = () => { $('#dlg').close(); selectMember(m); };
+  const del = $('#delMember', body);
+  if (del) del.onclick = async () => {
+    if (!confirm(`حذف ${m.name} نهائياً مع نقاطه وكل سجله؟ (مثلاً لما يطلب الزبون حذف بياناته)`)) return;
+    try {
+      await api(`/api/members/${m.id}`, { method: 'DELETE' });
+      if (state.member && state.member.id === m.id) state.member = null;
+      $('#dlg').close();
+      toast('انحذف الزبون', 'ok');
+      if ((location.hash || '#cashier') === '#cashier') showMember(state.member);
+    } catch (err) { toast(err.message, 'bad'); }
+  };
   const adj = $('#adj', body);
   if (adj) {
     const key = newKey();

@@ -1,10 +1,11 @@
 // صفحة بطاقة الزبون: QR للكاشير + زر الحفظ بمحفظة Google، وبتتحدّث لحالها لما تنضاف نقاط
-import { $, api, cardHTML, html, isIOS, render, setBrand, toast, WALLET_ICON } from './common.js';
+import { $, api, cardHTML, html, isIOS, render, setBrand, toast } from './common.js';
 
 const token = location.pathname.split('/')[2];
 const params = new URLSearchParams(location.search);
 const root = $('#root');
 let lastBalance = null;
+let deleted = false;
 
 async function load(first = false) {
   let data;
@@ -25,7 +26,7 @@ async function load(first = false) {
     ${params.get('gw') === 'off' ? html`<div class="alert warn" style="margin-bottom:12px">الحفظ بمحفظة Google لسا مش مفعّل. اعرض هالصفحة للكاشير.</div>` : ''}
     ${cardHTML(shop, member)}
     <div class="stack" style="margin-top:16px">
-      ${google && !ios ? html`<a class="wallet-btn" href="/c/${token}/google">${WALLET_ICON}<span>أضف إلى محفظة Google</span></a>` : ''}
+      ${google && !ios ? html`<a class="gw-button" href="/c/${token}/google"><img src="/img/google-wallet-button-ar.svg" alt="الإضافة إلى محفظة Google" width="309" height="50"></a>` : ''}
       ${ios ? html`<div class="panel small">
           <b>على الآيفون:</b> بطاقة Apple Wallet جاية قريباً. لهلأ، كبس على <b>مشاركة ⬆️</b> وبعدين <b>«إضافة إلى الشاشة الرئيسية»</b> عشان تفتحها بسرعة.
         </div>` : ''}
@@ -34,11 +35,33 @@ async function load(first = false) {
         <p class="muted" style="margin-top:4px">اعرض الـ QR للكاشير مع كل طلب. ${google && !ios ? 'بعد ما تحفظها بالمحفظة بتلاقيها جنب بطاقاتك، وبتطلعلك لحالها لما تقرّب من المحل.' : ''}</p>
       </div>
       <p class="center small muted">زياراتك: <span class="num">${member.visits}</span> · المكافآت اللي أخدتها: <span class="num">${member.redeemed}</span></p>
+      <p class="center small muted"><a href="/privacy">سياسة الخصوصية</a> · <button type="button" class="linkish" id="deleteCard">احذف بطاقتي وبياناتي</button></p>
     </div>`);
 }
+
+function forget() {
+  try {
+    const cards = JSON.parse(localStorage.getItem('loy_cards') || '{}');
+    for (const k of Object.keys(cards)) if (cards[k] === token) delete cards[k];
+    localStorage.setItem('loy_cards', JSON.stringify(cards));
+  } catch { /* اختياري */ }
+}
+
+root.addEventListener('click', async (e) => {
+  if (!e.target.closest('#deleteCard')) return;
+  if (!confirm('أكيد بدك تحذف بطاقتك؟ رح تنمسح نقاطك وكل سجلك عند هالمحل نهائياً، وما في رجعة.')) return;
+  try {
+    await api(`/api/cards/${token}/delete`, { method: 'POST' });
+    deleted = true;
+    forget();
+    render(root, html`<div class="panel center" style="margin-top:60px"><h1>👋</h1><p>انحذفت بطاقتك وكل بياناتك. إذا كانت محفوظة بالمحفظة، رح تتوقف لحالها.</p></div>`);
+  } catch (err) {
+    toast(err.message, 'bad');
+  }
+});
 
 await load(true);
 if (params.has('new') || params.has('gw')) history.replaceState(null, '', location.pathname);
 // تحديث كل 15 ثانية والصفحة مفتوحة، عشان الزبون يشوف نقاطه وهو عالكاونتر
-setInterval(() => { if (document.visibilityState === 'visible') load(); }, 15000);
-document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') load(); });
+setInterval(() => { if (!deleted && document.visibilityState === 'visible') load(); }, 15000);
+document.addEventListener('visibilitychange', () => { if (!deleted && document.visibilityState === 'visible') load(); });

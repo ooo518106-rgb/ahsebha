@@ -97,6 +97,18 @@ test('من البداية للنهاية: مزامنة الفئة، رابط ا�
   assert.deepEqual(patch.body.loyaltyPoints, { label: 'النقاط', balance: { int: 25 } });
   assert.deepEqual(patch.body.secondaryLoyaltyPoints, { label: 'باقي للمكافأة', balance: { int: 75 } });
 
+  // حذف البطاقة بيوقفها بالمحفظة
+  const guest = client();
+  const other = await guest.post(`/api/shops/${shop.slug}/join`, { name: 'مؤقت', phone: '0799990000' });
+  await guest.get(`/c/${other.data.token}/google`);
+  const otherId = (await c.get(`/api/members/lookup?code=${other.data.token}`)).data.member.id;
+  const beforeDelete = google.calls.length;
+  await guest.post(`/api/cards/${other.data.token}/delete`, {});
+  await guest.flush();
+  const deactivate = google.calls.slice(beforeDelete).find((x) => x.method === 'PATCH');
+  assert.ok(deactivate.url.endsWith(encodeURIComponent(`3388.loy_m${otherId}`)));
+  assert.deepEqual(deactivate.body, { id: `3388.loy_m${otherId}`, state: 'INACTIVE' });
+
   // رسالة لكل الزبائن
   r = await c.post('/api/broadcast', { body: 'خصم 20% اليوم على كل المشروبات' });
   assert.equal(r.status, 200);

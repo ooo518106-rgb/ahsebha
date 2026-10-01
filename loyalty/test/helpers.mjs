@@ -4,16 +4,17 @@ import { openDb } from '../src/server.js';
 
 export async function setup(env = {}) {
   const db = await openDb(':memory:');
-  return { db, env, client: () => client(db, env) };
+  return { db, env, client: (ip) => client(db, env, ip) };
 }
 
-// عميل HTTP وهمي بيحتفظ بالكوكي، والطلبات بتروح مباشرة لـ handle
-export function client(db, env) {
+// عميل HTTP وهمي بيحتفظ بالكوكي، والطلبات بتروح مباشرة لـ handle؛ كل عميل إله IP مختلف
+export function client(db, env, ip = `10.${Math.floor(Math.random() * 250)}.${Math.floor(Math.random() * 250)}.${Math.floor(Math.random() * 250)}`) {
   let cookie = '';
   const pending = [];
   const ctx = {
     db,
     env,
+    ip,
     asset: async (p) => (p.endsWith('.html') ? new Response(`<html>${p}</html>`, { headers: { 'content-type': 'text/html' } }) : new Response('nf', { status: 404 })),
     waitUntil: (p) => pending.push(p),
   };

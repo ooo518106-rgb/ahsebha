@@ -284,3 +284,57 @@ test('الصفحات والروابط', async () => {
   assert.equal(g.headers.get('location'), `/c/${m.token}?gw=off`);
   assert.equal((await c.get('/api/nothing')).status, 404);
 });
+
+test('حد الطلبات: الانضمام والتسجيل من نفس الشبكة', async () => {
+  const { client } = await setup();
+  const { shop } = await signup(client());
+  const sameWifi = client('203.0.113.7');
+  for (let i = 0; i < 20; i++) {
+    const r = await sameWifi.post(`/api/shops/${shop.slug}/join`, { name: `زبون ${i}`, phone: `07900100${String(i).padStart(2, '0')}` });
+    assert.equal(r.status, 201, `join ${i}`);
+  }
+  const blocked = await sameWifi.post(`/api/shops/${shop.slug}/join`, { name: 'زبون 21', phone: '0790010099' });
+  assert.equal(blocked.status, 429);
+  assert.equal((await client('198.51.100.1').post(`/api/shops/${shop.slug}/join`, { name: 'زبون تاني', phone: '0790010098' })).status, 201);
+
+  const net = '192.0.2.50';
+  for (let i = 0; i < 5; i++) assert.equal((await client(net).post('/api/auth/signup', { shopName: `Shop ${i}`, email: `s${i}@rl.test`, password: 'secret-pass-1' })).status, 201);
+  assert.equal((await client(net).post('/api/auth/signup', { shopName: 'Shop 6', email: 's6@rl.test', password: 'secret-pass-1' })).status, 429);
+});
+
+test('حذف البيانات: الزبون من صفحة بطاقته، والمالك من اللوحة', async () => {
+  const { client } = await setup();
+  const owner = client();
+  const { shop } = await signup(owner);
+  const guest = client();
+  const j = await guest.post(`/api/shops/${shop.slug}/join`, { name: 'سلمى', phone: '0791112222' });
+  const m = (await owner.get(`/api/members/lookup?code=${j.data.token}`)).data.member;
+  await owner.post(`/api/members/${m.id}/earn`, { amount: 30 });
+
+  assert.equal((await guest.post(`/api/cards/${j.data.token}/delete`, {})).status, 200);
+  assert.equal((await guest.get(`/api/cards/${j.data.token}`)).status, 404);
+  assert.equal((await owner.get('/api/members')).data.total, 0);
+  assert.equal((await owner.get('/api/activity')).data.recent.length, 0, 'السجل انمسح كمان');
+  assert.equal((await guest.post(`/api/cards/${j.data.token}/delete`, {})).status, 404);
+  // نفس الرقم بيقدر ينضم من جديد بعد الحذف
+  assert.equal((await guest.post(`/api/shops/${shop.slug}/join`, { name: 'سلمى', phone: '0791112222' })).status, 201);
+
+  const id = (await owner.get('/api/members')).data.members[0].id;
+  await owner.post('/api/staff', { name: 'كاشير', email: 'del-cashier@test.com', password: 'cashier-pass' });
+  const staff = client();
+  await staff.post('/api/auth/login', { email: 'del-cashier@test.com', password: 'cashier-pass' });
+  assert.equal((await staff.del(`/api/members/${id}`)).status, 403, 'الكاشير ما بيحذف');
+  assert.equal((await owner.del(`/api/members/${id}`)).status, 200);
+  assert.equal((await owner.get(`/api/members/${id}`)).status, 404);
+});
+
+test('صفحة الخصوصية وإيميل التواصل', async () => {
+  const { client } = await setup({ CONTACT_EMAIL: 'privacy@example.com' });
+  const c = client();
+  const r = await c.get('/privacy');
+  assert.equal(r.status, 200);
+  assert.equal(r.data, '<html>/privacy.html</html>');
+  assert.deepEqual((await c.get('/api/site')).data, { contactEmail: 'privacy@example.com' });
+  const { client: client2 } = await setup();
+  assert.deepEqual((await client2().get('/api/site')).data, { contactEmail: null });
+});

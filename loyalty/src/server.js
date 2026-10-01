@@ -1,6 +1,6 @@
 // تشغيل محلي أو على أي سيرفر Node 22+ (بدل Cloudflare):
 //   node --env-file=.env src/server.js
-// المتغيرات: PORT, DB_PATH, PUBLIC_URL, SIGNUP_CODE, GOOGLE_ISSUER_ID, GOOGLE_SERVICE_ACCOUNT
+// المتغيرات: PORT, DB_PATH, PUBLIC_URL, SIGNUP_CODE, CONTACT_EMAIL, GOOGLE_ISSUER_ID, GOOGLE_SERVICE_ACCOUNT
 import http from 'node:http';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -53,6 +53,7 @@ export function createServer({ db, env = {} }) {
         db,
         env,
         asset: serveAsset,
+        ip: req.socket.remoteAddress || 'unknown',
         waitUntil: (p) => Promise.resolve(p).catch((e) => console.error(e)),
       });
       const headers = {};

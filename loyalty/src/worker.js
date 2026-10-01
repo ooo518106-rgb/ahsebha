@@ -14,6 +14,7 @@ export default {
     return handle(request, {
       db,
       env,
+      ip: request.headers.get('cf-connecting-ip') || 'unknown',
       waitUntil: (p) => ctx.waitUntil(p),
       asset: (path) => env.ASSETS.fetch(new URL(path, request.url)),
     });

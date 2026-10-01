@@ -196,6 +196,31 @@ function int(v, min, max, msg) {
   return n;
 }
 
+// حد لعدد الطلبات لكل مفتاح بنافذة زمنية؛ لما يتجاوز بيرجع 429
+async function rateLimit(c, key, max, windowMs, msg = 'طلبات كتير، جرّب بعد كم دقيقة') {
+  const now = Date.now();
+  const win = Math.floor(now / windowMs);
+  const row = await c.db.get(
+    'INSERT INTO rate_hits (k, n, expires_at) VALUES (?, 1, ?) ON CONFLICT(k) DO UPDATE SET n = n + 1 RETURNING n',
+    `${key}:${win}`, (win + 1) * windowMs,
+  );
+  if (Math.random() < 0.02) await c.db.run('DELETE FROM rate_hits WHERE expires_at < ?', now);
+  if (row.n > max) fail(429, msg);
+}
+const MIN = 60 * 1000;
+
+// حذف الزبون وكل سجله نهائياً، وإيقاف بطاقته بمحفظة Google لو كان حافظها
+async function deleteMember(c, shop, m) {
+  await c.db.batch([
+    ['DELETE FROM txns WHERE member_id = ? AND shop_id = ?', [m.id, shop.id]],
+    ['DELETE FROM members WHERE id = ? AND shop_id = ?', [m.id, shop.id]],
+  ]);
+  const cfg = gw.googleConfig(c.env);
+  if (cfg && m.gw_object) {
+    c.waitUntil(gw.patchObject(cfg, { id: gw.objectId(cfg, m.id), state: 'INACTIVE' }).catch((e) => console.error('gwallet deactivate:', e.message)));
+  }
+}
+
 // ─── المسارات العامة (بدون تسجيل دخول) ───
 async function publicShop(c, slug) {
   return json({ shop: publicShopView(await shopBySlug(c.db, slug), c.origin) });
@@ -204,6 +229,9 @@ async function publicShop(c, slug) {
 async function join(c, slug) {
   const shop = await shopBySlug(c.db, slug);
   if (c.body.website) fail(400, 'طلب غير صالح'); // فخ للبوتات
+  // سقف لكل جهاز/شبكة، وسقف عام لكل محل (لو حدا غيّر الـ IP)
+  await rateLimit(c, `join:${c.ip}`, 20, 10 * MIN);
+  await rateLimit(c, `join-shop:${shop.id}`, 150, 10 * MIN, 'في ضغط على التسجيل هلأ، جرّب بعد شوي');
   const m = await createMember(c.db, shop, readName(c.body.name), readPhone(c.body.phone));
   return json({ token: m.token, url: `${c.origin}/c/${m.token}` }, 201);
 }
@@ -216,6 +244,19 @@ async function cardInfo(c, token) {
   delete v.phone;
   delete v.id;
   return json({ shop: publicShopView(shop, c.origin), member: v, google: !!gw.googleConfig(c.env) });
+}
+
+// الزبون بيحذف بطاقته وبياناته بنفسه (رابط البطاقة نفسه هو الإثبات)
+async function deleteCard(c, token) {
+  const m = await c.db.get('SELECT * FROM members WHERE token = ?', token);
+  if (!m) fail(404, 'ما لقينا هالبطاقة');
+  const shop = await c.db.get('SELECT * FROM shops WHERE id = ?', m.shop_id);
+  await deleteMember(c, shop, m);
+  return json({ ok: true });
+}
+
+async function site(c) {
+  return json({ contactEmail: c.env.CONTACT_EMAIL || null });
 }
 
 async function logo(c, shopId) {
@@ -232,6 +273,7 @@ async function logo(c, shopId) {
 // ─── الحساب ───
 async function signup(c) {
   const b = c.body;
+  await rateLimit(c, `signup:${c.ip}`, 5, 60 * MIN, 'محاولات تسجيل كتير من نفس الشبكة، جرّب بعد ساعة');
   if (c.env.SIGNUP_CODE && String(b.code || '').trim() !== String(c.env.SIGNUP_CODE)) fail(403, 'رمز التسجيل غلط. تواصل معنا لتحصل عليه');
   const shopName = clean(b.shopName, 60);
   if (shopName.length < 2) fail(400, 'اكتب اسم المحل');
@@ -267,6 +309,7 @@ async function signup(c) {
 }
 
 async function loginRoute(c) {
+  await rateLimit(c, `login:${c.ip}`, 30, 10 * MIN, 'محاولات دخول كتير، جرّب بعد كم دقيقة');
   const user = await auth.login(c.db, c.body.email, c.body.password);
   const token = await auth.createSession(c.db, user.id);
   return json({ ok: true }, 200, { 'set-cookie': auth.sessionCookie(token, c.req) });
@@ -394,6 +437,12 @@ async function redeem(c, id) {
   if (!res || (!res[1].changes && (await seenKey(c, c.body.key)))) return respondMember(c, m.id, { duplicate: true });
   if (!res[1].changes) fail(409, `ما عنده ${c.shop.program_type === 'stamps' ? 'أختام' : 'نقاط'} كفاية للمكافأة`);
   return respondMember(c, m.id, { delta: -cost });
+}
+
+async function removeMember(c, id) {
+  const m = await memberOf(c, id);
+  await deleteMember(c, c.shop, m);
+  return json({ ok: true });
 }
 
 async function adjust(c, id) {
@@ -568,6 +617,8 @@ const API = [
   ['GET', /^\/api\/shops\/([a-z0-9-]{3,40})\/public$/, publicShop],
   ['POST', /^\/api\/shops\/([a-z0-9-]{3,40})\/join$/, join],
   ['GET', /^\/api\/cards\/([a-z2-9]{20})$/, cardInfo],
+  ['POST', /^\/api\/cards\/([a-z2-9]{20})\/delete$/, deleteCard],
+  ['GET', /^\/api\/site$/, site],
   ['POST', /^\/api\/auth\/signup$/, signup],
   ['POST', /^\/api\/auth\/login$/, loginRoute],
   ['POST', /^\/api\/auth\/logout$/, logout],
@@ -580,6 +631,7 @@ const API = [
   ['POST', /^\/api\/members\/(\d+)\/earn$/, earn, 'staff'],
   ['POST', /^\/api\/members\/(\d+)\/redeem$/, redeem, 'staff'],
   ['POST', /^\/api\/members\/(\d+)\/adjust$/, adjust, 'owner'],
+  ['DELETE', /^\/api\/members\/(\d+)$/, removeMember, 'owner'],
   ['GET', /^\/api\/activity$/, activity, 'staff'],
   ['PUT', /^\/api\/shop$/, updateShop, 'owner'],
   ['PUT', /^\/api\/shop\/logo$/, updateLogo, 'owner'],
@@ -648,7 +700,7 @@ async function page(c, file) {
 
 export async function handle(req, ctx) {
   const url = new URL(req.url);
-  const c = { ...ctx, req, url, origin: String(ctx.env.PUBLIC_URL || url.origin).replace(/\/+$/, ''), body: {} };
+  const c = { ...ctx, req, url, origin: String(ctx.env.PUBLIC_URL || url.origin).replace(/\/+$/, ''), body: {}, ip: ctx.ip || 'unknown' };
   const p = url.pathname;
   try {
     if (p.startsWith('/api/')) return await api(c);
@@ -656,6 +708,7 @@ export async function handle(req, ctx) {
     let m;
     if ((m = p.match(/^\/media\/logo\/(\d+)\.png$/))) return await logo(c, m[1]);
     if (p === '/' || p === '/index.html') return await page(c, '/index.html');
+    if (p === '/privacy' || p === '/privacy/') return await page(c, '/privacy.html');
     if (p === '/app' || p === '/app/') return await page(c, '/app.html');
     if (/^\/j\/[a-z0-9-]{3,40}\/?$/.test(p)) return await page(c, '/join.html');
     if ((m = p.match(/^\/c\/([a-z2-9]{20})\/google$/))) return await googleSave(c, m[1]);
