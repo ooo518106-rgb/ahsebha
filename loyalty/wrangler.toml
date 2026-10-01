@@ -4,6 +4,7 @@
 # 3) npx wrangler deploy
 name = "loyalty"
 main = "src/worker.js"
+account_id = "65c5a1672b3de2c36a6e79273a99c43a"
 compatibility_date = "2025-09-01"
 
 [assets]
@@ -17,7 +18,7 @@ not_found_handling = "none"
 [[d1_databases]]
 binding = "DB"
 database_name = "loyalty"
-database_id = "REPLACE_WITH_DATABASE_ID"
+database_id = "d9ec1b6e-14fb-4d36-8ae4-78bc7e01d46e"
 
 [vars]
 # رقم المُصدِر من Google Pay & Wallet Console (مش سري)
