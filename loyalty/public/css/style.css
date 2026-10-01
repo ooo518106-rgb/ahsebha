@@ -255,3 +255,11 @@ dialog .dlg-body { padding: 16px; }
   .poster { position: fixed; inset: 0; border: 0; display: grid; place-content: center; font-size: 1.4rem; }
   .poster .qr { width: 9cm; }
 }
+
+/* العروض على بطاقة الزبون */
+.stars { display: flex; justify-content: center; gap: 4px; }
+.stars button { font-size: 2.1rem; line-height: 1; background: none; border: 0; color: #d6d3d1; cursor: pointer; padding: 2px 4px; min-height: 0; }
+.stars button.on { color: #f59e0b; }
+.tier-gold { border-color: #eab308; }
+.tier-silver { border-color: #a8a29e; }
+.row.tight > .grow { flex-basis: 90px; }

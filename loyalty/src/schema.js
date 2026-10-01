@@ -134,6 +134,36 @@ export const SCHEMA = [
     body TEXT NOT NULL,
     created_at INTEGER NOT NULL
   )`,
+  // تقييمات الزبائن بعد الزيارة (التعليق بيوصل لصاحب المحل بس)
+  `CREATE TABLE IF NOT EXISTS reviews (
+    id INTEGER PRIMARY KEY,
+    shop_id INTEGER NOT NULL REFERENCES shops(id),
+    member_id INTEGER NOT NULL REFERENCES members(id),
+    stars INTEGER NOT NULL CHECK (stars BETWEEN 1 AND 5),
+    comment TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL
+  )`,
+  'CREATE INDEX IF NOT EXISTS reviews_shop ON reviews(shop_id, created_at)',
+  'CREATE INDEX IF NOT EXISTS reviews_member ON reviews(member_id, created_at)',
+  // إعدادات المنصة (رقم CliQ، آخر رابط للموقع…)
+  `CREATE TABLE IF NOT EXISTS platform_settings (
+    k TEXT PRIMARY KEY,
+    v TEXT NOT NULL
+  )`,
+  // دفعات الاشتراك: صاحب المحل بيحوّل بـ CliQ وبيبلّغ، ومدير المنصة بيأكد
+  `CREATE TABLE IF NOT EXISTS payments (
+    id INTEGER PRIMARY KEY,
+    shop_id INTEGER NOT NULL REFERENCES shops(id),
+    plan TEXT NOT NULL CHECK (plan IN ('month', 'year')),
+    amount REAL NOT NULL,
+    payer TEXT NOT NULL,
+    ref TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected')),
+    created_at INTEGER NOT NULL,
+    decided_at INTEGER
+  )`,
+  'CREATE INDEX IF NOT EXISTS payments_status ON payments(status, created_at)',
+  'CREATE INDEX IF NOT EXISTS payments_shop ON payments(shop_id, created_at)',
   'CREATE INDEX IF NOT EXISTS leads_time ON leads(created_at)',
   'CREATE INDEX IF NOT EXISTS members_shop ON members(shop_id, created_at)',
   'CREATE INDEX IF NOT EXISTS txns_shop_time ON txns(shop_id, created_at)',
@@ -151,4 +181,31 @@ export const MIGRATIONS = [
   // نتيجة آخر إشعار لكل جهاز (عشان صاحب المحل يشوف إذا وصل أو ليش ما وصل)
   'ALTER TABLE push_subs ADD COLUMN last_at INTEGER',
   'ALTER TABLE push_subs ADD COLUMN last_error TEXT',
+  // العروض: نقاط دبل بأوقات، المستويات، عيد الميلاد، الزبائن الغايبين، التقييمات، ادعُ صاحبك
+  "ALTER TABLE shops ADD COLUMN boosts TEXT NOT NULL DEFAULT '[]'",
+  'ALTER TABLE shops ADD COLUMN tiers_on INTEGER NOT NULL DEFAULT 0',
+  'ALTER TABLE shops ADD COLUMN tier_silver INTEGER NOT NULL DEFAULT 10',
+  'ALTER TABLE shops ADD COLUMN tier_gold INTEGER NOT NULL DEFAULT 25',
+  'ALTER TABLE shops ADD COLUMN bday_on INTEGER NOT NULL DEFAULT 1',
+  'ALTER TABLE shops ADD COLUMN bday_gift INTEGER',
+  'ALTER TABLE shops ADD COLUMN winback_days INTEGER NOT NULL DEFAULT 30',
+  "ALTER TABLE shops ADD COLUMN winback_text TEXT NOT NULL DEFAULT ''",
+  'ALTER TABLE shops ADD COLUMN winback_double INTEGER NOT NULL DEFAULT 1',
+  'ALTER TABLE shops ADD COLUMN review_on INTEGER NOT NULL DEFAULT 1',
+  "ALTER TABLE shops ADD COLUMN review_url TEXT NOT NULL DEFAULT ''",
+  'ALTER TABLE shops ADD COLUMN ref_bonus INTEGER',
+  'ALTER TABLE members ADD COLUMN birthday TEXT',
+  'ALTER TABLE members ADD COLUMN bday_set_at INTEGER',
+  'ALTER TABLE members ADD COLUMN bday_year INTEGER',
+  'ALTER TABLE members ADD COLUMN ref_code TEXT',
+  'ALTER TABLE members ADD COLUMN referred_by INTEGER',
+  'ALTER TABLE members ADD COLUMN ref_rewarded INTEGER NOT NULL DEFAULT 0',
+  'ALTER TABLE members ADD COLUMN boost_until INTEGER',
+  'ALTER TABLE members ADD COLUMN nudged_at INTEGER',
+  'ALTER TABLE members ADD COLUMN review_ask_at INTEGER',
+  // فهارس على الأعمدة الجديدة (لازم تيجي بعد ما ينضاف العمود)
+  'CREATE UNIQUE INDEX IF NOT EXISTS members_ref ON members(shop_id, ref_code)',
+  'CREATE INDEX IF NOT EXISTS members_referrer ON members(referred_by)',
+  'CREATE INDEX IF NOT EXISTS members_visit ON members(shop_id, last_visit)',
+  'CREATE INDEX IF NOT EXISTS members_bday ON members(shop_id, birthday)',
 ];

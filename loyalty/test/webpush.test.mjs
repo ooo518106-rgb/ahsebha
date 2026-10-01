@@ -1,35 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { encryptPayload, fromB64url, sendPush, validEndpoint, generateVapidKeys } from '../src/webpush.js';
-import { b64url } from '../src/util.js';
-import { setup, signup } from './helpers.mjs';
-
-// جهاز وهمي: مفتاح ECDH وسر auth، وبيفك التشفير حسب RFC 8291
-async function fakeDevice() {
-  const keys = await crypto.subtle.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, true, ['deriveBits']);
-  const pub = new Uint8Array(await crypto.subtle.exportKey('raw', keys.publicKey));
-  const auth = crypto.getRandomValues(new Uint8Array(16));
-  const hkdf = async (salt, ikm, info, n) => new Uint8Array(await crypto.subtle.deriveBits({ name: 'HKDF', hash: 'SHA-256', salt, info }, await crypto.subtle.importKey('raw', ikm, 'HKDF', false, ['deriveBits']), n * 8));
-  const te = new TextEncoder();
-  async function decrypt(body) {
-    const salt = body.subarray(0, 16);
-    const rs = new DataView(body.buffer, body.byteOffset).getUint32(16);
-    const idlen = body[20];
-    const asPublic = body.subarray(21, 21 + idlen);
-    const cipher = body.subarray(21 + idlen);
-    const asKey = await crypto.subtle.importKey('raw', asPublic, { name: 'ECDH', namedCurve: 'P-256' }, false, []);
-    const shared = new Uint8Array(await crypto.subtle.deriveBits({ name: 'ECDH', public: asKey }, keys.privateKey, 256));
-    const info = new Uint8Array([...te.encode('WebPush: info\0'), ...pub, ...asPublic]);
-    const ikm = await hkdf(auth, shared, info, 32);
-    const cek = await hkdf(salt, ikm, te.encode('Content-Encoding: aes128gcm\0'), 16);
-    const nonce = await hkdf(salt, ikm, te.encode('Content-Encoding: nonce\0'), 12);
-    const plain = new Uint8Array(await crypto.subtle.decrypt({ name: 'AES-GCM', iv: nonce }, await crypto.subtle.importKey('raw', cek, 'AES-GCM', false, ['decrypt']), cipher));
-    assert.equal(rs, 4096);
-    assert.equal(plain[plain.length - 1], 2, 'آخر سجل');
-    return new TextDecoder().decode(plain.subarray(0, -1));
-  }
-  return { p256dh: b64url(pub), auth: b64url(auth), decrypt };
-}
+import { fakeDevice, setup, signup } from './helpers.mjs';
 
 test('التشفير بينفك عند الجهاز بنفس النص', async () => {
   const d = await fakeDevice();

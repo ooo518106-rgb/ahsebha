@@ -68,13 +68,20 @@ export async function encryptPayload(plaintext, p256dh, auth) {
 }
 
 // بيرجّع { result: 'ok' | 'gone' (الاشتراك انتهى، احذفه) | 'error', code, reason } — السبب من رد خدمة الإشعارات (Apple بترجّع {"reason": "..."})
-export async function sendPush(sub, message, { vapid, subject, fetchImpl = fetch, ttl = 86400 }) {
+// cache (اختياري): Map بنفس الدفعة، عشان ما نوقّع JWT جديد لكل جهاز على نفس الخدمة
+export async function sendPush(sub, message, { vapid, subject, fetchImpl = fetch, ttl = 86400, cache = null }) {
   try {
     const body = await encryptPayload(JSON.stringify(message), sub.p256dh, sub.auth);
+    const aud = new URL(sub.endpoint).origin;
+    let authorization = cache && cache.get(aud);
+    if (!authorization) {
+      authorization = await vapidAuth(sub.endpoint, vapid, subject);
+      if (cache) cache.set(aud, authorization);
+    }
     const res = await fetchImpl(sub.endpoint, {
       method: 'POST',
       headers: {
-        authorization: await vapidAuth(sub.endpoint, vapid, subject),
+        authorization,
         'content-encoding': 'aes128gcm',
         'content-type': 'application/octet-stream',
         ttl: String(ttl),

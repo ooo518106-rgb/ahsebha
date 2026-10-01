@@ -126,13 +126,54 @@ async function load(first = false, quiet = false) {
   }
   if (!quiet && lastBalance !== null && data.member.balance > lastBalance) toast(`+${data.member.balance - lastBalance} ${data.shop.unit} 🎉`, 'ok');
   lastBalance = data.member.balance;
+  // ما بنعيد الرسم إذا ما تغيّر إشي (عشان ما يضيع اللي الزبون عم يكتبه)
+  const sig = JSON.stringify(data);
+  if (sig === lastSig) return;
+  lastSig = sig;
   lastData = data;
   draw();
 }
 
+// ─── العروض على البطاقة: المستوى، نقاط دبل، عيد الميلاد، التقييم، ادعُ صاحبك ───
+let lastSig = null;
+let rate = null; // { stars } لما يختار نجوم أقل من 4 ويكتب ملاحظة، أو { done, googleUrl }
+const MONTHS = ['كانون الثاني', 'شباط', 'آذار', 'نيسان', 'أيار', 'حزيران', 'تموز', 'آب', 'أيلول', 'تشرين الأول', 'تشرين الثاني', 'كانون الأول'];
+const fmtDay = (ms) => new Intl.DateTimeFormat('ar-u-nu-latn', { weekday: 'long' }).format(new Date(ms));
+
+function perksPanels(shop, member, refUrl, canRate) {
+  const unit = shop.programType === 'stamps' ? 'ختم' : 'نقطة';
+  const t = member.tier;
+  return html`
+    ${member.birthdayToday ? html`<div class="alert ok center">🎂 كل سنة وإنت سالم يا ${member.name.split(' ')[0]}! 🎉</div>` : ''}
+    ${shop.boostNow > 1 ? html`<div class="alert ok center">⏰ هلق نقاطك ×${shop.boostNow} على كل طلب!</div>`
+      : member.boostUntil ? html`<div class="alert ok center">🎁 اشتقنالك! نقاطك دبل لحد ${fmtDay(member.boostUntil)}</div>` : ''}
+    ${t ? html`<div class="panel small tier tier-${t.key}"><b>${t.icon} مستواك: ${t.name}</b>${t.mult > 1 ? html` · نقاطك ×${t.mult}` : ''}
+      ${t.next ? html`<div class="muted" style="margin-top:4px">باقي <span class="num">${t.next.visitsLeft}</span> ${t.next.visitsLeft === 1 ? 'زيارة' : 'زيارات'} وبتصير ${t.next.icon} ${t.next.name}</div>` : ''}</div>` : ''}
+    ${rate && rate.done ? html`<div class="panel small center stack"><b>شكراً إلك 🙏</b>
+        ${rate.googleUrl ? html`<p class="muted">بتساعدنا كتير إذا كتبت تقييمك على Google ⭐</p><a class="btn block" href="${rate.googleUrl}" target="_blank" rel="noopener">قيّمنا على Google</a>` : html`<p class="muted">وصل كلامك لـ ${shop.name}.</p>`}</div>`
+      : canRate ? html`<div class="panel small center stack" id="ratePanel"><b>كيف كانت زيارتك اليوم؟</b>
+        <div class="stars" role="group" aria-label="التقييم">${[1, 2, 3, 4, 5].map((n) => html`<button type="button" data-star="${n}" class="${rate && rate.stars >= n ? 'on' : ''}" aria-label="${n} من 5">★</button>`)}</div>
+        ${rate && rate.stars ? html`<textarea id="rateNote" rows="2" maxlength="500" placeholder="شو اللي ما عجبك؟ رح يوصل لصاحب المحل بس"></textarea>
+          <button class="btn block" type="button" id="rateSend">ابعت</button>` : ''}</div>` : ''}
+    ${shop.bdayOn && !member.birthday ? html`<form class="panel small stack" id="bdayForm"><b>🎂 شو تاريخ ميلادك؟</b>
+        <span class="muted">${shop.bdayGift > 0 ? `بنهديك ${shop.bdayGift >= shop.cost ? shop.rewardName : `${shop.bdayGift} ${unit}`} يوم عيدك 🎁` : 'عشان نعايدك يوم عيدك 🎉'}</span>
+        <div class="row tight"><select name="day" class="grow" required aria-label="اليوم"><option value="">اليوم</option>${Array.from({ length: 31 }, (_, i) => html`<option>${i + 1}</option>`)}</select>
+          <select name="month" class="grow" required aria-label="الشهر"><option value="">الشهر</option>${MONTHS.map((m, i) => html`<option value="${i + 1}">${m}</option>`)}</select>
+          <button class="btn" type="submit">حفظ</button></div></form>` : ''}
+    ${refUrl ? html`<div class="panel small stack"><b>👥 ادعُ صاحبك</b>
+        <span class="muted">لما يزورنا أول مرة، بتاخدوا انتو التنين <b class="num">${shop.refBonus}</b> ${unit} هدية.</span>
+        <div class="row"><button class="btn grow" type="button" id="shareRef">ابعتله الدعوة</button>
+          <button class="btn ghost" type="button" id="copyRef">نسخ الرابط</button></div></div>` : ''}`;
+}
+
+function inviteText() {
+  const { shop, refUrl } = lastData;
+  return `تعال انضم لبطاقة الولاء تبعت ${shop.name} ☕ وبأول زيارة بناخد انا وإنت هدية 🎁\n${refUrl}`;
+}
+
 function draw() {
   if (!lastData || deleted) return;
-  const { shop, member, google, apple } = lastData;
+  const { shop, member, google, apple, refUrl, canRate } = lastData;
   setBrand(shop.color);
   document.title = `بطاقة ${shop.name}`;
   homeScreen(shop.logo, shop.name);
@@ -143,6 +184,7 @@ function draw() {
     ${params.get('apple') === 'off' ? html`<div class="alert warn" style="margin-bottom:12px">الحفظ بـ Apple Wallet لسا مش مفعّل. اعرض هالصفحة للكاشير.</div>` : ''}
     ${cardHTML(shop, member)}
     <div class="stack" style="margin-top:16px">
+      ${perksPanels(shop, member, refUrl, canRate)}
       ${google && !ios ? html`<a class="gw-button" href="/c/${token}/google"><img src="/img/google-wallet-button-ar.svg" alt="الإضافة إلى محفظة Google" width="309" height="50"></a>` : ''}
       ${ios && apple ? html`<a class="gw-button" href="/c/${token}/apple"><img class="apple-badge" src="/img/add-to-apple-wallet.svg" alt="Add to Apple Wallet" width="160" height="50"></a>` : ''}
       ${ios && !standalone ? html`<div class="panel small">
@@ -189,6 +231,48 @@ root.addEventListener('click', (e) => {
   if (e.target.closest('#pushOff')) disablePush();
   const t = e.target.closest('#pushTest');
   if (t) runTest(t);
+});
+
+// التقييم: 4 أو 5 نجوم بينبعت فوراً (ومنطلب تقييم على Google)، وأقل بنسأل شو اللي ما عجبه
+async function sendRating(stars, comment = '') {
+  try {
+    const r = await api(`/api/cards/${token}/review`, { method: 'POST', body: { stars, comment } });
+    rate = { done: true, googleUrl: r.googleUrl };
+  } catch (err) {
+    toast(err.message, 'bad');
+    rate = null;
+  }
+  draw();
+}
+
+root.addEventListener('click', async (e) => {
+  const star = e.target.closest('[data-star]');
+  if (star) {
+    const n = Number(star.dataset.star);
+    if (n >= 4) sendRating(n);
+    else { rate = { stars: n }; draw(); $('#rateNote')?.focus(); }
+    return;
+  }
+  if (e.target.closest('#rateSend')) { sendRating(rate.stars, $('#rateNote').value); return; }
+  if (e.target.closest('#shareRef')) {
+    const text = inviteText();
+    if (navigator.share) { navigator.share({ text }).catch(() => {}); } else { window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank', 'noopener'); }
+    return;
+  }
+  if (e.target.closest('#copyRef')) {
+    try { await navigator.clipboard.writeText(lastData.refUrl); toast('انسخ الرابط ✅', 'ok'); } catch { prompt('انسخ الرابط:', lastData.refUrl); }
+  }
+});
+
+root.addEventListener('submit', async (e) => {
+  if (e.target.id !== 'bdayForm') return;
+  e.preventDefault();
+  const f = new FormData(e.target);
+  try {
+    await api(`/api/cards/${token}/birthday`, { method: 'POST', body: { day: f.get('day'), month: f.get('month') } });
+    toast('انحفظ تاريخ ميلادك 🎂', 'ok');
+    await load();
+  } catch (err) { toast(err.message, 'bad'); }
 });
 
 root.addEventListener('click', async (e) => {

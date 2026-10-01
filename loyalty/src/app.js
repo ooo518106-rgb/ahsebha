@@ -5,6 +5,7 @@ import * as apple from './apple.js';
 import { pemToDer } from '../public/js/asn1.js';
 import * as gw from './gwallet.js';
 import * as webpush from './webpush.js';
+import * as perks from './perks.js';
 import { defaultLogoPng } from './png.js';
 import { earnFor, progress, rewardCost, rewardRule, stampsLine, unitLabel } from '../public/js/rules.js';
 import { b64ToBytes, bytesToB64, clean, fail, HttpError, isUniqueError, json, normPhone, randomDigits, randomToken } from './util.js';
@@ -46,6 +47,26 @@ function shopView(shop, origin) {
     rule: rewardRule(shop),
     cost: rewardCost(shop),
     unit: unitLabel(shop),
+    perks: perksView(shop),
+  };
+}
+
+// إعدادات العروض كما بتطلع للوحة
+function perksView(shop) {
+  return {
+    boosts: perks.parseBoosts(shop.boosts),
+    boostNow: perks.activeBoost(shop),
+    tiersOn: !!shop.tiers_on,
+    tierSilver: shop.tier_silver,
+    tierGold: shop.tier_gold,
+    bdayOn: !!shop.bday_on,
+    bdayGift: perks.bdayGift(shop),
+    winbackDays: shop.winback_days,
+    winbackText: shop.winback_text,
+    winbackDouble: !!shop.winback_double,
+    reviewOn: !!shop.review_on,
+    reviewUrl: shop.review_url,
+    refBonus: perks.refBonus(shop),
   };
 }
 
@@ -61,6 +82,11 @@ function publicShopView(shop, origin) {
     cost: rewardCost(shop),
     unit: unitLabel(shop),
     welcomeText: shop.welcome_text,
+    boostNow: perks.activeBoost(shop),
+    refBonus: perks.refBonus(shop),
+    bdayOn: !!shop.bday_on,
+    bdayGift: perks.bdayGift(shop),
+    tiersOn: !!shop.tiers_on,
   };
 }
 
@@ -84,6 +110,11 @@ function memberView(m, shop, hidePhone = false) {
     inWallet: !!m.gw_object,
     progress: progress(shop, m.balance),
     stamps: shop.program_type === 'stamps' ? stampsLine(shop, m.balance) : null,
+    tier: perks.tierOf(shop, m.visits),
+    boostUntil: m.boost_until && m.boost_until > Date.now() ? m.boost_until : null,
+    // الكاشير بيعرف إنه عيد ميلاده اليوم، بس التاريخ نفسه للمالك والزبون
+    birthday: hidePhone ? null : m.birthday || null,
+    birthdayToday: !!m.birthday && perks.isBirthdayToday(m.birthday, perks.localTime(shop.country)),
   };
 }
 
@@ -394,7 +425,7 @@ async function pushTo(c, subs, messageFor) {
   const out = { ok: 0, error: 0, results: [] };
   if (!subs.length) return out;
   const vapid = await vapidKeys(c);
-  const opts = { vapid, subject: c.env.VAPID_SUBJECT || c.origin, fetchImpl: c.env.fetch || ((...a) => fetch(...a)) };
+  const opts = { vapid, subject: c.env.VAPID_SUBJECT || c.origin, fetchImpl: c.env.fetch || ((...a) => fetch(...a)), cache: new Map() };
   out.results = await Promise.all(subs.map((s) => webpush.sendPush(s, messageFor(s), opts)));
   const now = Date.now();
   const writes = out.results.map((r, i) => {
@@ -423,15 +454,18 @@ async function notifyMember(c, member, message) {
   return { devices: subs.length, sent: r.ok, reason: r.ok ? null : (r.results.find((x) => x.result !== 'ok') || {}).reason || null };
 }
 
-function earnMessage(shop, before, after, delta) {
+function earnMessage(shop, before, after, perk, ref) {
+  const delta = perk.delta;
   const p0 = progress(shop, before.balance);
   const p1 = progress(shop, after.balance);
   const stamps = shop.program_type === 'stamps';
+  const extras = [...perk.reasons, ...(ref ? [`👥 +${ref.bonus} هدية الدعوة`] : [])];
+  const tail = extras.length ? ` (${extras.join('، ')})` : '';
   const body = p1.available > p0.available
-    ? `🎁 مكافأتك جاهزة: ${shop.reward_name}! اطلبها بزيارتك الجاية.`
+    ? `🎁 مكافأتك جاهزة: ${shop.reward_name}! اطلبها بزيارتك الجاية.${tail}`
     : stamps
-      ? `انضافلك ${delta === 1 ? 'ختم' : `${delta} أختام`} ☕ صار عندك ${p1.toward}/${p1.cost}`
-      : `انضافلك ${delta} نقطة ☕ رصيدك صار ${after.balance}، وباقي ${p1.remaining} لـ ${shop.reward_name}`;
+      ? `انضافلك ${delta === 1 ? 'ختم' : `${delta} أختام`} ☕${tail} صار عندك ${p1.toward}/${p1.cost}`
+      : `انضافلك ${delta} نقطة ☕${tail} رصيدك صار ${after.balance}، وباقي ${p1.remaining} لـ ${shop.reward_name}`;
   return { title: shop.name, body };
 }
 
@@ -453,6 +487,136 @@ async function broadcastContinue(c, id) {
   await requireActive(c);
   const cursor = int(c.body.cursor, 0, Number.MAX_SAFE_INTEGER, 'مؤشر غلط');
   return json({ push: await broadcastBatch(c, Number(id), cursor) });
+}
+
+// ─── المهام الدورية (كل 15 دقيقة): هدايا عيد الميلاد، طلب التقييم، وتذكير الزبائن الغايبين ───
+// Cloudflare بيسمح بـ 50 طلب خارجي بكل تشغيلة (الخطة المجانية)، فبنبعت لحد 30 إشعار وبنكمّل بالتشغيلة الجاية
+const CRON_BUDGET = 30;
+const HOUR = 36e5;
+
+export async function runScheduled(ctx, now = Date.now()) {
+  const origin = String(ctx.env.PUBLIC_URL || (await getSetting(ctx.db, 'origin')) || '').replace(/\/+$/, '');
+  if (!origin) return { skipped: 'ما في رابط للموقع لسا (بينحفظ أول ما حدا يفتح اللوحة)' };
+  const c = { ...ctx, origin, budget: CRON_BUDGET };
+  const platformShop = await platformShopId(c.db);
+  const shops = new Map();
+  const shopOf = async (id) => {
+    if (!shops.has(id)) {
+      const shop = await c.db.get('SELECT * FROM shops WHERE id = ?', id);
+      shops.set(id, shop && subscriptionOf(shop, platformShop).state !== 'expired' ? shop : null);
+    }
+    return shops.get(id);
+  };
+  const out = { birthdays: 0, reviews: 0, winback: 0 };
+  out.birthdays = await birthdayJob(c, shopOf, now);
+  if (c.budget > 0) out.reviews = await reviewAskJob(c, shopOf, now);
+  if (c.budget > 0) out.winback = await winbackJob(c, shopOf, now);
+  await c.db.run('DELETE FROM rate_hits WHERE expires_at < ?', now);
+  return out;
+}
+
+// بيبعت إشعار لكل أجهزة الزبون ضمن الميزانية
+async function cronPush(c, shop, m, message) {
+  const subs = await c.db.all('SELECT * FROM push_subs WHERE member_id = ?', m.id);
+  if (!subs.length || c.budget < subs.length) return false;
+  c.budget -= subs.length;
+  await pushTo(c, subs, () => ({ icon: logoUrl(shop, c.origin), url: `${c.origin}/c/${m.token}`, title: shop.name, ...message }));
+  return true;
+}
+
+// 🎂 يوم عيد الميلاد (بتوقيت المحل، من 9 الصبح): الهدية بتنضاف للرصيد وبيوصله إشعار
+async function birthdayJob(c, shopOf, now) {
+  const mds = [...new Set([-1, 0, 1].map((d) => new Date(now + d * DAY).toISOString().slice(5, 10)).concat('02-29'))];
+  const rows = await c.db.all(
+    `SELECT * FROM members WHERE birthday IN (${mds.map(() => '?').join(', ')}) AND bday_set_at <= ? ORDER BY id LIMIT 200`,
+    ...mds, now - perks.BDAY_MIN_AGE_DAYS * DAY,
+  );
+  let n = 0;
+  for (const m of rows) {
+    const shop = await shopOf(m.shop_id);
+    if (!shop || !shop.bday_on) continue;
+    const t = perks.localTime(shop.country, now);
+    if (m.bday_year === t.year || !perks.isBirthdayToday(m.birthday, t) || t.hour < 9 || t.hour > 21) continue;
+    if (c.budget < 3) break;
+    const gift = perks.bdayGift(shop);
+    const due = 'id = ? AND (bday_year IS NULL OR bday_year <> ?)';
+    const res = await c.db.batch([
+      ...(gift > 0 ? [[`INSERT INTO txns (shop_id, member_id, kind, delta, note, created_at) SELECT shop_id, id, 'adjust', ?, '🎂 هدية عيد الميلاد', ? FROM members WHERE ${due}`, [gift, now, m.id, t.year]]] : []),
+      [`UPDATE members SET balance = balance + ?, bday_year = ?, updated_at = ? WHERE ${due}`, [gift, t.year, now, m.id, t.year]],
+    ]);
+    if (!res[res.length - 1].changes) continue;
+    n++;
+    const first = perks.firstName(m.name);
+    const body = gift <= 0 ? `كل سنة وإنت سالم يا ${first}! 🎉 من كل فريق ${shop.name}`
+      : gift === rewardCost(shop) ? `كل سنة وإنت سالم يا ${first}! 🎉 ${shop.reward_name} اليوم علينا، الهدية صارت بحسابك 🎁`
+        : `كل سنة وإنت سالم يا ${first}! 🎉 انضافلك ${gift} ${unitLabel(shop)} هدية عيدك 🎁`;
+    if (gift > 0 && m.gw_object && gw.googleConfig(c.env)) {
+      c.budget -= 2;
+      pushMember(c, shop, await c.db.get('SELECT * FROM members WHERE id = ?', m.id));
+    }
+    await cronPush(c, shop, m, { title: `${shop.name} 🎂`, body });
+  }
+  return n;
+}
+
+// ⭐ بعد الزيارة بساعة لـ 6 ساعات: «كيف كانت زيارتك؟» (مرة كل شهر بالكتير، ومش بالليل)
+async function reviewAskJob(c, shopOf, now) {
+  const rows = await c.db.all(
+    `SELECT m.* FROM members m WHERE m.last_visit BETWEEN ? AND ? AND (m.review_ask_at IS NULL OR m.review_ask_at < ?)
+       AND EXISTS (SELECT 1 FROM push_subs p WHERE p.member_id = m.id)
+       AND NOT EXISTS (SELECT 1 FROM reviews r WHERE r.member_id = m.id AND r.created_at > m.last_visit)
+     ORDER BY m.last_visit LIMIT 200`,
+    now - 6 * HOUR, now - HOUR, now - 30 * DAY,
+  );
+  let n = 0;
+  for (const m of rows) {
+    const shop = await shopOf(m.shop_id);
+    if (!shop || !shop.review_on) continue;
+    const t = perks.localTime(shop.country, now);
+    if (t.hour < 9 || t.hour > 22) continue;
+    if (c.budget <= 0) break;
+    const r = await c.db.run('UPDATE members SET review_ask_at = ? WHERE id = ? AND (review_ask_at IS NULL OR review_ask_at < ?)', now, m.id, now - 30 * DAY);
+    if (!r.changes) continue;
+    if (await cronPush(c, shop, m, { body: `كيف كانت زيارتك لـ ${shop.name} اليوم؟ قيّمنا بكبسة ⭐`, url: `${c.origin}/c/${m.token}?rate=1` })) n++;
+  }
+  return n;
+}
+
+// 💤 الزبون اللي غاب (حسب إعداد المحل): «اشتقنالك» مع نقاط دبل لـ 3 أيام، مرة وحدة لكل غيبة
+async function winbackJob(c, shopOf, now) {
+  const rows = await c.db.all(
+    `SELECT m.* FROM members m JOIN shops s ON s.id = m.shop_id
+     WHERE s.winback_days > 0 AND COALESCE(m.last_visit, m.created_at) < ? - s.winback_days * ${DAY}
+       AND (m.nudged_at IS NULL OR m.nudged_at < COALESCE(m.last_visit, m.created_at))
+       AND EXISTS (SELECT 1 FROM push_subs p WHERE p.member_id = m.id)
+     ORDER BY COALESCE(m.last_visit, m.created_at) LIMIT 200`,
+    now,
+  );
+  let n = 0;
+  for (const m of rows) {
+    const shop = await shopOf(m.shop_id);
+    if (!shop) continue;
+    const t = perks.localTime(shop.country, now);
+    if (t.hour < 11 || t.hour > 20) continue;
+    if (c.budget <= 0) break;
+    const boost = shop.winback_double ? now + 3 * DAY : m.boost_until;
+    const r = await c.db.run('UPDATE members SET nudged_at = ?, boost_until = ? WHERE id = ? AND (nudged_at IS NULL OR nudged_at < COALESCE(last_visit, created_at))', now, boost, m.id);
+    if (!r.changes) continue;
+    const first = perks.firstName(m.name);
+    const text = (shop.winback_text || `اشتقنالك يا {الاسم} ☕ مرّ علينا قريب`).replaceAll('{الاسم}', first);
+    const body = shop.winback_double ? `${text} — نقاطك دبل لـ 3 أيام 🎁` : text;
+    if (await cronPush(c, shop, m, { body })) n++;
+  }
+  return n;
+}
+
+async function getSetting(db, k) {
+  const row = await db.get('SELECT v FROM platform_settings WHERE k = ?', k);
+  return row ? row.v : null;
+}
+
+async function setSetting(db, k, v) {
+  await db.run('INSERT INTO platform_settings (k, v) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v', k, String(v));
 }
 
 // ─── مساعدات ───
@@ -482,12 +646,13 @@ function readPhone(v) {
 
 const DUPLICATE_PHONE = 'هالرقم مسجّل عنا من قبل. اطلب من الكاشير يبعتلك رابط بطاقتك.';
 
-async function createMember(db, shop, name, phone) {
+async function createMember(db, shop, name, phone, { birthday = null, referredBy = null } = {}) {
+  const now = Date.now();
   for (let i = 0; i < 6; i++) {
     try {
       const r = await db.run(
-        'INSERT INTO members (shop_id, token, card_no, name, phone, created_at) VALUES (?, ?, ?, ?, ?, ?)',
-        shop.id, randomToken(), randomDigits(8), name, phone, Date.now(),
+        'INSERT INTO members (shop_id, token, card_no, name, phone, birthday, bday_set_at, referred_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        shop.id, randomToken(), randomDigits(8), name, phone, birthday, birthday ? now : null, referredBy, now,
       );
       return db.get('SELECT * FROM members WHERE id = ?', r.lastId);
     } catch (e) {
@@ -576,7 +741,31 @@ async function deleteMember(c, shop, m) {
 async function publicShop(c, slug) {
   const shop = await shopBySlug(c.db, slug);
   const paused = (await subscription(c, shop)).state === 'expired';
-  return json({ shop: { ...publicShopView(shop, c.origin), paused } });
+  const referrer = await referrerOf(c, shop, c.url.searchParams.get('ref'));
+  return json({ shop: { ...publicShopView(shop, c.origin), paused }, referrer: referrer ? perks.firstName(referrer.name) : null });
+}
+
+const REF_RE = /^[a-z2-9]{6}$/;
+async function referrerOf(c, shop, code) {
+  const ref = String(code || '').toLowerCase();
+  if (!REF_RE.test(ref) || perks.refBonus(shop) <= 0) return null;
+  return c.db.get('SELECT id, name FROM members WHERE shop_id = ? AND ref_code = ?', shop.id, ref);
+}
+
+// كود الدعوة للزبون (بينعمل أول مرة بيفتح بطاقته)
+async function refCodeFor(c, m) {
+  if (m.ref_code) return m.ref_code;
+  for (let i = 0; i < 5; i++) {
+    const code = randomToken().slice(0, 6);
+    try {
+      const r = await c.db.run('UPDATE members SET ref_code = ? WHERE id = ? AND ref_code IS NULL', code, m.id);
+      if (r.changes) return code;
+      return (await c.db.get('SELECT ref_code FROM members WHERE id = ?', m.id)).ref_code;
+    } catch (e) {
+      if (!isUniqueError(e)) throw e;
+    }
+  }
+  return null;
 }
 
 async function join(c, slug) {
@@ -586,7 +775,10 @@ async function join(c, slug) {
   // سقف لكل جهاز/شبكة، وسقف عام لكل محل (لو حدا غيّر الـ IP)
   await rateLimit(c, `join:${c.ip}`, 20, 10 * MIN);
   await rateLimit(c, `join-shop:${shop.id}`, 150, 10 * MIN, 'في ضغط على التسجيل هلأ، جرّب بعد شوي');
-  const m = await createMember(c.db, shop, readName(c.body.name), readPhone(c.body.phone));
+  const birthday = c.body.bdayDay || c.body.bdayMonth ? perks.readBirthday(c.body.bdayDay, c.body.bdayMonth) : null;
+  if ((c.body.bdayDay || c.body.bdayMonth) && !birthday) fail(400, 'تاريخ الميلاد مش صحيح');
+  const referrer = await referrerOf(c, shop, c.body.ref);
+  const m = await createMember(c.db, shop, readName(c.body.name), readPhone(c.body.phone), { birthday, referredBy: referrer ? referrer.id : null });
   return json({ token: m.token, url: `${c.origin}/c/${m.token}` }, 201);
 }
 
@@ -598,7 +790,47 @@ async function cardInfo(c, token) {
   delete v.phone;
   delete v.phoneHidden;
   delete v.id;
-  return json({ shop: publicShopView(shop, c.origin), member: v, google: !!gw.googleConfig(c.env), apple: !!(await appleConfig(c)) });
+  const code = perks.refBonus(shop) > 0 ? await refCodeFor(c, m) : null;
+  return json({
+    shop: publicShopView(shop, c.origin),
+    member: v,
+    google: !!gw.googleConfig(c.env),
+    apple: !!(await appleConfig(c)),
+    refUrl: code ? `${c.origin}/j/${shop.slug}?ref=${code}` : null,
+    canRate: await canRate(c, shop, m),
+  });
+}
+
+// الزبون بيضيف تاريخ ميلاده (مرة وحدة؛ لتغييره بيحكي مع المحل)
+async function cardBirthday(c, token) {
+  const m = await c.db.get('SELECT * FROM members WHERE token = ?', token);
+  if (!m) fail(404, 'ما لقينا هالبطاقة');
+  const md = perks.readBirthday(c.body.day, c.body.month);
+  if (!md) fail(400, 'تاريخ الميلاد مش صحيح');
+  const r = await c.db.run('UPDATE members SET birthday = ?, bday_set_at = ? WHERE id = ? AND birthday IS NULL', md, Date.now(), m.id);
+  if (!r.changes) fail(409, 'تاريخ ميلادك محفوظ من قبل. لتغييره احكي مع المحل.');
+  return json({ ok: true, birthday: md });
+}
+
+// ─── التقييمات ───
+// الزبون بيقيّم زيارته خلال يومين منها، ومرة وحدة لكل زيارة
+const RATE_WINDOW = 2 * DAY;
+async function canRate(c, shop, m) {
+  if (!shop.review_on || !m.last_visit || m.last_visit < Date.now() - RATE_WINDOW) return false;
+  const last = await c.db.get('SELECT MAX(created_at) AS at FROM reviews WHERE member_id = ?', m.id);
+  return !last.at || last.at < m.last_visit;
+}
+
+async function cardReview(c, token) {
+  const m = await c.db.get('SELECT * FROM members WHERE token = ?', token);
+  if (!m) fail(404, 'ما لقينا هالبطاقة');
+  const shop = await c.db.get('SELECT * FROM shops WHERE id = ?', m.shop_id);
+  await rateLimit(c, `review:${c.ip}`, 10, 60 * MIN);
+  const stars = int(c.body.stars, 1, 5, 'اختار من 1 لـ 5 نجوم');
+  if (!(await canRate(c, shop, m))) fail(409, 'قيّمت هالزيارة من قبل، شكراً إلك 🙏');
+  await c.db.run('INSERT INTO reviews (shop_id, member_id, stars, comment, created_at) VALUES (?, ?, ?, ?, ?)', shop.id, m.id, stars, clean(c.body.comment, 500), Date.now());
+  // التقييم الحلو منطلب نشره على Google، والزعلان بيضل عند صاحب المحل
+  return json({ ok: true, googleUrl: stars >= 4 && shop.review_url ? shop.review_url : null }, 201);
 }
 
 // الزبون بيحذف بطاقته وبياناته بنفسه (رابط البطاقة نفسه هو الإثبات)
@@ -760,6 +992,8 @@ async function logout(c) {
 }
 
 async function me(c) {
+  // المهام الدورية ما إلها طلب، فبنحفظ رابط الموقع من هون
+  if (!c.env.PUBLIC_URL && (await getSetting(c.db, 'origin')) !== c.origin) await setSetting(c.db, 'origin', c.origin);
   return json({
     user: { id: c.user.id, name: c.user.name, email: c.user.email, role: c.user.role, isAdmin: await isPlatformAdmin(c) },
     shop: shopView(c.shop, c.origin),
@@ -872,11 +1106,49 @@ async function earn(c, id) {
   const r = earnFor(c.shop, c.body);
   if (r.error) fail(400, r.error);
   const now = Date.now();
+  // العروض: نقاط دبل بالوقت، رجعة الزبون الغايب، والمستوى
+  const p = perks.applyPerks(c.shop, m, r.delta, now);
+  const note = p.reasons.length ? p.reasons.join(' · ') : null;
   const res = await applyTxn(c, [
-    ['INSERT INTO txns (shop_id, member_id, kind, delta, amount, user_id, idem, created_at) VALUES (?, ?, \'earn\', ?, ?, ?, ?, ?)', [c.shop.id, m.id, r.delta, r.amount, c.user.id, idemKey(c.body.key), now]],
-    ['UPDATE members SET balance = balance + ?, lifetime = lifetime + ?, visits = visits + 1, last_visit = ?, updated_at = ? WHERE id = ? AND shop_id = ?', [r.delta, r.delta, now, now, m.id, c.shop.id]],
+    ['INSERT INTO txns (shop_id, member_id, kind, delta, amount, user_id, note, idem, created_at) VALUES (?, ?, \'earn\', ?, ?, ?, ?, ?, ?)', [c.shop.id, m.id, p.delta, r.amount, c.user.id, note, idemKey(c.body.key), now]],
+    ['UPDATE members SET balance = balance + ?, lifetime = lifetime + ?, visits = visits + 1, last_visit = ?, updated_at = ? WHERE id = ? AND shop_id = ?', [p.delta, p.delta, now, now, m.id, c.shop.id]],
   ]);
-  return respondMember(c, m.id, res ? { delta: r.delta } : { duplicate: true }, (fresh) => earnMessage(c.shop, m, fresh, r.delta));
+  const ref = res ? await rewardReferral(c, m, now) : null;
+  const extra = res ? { delta: p.delta, base: p.base, reasons: p.reasons, ...(ref ? { refBonus: ref.bonus } : {}) } : { duplicate: true };
+  return respondMember(c, m.id, extra, (fresh) => earnMessage(c.shop, m, fresh, p, ref));
+}
+
+// ادعُ صاحبك: بأول زيارة للزبون اللي انضم بدعوة، الاتنين بياخدوا هدية (مرة وحدة، وبسقف شهري للي بيدعي)
+async function rewardReferral(c, m, now) {
+  const bonus = perks.refBonus(c.shop);
+  if (!m.referred_by || m.ref_rewarded || bonus <= 0) return null;
+  const referrer = await c.db.get('SELECT * FROM members WHERE id = ? AND shop_id = ?', m.referred_by, c.shop.id);
+  if (!referrer) return null;
+  const monthStart = now - 30 * DAY;
+  const done = await c.db.get('SELECT COUNT(*) AS n FROM members WHERE referred_by = ? AND ref_rewarded > ?', referrer.id, monthStart);
+  const capped = done.n >= perks.REF_MONTHLY_CAP;
+  const marked = 'EXISTS (SELECT 1 FROM members WHERE id = ? AND ref_rewarded = ?)';
+  const res = await c.db.batch([
+    // العلامة أول إشي، وكل الباقي مشروط عليها: لو طلبين وصلوا سوا، واحد بس بياخد
+    ['UPDATE members SET ref_rewarded = ? WHERE id = ? AND ref_rewarded = 0', [now, m.id]],
+    [`INSERT INTO txns (shop_id, member_id, kind, delta, note, created_at) SELECT ?, ?, 'adjust', ?, ?, ? WHERE ${marked}`, [c.shop.id, m.id, bonus, `👥 هدية الانضمام بدعوة من ${perks.firstName(referrer.name)}`, now, m.id, now]],
+    [`UPDATE members SET balance = balance + ? WHERE id = ? AND ${marked}`, [bonus, m.id, m.id, now]],
+    ...(capped ? [] : [
+      [`INSERT INTO txns (shop_id, member_id, kind, delta, note, created_at) SELECT ?, ?, 'adjust', ?, ?, ? WHERE ${marked}`, [c.shop.id, referrer.id, bonus, `👥 دعوة ${perks.firstName(m.name)}`, now, m.id, now]],
+      [`UPDATE members SET balance = balance + ?, updated_at = ? WHERE id = ? AND ${marked}`, [bonus, now, referrer.id, m.id, now]],
+    ]),
+  ]);
+  if (!res[0].changes) return null;
+  if (!capped) {
+    const fresh = await c.db.get('SELECT * FROM members WHERE id = ?', referrer.id);
+    pushMember(c, c.shop, fresh);
+    c.waitUntil(notifyMember(c, fresh, {
+      title: c.shop.name,
+      body: `👥 صاحبك ${perks.firstName(m.name)} زارنا! انضافلك ${bonus} ${unitLabel(c.shop)} هدية الدعوة 🎉`,
+      icon: logoUrl(c.shop, c.origin),
+    }).catch(() => {}));
+  }
+  return { bonus };
 }
 
 async function redeem(c, id) {
@@ -1020,6 +1292,44 @@ async function updateLogo(c) {
   return json({ shop: shopView(shop, c.origin), google: { ...googleStatus(c, shop), lastSync: google } });
 }
 
+// إعدادات العروض (كل قسم بيبعت حقوله بس)
+async function updatePerks(c) {
+  const b = c.body;
+  const s = c.shop;
+  const flag = (k, col) => (b[k] === undefined ? s[col] : b[k] ? 1 : 0);
+  const num = (k, col, min, max, msg) => (b[k] === undefined ? s[col] : int(b[k], min, max, msg));
+  const next = {
+    tiers_on: flag('tiersOn', 'tiers_on'),
+    tier_silver: num('tierSilver', 'tier_silver', 2, 1000, 'زيارات الفضي لازم تكون بين 2 و 1000'),
+    tier_gold: num('tierGold', 'tier_gold', 3, 5000, 'زيارات الذهبي لازم تكون بين 3 و 5000'),
+    bday_on: flag('bdayOn', 'bday_on'),
+    bday_gift: num('bdayGift', 'bday_gift', 0, 1000000, 'هدية عيد الميلاد لازم تكون عدد صحيح'),
+    winback_days: num('winbackDays', 'winback_days', 0, 365, 'عدد الأيام لازم يكون بين 0 و 365'),
+    winback_text: b.winbackText === undefined ? s.winback_text : clean(b.winbackText, 120),
+    winback_double: flag('winbackDouble', 'winback_double'),
+    review_on: flag('reviewOn', 'review_on'),
+    review_url: b.reviewUrl === undefined ? s.review_url : String(b.reviewUrl || '').trim(),
+    ref_bonus: num('refBonus', 'ref_bonus', 0, 1000000, 'هدية الدعوة لازم تكون عدد صحيح'),
+    boosts: s.boosts,
+  };
+  if (next.winback_days > 0 && next.winback_days < 7) fail(400, 'أقل إشي 7 أيام، عشان ما ننزعج الزبائن');
+  if (next.tier_gold <= next.tier_silver) fail(400, 'زيارات الذهبي لازم تكون أكتر من الفضي');
+  if (next.review_url) {
+    let ok = false;
+    try { ok = new URL(next.review_url).protocol === 'https:' && next.review_url.length <= 300; } catch { ok = false; }
+    if (!ok) fail(400, 'رابط التقييم لازم يبلّش بـ https://');
+  }
+  if (b.boosts !== undefined) {
+    const v = perks.validateBoosts(b.boosts);
+    if (v.error) fail(400, v.error);
+    next.boosts = JSON.stringify(v.boosts);
+  }
+  const cols = Object.keys(next);
+  await c.db.run(`UPDATE shops SET ${cols.map((k) => `${k} = ?`).join(', ')}, updated_at = ? WHERE id = ?`, ...cols.map((k) => next[k]), Date.now(), s.id);
+  const shop = await c.db.get('SELECT * FROM shops WHERE id = ?', s.id);
+  return json({ shop: shopView(shop, c.origin) });
+}
+
 async function syncNow(c) {
   const r = await syncClass(c, c.shop);
   if (!r.enabled) fail(400, 'Google Wallet مش مفعّل على السيرفر');
@@ -1084,6 +1394,8 @@ const API = [
   ['POST', /^\/api\/shops\/([a-z0-9-]{3,40})\/join$/, join],
   ['GET', /^\/api\/cards\/([a-z2-9]{20})$/, cardInfo],
   ['POST', /^\/api\/cards\/([a-z2-9]{20})\/delete$/, deleteCard],
+  ['POST', /^\/api\/cards\/([a-z2-9]{20})\/birthday$/, cardBirthday],
+  ['POST', /^\/api\/cards\/([a-z2-9]{20})\/review$/, cardReview],
   ['GET', /^\/api\/site$/, site],
   ['GET', /^\/api\/push\/key$/, pushKey],
   ['POST', /^\/api\/cards\/([a-z2-9]{20})\/push$/, cardPushSubscribe],
@@ -1114,6 +1426,7 @@ const API = [
   ['GET', /^\/api\/activity$/, activity, 'staff'],
   ['PUT', /^\/api\/shop$/, updateShop, 'owner'],
   ['PUT', /^\/api\/shop\/logo$/, updateLogo, 'owner'],
+  ['PUT', /^\/api\/shop\/perks$/, updatePerks, 'owner'],
   ['POST', /^\/api\/shop\/sync$/, syncNow, 'owner'],
   ['POST', /^\/api\/broadcast$/, broadcast, 'owner'],
   ['POST', /^\/api\/broadcast\/(\d+)\/continue$/, broadcastContinue, 'owner'],
