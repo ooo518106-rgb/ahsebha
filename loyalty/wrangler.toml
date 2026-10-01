@@ -6,6 +6,8 @@ name = "loyalty"
 main = "src/worker.js"
 account_id = "65c5a1672b3de2c36a6e79273a99c43a"
 compatibility_date = "2025-09-01"
+workers_dev = true
+preview_urls = false
 
 [assets]
 directory = "./public"
@@ -22,7 +24,7 @@ database_id = "d9ec1b6e-14fb-4d36-8ae4-78bc7e01d46e"
 
 [vars]
 # رقم المُصدِر من Google Pay & Wallet Console (مش سري)
-GOOGLE_ISSUER_ID = ""
+GOOGLE_ISSUER_ID = "3388000000023212673"
 # الأسرار بتنحط من لوحة Cloudflare (Settings ← Variables and Secrets ← Secret)، مش هون:
 #   GOOGLE_SERVICE_ACCOUNT = محتوى ملف JSON تبع حساب الخدمة
 #   SIGNUP_CODE (اختياري) = رمز بتعطيه للمحلات عشان تقدر تسجّل؛ بدونه التسجيل مفتوح للكل
