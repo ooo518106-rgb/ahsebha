@@ -334,9 +334,9 @@ test('صفحة الخصوصية وإيميل التواصل', async () => {
   const r = await c.get('/privacy');
   assert.equal(r.status, 200);
   assert.equal(r.data, '<html>/privacy.html</html>');
-  assert.deepEqual((await c.get('/api/site')).data, { contactEmail: 'privacy@example.com', whatsapp: null, signupOpen: true });
+  assert.deepEqual((await c.get('/api/site')).data, { contactEmail: 'privacy@example.com', whatsapp: null, signupOpen: true, apple: false });
   const { client: client2 } = await setup({ WHATSAPP_NUMBER: '962798900911', SIGNUP_CODE: 'x' });
-  assert.deepEqual((await client2().get('/api/site')).data, { contactEmail: null, whatsapp: '962798900911', signupOpen: false });
+  assert.deepEqual((await client2().get('/api/site')).data, { contactEmail: null, whatsapp: '962798900911', signupOpen: false, apple: false });
 });
 
 test('طلبات الاشتراك: من صفحة البيع، وبيشوفها مدير المنصة بس', async () => {

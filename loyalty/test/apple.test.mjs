@@ -1,0 +1,154 @@
+import { test, before } from 'node:test';
+import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { authTokenFor, generateKeyAndCsr, zip } from '../src/apple.js';
+import { setup, signup } from './helpers.mjs';
+
+// سلسلة شهادات تجريبية بتشبه تبعت Apple: جذر ← وسيطة (WWDR) ← شهادة Pass Type ID
+let dir;
+let opensslOk = true;
+const sh = (...args) => execFileSync('openssl', args, { cwd: dir, stdio: ['ignore', 'pipe', 'pipe'] });
+before(() => {
+  dir = mkdtempSync(path.join(tmpdir(), 'nuqatak-apple-'));
+  try {
+    writeFileSync(path.join(dir, 'ext.cnf'), '[ca]\nbasicConstraints=critical,CA:TRUE\nkeyUsage=critical,keyCertSign,cRLSign\n[leaf]\nbasicConstraints=critical,CA:FALSE\nkeyUsage=critical,digitalSignature\n');
+    sh('req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-keyout', 'root.key', '-out', 'root.pem', '-days', '2', '-subj', '/CN=Test Root', '-addext', 'basicConstraints=critical,CA:TRUE', '-addext', 'keyUsage=critical,keyCertSign,cRLSign');
+    sh('req', '-newkey', 'rsa:2048', '-nodes', '-keyout', 'wwdr.key', '-out', 'wwdr.csr', '-subj', '/CN=Test WWDR/OU=G4/O=Test');
+    sh('x509', '-req', '-in', 'wwdr.csr', '-CA', 'root.pem', '-CAkey', 'root.key', '-CAcreateserial', '-out', 'wwdr.pem', '-days', '2', '-extfile', 'ext.cnf', '-extensions', 'ca');
+  } catch {
+    opensslOk = false;
+  }
+});
+
+function issue(csrPem, name) {
+  writeFileSync(path.join(dir, `${name}.csr`), csrPem);
+  sh('x509', '-req', '-in', `${name}.csr`, '-CA', 'wwdr.pem', '-CAkey', 'wwdr.key', '-CAcreateserial', '-days', '2', '-extfile', 'ext.cnf', '-extensions', 'leaf',
+    '-subj', '/UID=pass.com.nuqatak.test/CN=Pass Type ID: pass.com.nuqatak.test/OU=ABCDE12345/O=Test Dev/C=US', '-outform', 'DER', '-out', `${name}.cer`);
+  return readFileSync(path.join(dir, `${name}.cer`)).toString('base64');
+}
+
+function unzipAll(bytes) {
+  writeFileSync(path.join(dir, 'card.pkpass'), bytes);
+  const out = execFileSync('python3', ['-c', 'import zipfile,sys,json,base64;z=zipfile.ZipFile(sys.argv[1]);print(json.dumps({n:base64.b64encode(z.read(n)).decode() for n in z.namelist()}))', path.join(dir, 'card.pkpass')]);
+  return Object.fromEntries(Object.entries(JSON.parse(out)).map(([k, v]) => [k, Buffer.from(v, 'base64')]));
+}
+
+test('ملف ZIP بدون ضغط بينقرا', () => {
+  if (!opensslOk) return;
+  const z = zip([{ name: 'a.txt', data: new TextEncoder().encode('hello') }, { name: 'b/c.json', data: new TextEncoder().encode('{}') }]);
+  const files = unzipAll(z);
+  assert.equal(files['a.txt'].toString(), 'hello');
+  assert.equal(files['b/c.json'].toString(), '{}');
+});
+
+test('Apple Wallet من الإعداد للبطاقة الموقّعة وخدمة التحديث', async (t) => {
+  if (!opensslOk) { t.skip('openssl مش موجود'); return; }
+  const { db, client } = await setup({ APPLE_WWDR_PEM: readFileSync(path.join(dir, 'wwdr.pem'), 'utf8') });
+  const admin = client();
+  const { shop } = await signup(admin, { shopName: 'Mocha Coffee' });
+  const other = client();
+  await signup(other, { shopName: 'Other Shop' });
+
+  assert.equal((await admin.get('/api/admin/apple')).data.configured, false);
+  const b64 = (u8) => Buffer.from(u8).toString('base64');
+  const keys = await generateKeyAndCsr();
+  const keyBody = { privateKey: b64(keys.pkcs8), publicKey: b64(keys.spki) };
+  assert.equal((await other.post('/api/admin/apple/key', keyBody)).status, 403, 'صاحب محل عادي ما بيعدّل إعداد Apple');
+  assert.equal((await admin.put('/api/admin/apple/cert', { cert: 'x' })).status, 400, 'لازم CSR أول');
+
+  // 1) طلب الشهادة 2) Apple (هون: شهادتنا التجريبية) 3) رفع الشهادة
+  // مفتاح عام مش من نفس الزوج مرفوض
+  const strangerKeys = await generateKeyAndCsr();
+  assert.equal((await admin.post('/api/admin/apple/key', { ...keyBody, publicKey: b64(strangerKeys.spki) })).status, 400);
+  assert.equal((await admin.post('/api/admin/apple/key', keyBody)).data.hasKey, true);
+  const csr = keys.csrPem;
+  assert.match(csr, /^-----BEGIN CERTIFICATE REQUEST-----/);
+  writeFileSync(path.join(dir, 'check.csr'), csr);
+  sh('req', '-in', 'check.csr', '-noout', '-verify');
+  // شهادة من مفتاح تاني مرفوضة
+  sh('req', '-newkey', 'rsa:2048', '-nodes', '-keyout', 'stranger.key', '-out', 'stranger.csr', '-subj', '/CN=x');
+  const stranger = issue(readFileSync(path.join(dir, 'stranger.csr'), 'utf8'), 'stranger');
+  assert.equal((await admin.put('/api/admin/apple/cert', { cert: stranger })).status, 400);
+  let r = await admin.put('/api/admin/apple/cert', { cert: issue(csr, 'pass') });
+  assert.equal(r.status, 200);
+  assert.deepEqual([r.data.configured, r.data.passTypeId, r.data.teamId], [true, 'pass.com.nuqatak.test', 'ABCDE12345']);
+  assert.equal((await admin.post('/api/admin/apple/key', keyBody)).status, 409, 'ما بنكسر إعداد شغّال بالغلط');
+
+  // محل فيه فرع ورسالة ترحيب، وزبون
+  await admin.put('/api/shop', { name: 'موكا كوفي هاوس', welcomeText: 'موكا كوفي هاوس ترحب بكم ☕', locations: [{ name: 'الفرع', lat: 31.7167, lng: 35.7939 }] });
+  const guest = client();
+  const join = await guest.post(`/api/shops/${shop.slug}/join`, { name: 'أحمد', phone: '0791234567' });
+  const token = join.data.token;
+  assert.equal((await guest.get(`/api/cards/${token}`)).data.apple, true);
+
+  const res = await guest.get(`/c/${token}/apple`);
+  assert.equal(res.status, 200);
+  assert.equal(res.headers.get('content-type'), 'application/vnd.apple.pkpass');
+  const files = unzipAll(Buffer.from(res.data));
+  for (const f of ['pass.json', 'manifest.json', 'signature', 'icon.png', 'icon@2x.png', 'logo.png']) assert.ok(files[f], f);
+  const pass = JSON.parse(files['pass.json']);
+  assert.equal(pass.passTypeIdentifier, 'pass.com.nuqatak.test');
+  assert.equal(pass.teamIdentifier, 'ABCDE12345');
+  assert.equal(pass.serialNumber, token);
+  assert.equal(pass.organizationName, 'موكا كوفي هاوس');
+  assert.equal(pass.webServiceURL, 'https://loyalty.test/apple');
+  assert.deepEqual(pass.barcodes[0], { format: 'PKBarcodeFormatQR', message: token, messageEncoding: 'iso-8859-1', altText: pass.storeCard.secondaryFields[1].value });
+  assert.deepEqual(pass.locations, [{ latitude: 31.7167, longitude: 35.7939, relevantText: 'موكا كوفي هاوس ترحب بكم ☕' }]);
+  assert.equal(pass.storeCard.headerFields[0].value, 0);
+  // manifest = SHA-1 لكل ملف، والتوقيع صحيح بالسلسلة
+  const manifest = JSON.parse(files['manifest.json']);
+  for (const [name, hash] of Object.entries(manifest)) assert.equal(createHash('sha1').update(files[name]).digest('hex'), hash, name);
+  writeFileSync(path.join(dir, 'manifest.json'), files['manifest.json']);
+  writeFileSync(path.join(dir, 'signature'), files.signature);
+  sh('cms', '-verify', '-binary', '-inform', 'DER', '-in', 'signature', '-content', 'manifest.json', '-CAfile', 'root.pem', '-purpose', 'any', '-out', path.join(dir, 'verified'));
+
+  // خدمة التحديث
+  const secret = (await db.get('SELECT auth_secret FROM apple_config WHERE id = 1')).auth_secret;
+  const auth = { authorization: `ApplePass ${await authTokenFor(secret, token)}` };
+  assert.equal(pass.authenticationToken, auth.authorization.slice('ApplePass '.length));
+  const reg = `/apple/v1/devices/device123/registrations/pass.com.nuqatak.test/${token}`;
+  assert.equal((await guest.req('POST', reg, { pushToken: 'abc' })).status, 401);
+  assert.equal((await guest.req('POST', reg, { pushToken: 'abc' }, auth)).status, 201);
+  assert.equal((await guest.req('POST', reg, { pushToken: 'abc' }, auth)).status, 200);
+  r = await guest.get('/apple/v1/devices/device123/registrations/pass.com.nuqatak.test?passesUpdatedSince=0');
+  assert.deepEqual(r.data.serialNumbers, [token]);
+  const tag = r.data.lastUpdated;
+  assert.equal((await guest.get(`/apple/v1/devices/device123/registrations/pass.com.nuqatak.test?passesUpdatedSince=${tag}`)).status, 204);
+
+  await new Promise((ok) => setTimeout(ok, 5));
+  const memberId = (await admin.get(`/api/members/lookup?code=${token}`)).data.member.id;
+  await admin.post(`/api/members/${memberId}/earn`, { amount: 25 });
+  r = await guest.get(`/apple/v1/devices/device123/registrations/pass.com.nuqatak.test?passesUpdatedSince=${tag}`);
+  assert.deepEqual(r.data.serialNumbers, [token], 'البطاقة تغيّرت بعد إضافة النقاط');
+
+  assert.equal((await guest.req('GET', `/apple/v1/passes/pass.com.nuqatak.test/${token}`)).status, 401);
+  const latest = await guest.req('GET', `/apple/v1/passes/pass.com.nuqatak.test/${token}`, undefined, auth);
+  assert.equal(latest.status, 200);
+  const updated = JSON.parse(unzipAll(Buffer.from(latest.data))['pass.json']);
+  assert.equal(updated.storeCard.headerFields[0].value, 25);
+  const lm = latest.headers.get('last-modified');
+  assert.equal((await guest.req('GET', `/apple/v1/passes/pass.com.nuqatak.test/${token}`, undefined, { ...auth, 'if-modified-since': lm })).status, 304);
+  assert.equal((await guest.req('POST', '/apple/v1/log', { logs: ['test'] })).status, 200);
+
+  // حذف البطاقة بيشيل التسجيل
+  assert.equal((await guest.req('DELETE', reg, undefined, auth)).status, 200);
+  await guest.req('POST', reg, { pushToken: 'abc' }, auth);
+  await guest.post(`/api/cards/${token}/delete`, {});
+  assert.equal((await db.get('SELECT COUNT(*) AS n FROM apple_regs')).n, 0);
+});
+
+test('بدون إعداد Apple: الرابط بيرجع للبطاقة', async () => {
+  const { client } = await setup();
+  const c = client();
+  const { shop } = await signup(c);
+  const join = await client().post(`/api/shops/${shop.slug}/join`, { name: 'سارة', phone: '0790001111' });
+  const r = await client().get(`/c/${join.data.token}/apple`);
+  assert.equal(r.status, 302);
+  assert.equal(r.headers.get('location'), `/c/${join.data.token}?apple=off`);
+  assert.equal((await client().get(`/api/cards/${join.data.token}`)).data.apple, false);
+  assert.equal((await client().get('/apple/v1/passes/x/y')).status, 404);
+});

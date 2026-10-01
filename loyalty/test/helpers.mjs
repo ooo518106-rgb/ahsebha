@@ -28,7 +28,7 @@ export function client(db, env, ip = `10.${Math.floor(Math.random() * 250)}.${Ma
     const sc = res.headers.get('set-cookie');
     if (sc) cookie = sc.split(';')[0].endsWith('=') ? '' : sc.split(';')[0];
     const ct = res.headers.get('content-type') || '';
-    const data = ct.includes('json') ? await res.json() : ct.startsWith('image/') ? new Uint8Array(await res.arrayBuffer()) : await res.text();
+    const data = ct.includes('json') ? await res.json() : (ct.startsWith('image/') || ct.includes('pkpass')) ? new Uint8Array(await res.arrayBuffer()) : await res.text();
     return { status: res.status, data, headers: res.headers };
   }
   return {

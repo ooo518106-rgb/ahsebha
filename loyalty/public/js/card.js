@@ -15,24 +15,26 @@ async function load(first = false) {
     if (first) render(root, html`<div class="panel center" style="margin-top:60px"><h1>😕</h1><p>${e.message}</p></div>`);
     return;
   }
-  const { shop, member, google } = data;
+  const { shop, member, google, apple } = data;
   if (lastBalance !== null && member.balance > lastBalance) toast(`+${member.balance - lastBalance} ${shop.unit} 🎉`, 'ok');
   lastBalance = member.balance;
   setBrand(shop.color);
   document.title = `بطاقة ${shop.name}`;
   const ios = isIOS();
   render(root, html`
-    ${params.has('new') ? html`<div class="alert ok" style="margin-bottom:12px">أهلاً ${member.name}! هاي بطاقتك 🎉 ${ios ? '' : 'احفظها بالمحفظة عشان تطلعلك بسرعة.'}</div>` : ''}
+    ${params.has('new') ? html`<div class="alert ok" style="margin-bottom:12px">أهلاً ${member.name}! هاي بطاقتك 🎉 ${(ios && !apple) ? '' : 'احفظها بالمحفظة عشان تطلعلك بسرعة.'}</div>` : ''}
     ${params.get('gw') === 'off' ? html`<div class="alert warn" style="margin-bottom:12px">الحفظ بمحفظة Google لسا مش مفعّل. اعرض هالصفحة للكاشير.</div>` : ''}
+    ${params.get('apple') === 'off' ? html`<div class="alert warn" style="margin-bottom:12px">الحفظ بـ Apple Wallet لسا مش مفعّل. اعرض هالصفحة للكاشير.</div>` : ''}
     ${cardHTML(shop, member)}
     <div class="stack" style="margin-top:16px">
       ${google && !ios ? html`<a class="gw-button" href="/c/${token}/google"><img src="/img/google-wallet-button-ar.svg" alt="الإضافة إلى محفظة Google" width="309" height="50"></a>` : ''}
-      ${ios ? html`<div class="panel small">
+      ${ios && apple ? html`<a class="gw-button" href="/c/${token}/apple"><img class="apple-badge" src="/img/add-to-apple-wallet.svg" alt="Add to Apple Wallet" width="160" height="50"></a>` : ''}
+      ${ios && !apple ? html`<div class="panel small">
           <b>على الآيفون:</b> بطاقة Apple Wallet جاية قريباً. لهلأ، كبس على <b>مشاركة ⬆️</b> وبعدين <b>«إضافة إلى الشاشة الرئيسية»</b> عشان تفتحها بسرعة.
         </div>` : ''}
       <div class="panel small">
         <b>${shop.rule}</b>
-        <p class="muted" style="margin-top:4px">اعرض الـ QR للكاشير مع كل طلب. ${google && !ios ? 'بعد ما تحفظها بالمحفظة بتلاقيها جنب بطاقاتك، وبتطلعلك لحالها لما تقرّب من المحل.' : ''}</p>
+        <p class="muted" style="margin-top:4px">اعرض الـ QR للكاشير مع كل طلب. ${(google && !ios) || (apple && ios) ? 'بعد ما تحفظها بالمحفظة بتلاقيها جنب بطاقاتك، وبتطلعلك لحالها لما تقرّب من المحل.' : ''}${apple && ios ? ' وعلى الآيفون بتفتحها بكبستين على الزر الجانبي.' : ''}</p>
       </div>
       <p class="center small muted">زياراتك: <span class="num">${member.visits}</span> · المكافآت اللي أخدتها: <span class="num">${member.redeemed}</span></p>
       <p class="center small muted"><a href="/privacy">سياسة الخصوصية</a> · <button type="button" class="linkish" id="deleteCard">احذف بطاقتي وبياناتي</button></p>
@@ -62,7 +64,7 @@ root.addEventListener('click', async (e) => {
 });
 
 await load(true);
-if (params.has('new') || params.has('gw')) history.replaceState(null, '', location.pathname);
+if (params.has('new') || params.has('gw') || params.has('apple')) history.replaceState(null, '', location.pathname);
 // تحديث كل 15 ثانية والصفحة مفتوحة، عشان الزبون يشوف نقاطه وهو عالكاونتر
 setInterval(() => { if (!deleted && document.visibilityState === 'visible') load(); }, 15000);
 document.addEventListener('visibilitychange', () => { if (!deleted && document.visibilityState === 'visible') load(); });

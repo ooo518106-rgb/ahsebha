@@ -1,6 +1,8 @@
 // السيرفر: صفحات + API. معالج واحد handle(request, ctx) بيشتغل على Cloudflare Workers وعلى Node.
 // ctx = { db, env, asset(path) → Response, waitUntil(promise) }
 import * as auth from './auth.js';
+import * as apple from './apple.js';
+import { pemToDer } from '../public/js/asn1.js';
 import * as gw from './gwallet.js';
 import { defaultLogoPng } from './png.js';
 import { earnFor, progress, rewardCost, rewardRule, stampsLine, unitLabel } from '../public/js/rules.js';
@@ -132,6 +134,169 @@ async function googleSave(c, token) {
   return new Response(null, { status: 302, headers: { location: url, 'cache-control': 'no-store' } });
 }
 
+// ─── Apple Wallet ───
+// الإعداد بينحفظ بقاعدة البيانات (صف واحد): المفتاح الخاص، الشهادة من Apple، ورقم الفريق
+async function appleConfig(c, { withKey = true } = {}) {
+  const row = await c.db.get('SELECT * FROM apple_config WHERE id = 1');
+  if (!row || !row.cert || !row.private_key) return null;
+  return {
+    passTypeId: row.pass_type_id,
+    teamId: row.team_id,
+    authSecret: row.auth_secret,
+    certExpires: row.cert_expires,
+    ...(withKey ? { pkcs8: b64ToBytes(row.private_key), certDer: b64ToBytes(row.cert) } : {}),
+    chain: c.env.APPLE_WWDR_PEM ? [pemToDer(c.env.APPLE_WWDR_PEM)] : undefined,
+  };
+}
+
+async function passImages(c, shop) {
+  const row = await c.db.get('SELECT mime, data FROM shop_logos WHERE shop_id = ?', shop.id);
+  const png = row && row.mime === 'image/png' ? b64ToBytes(row.data) : await defaultLogoPng(shop.color, 180);
+  return { 'icon.png': png, 'icon@2x.png': png, 'logo.png': png, 'logo@2x.png': png };
+}
+
+async function pkpassFor(c, cfg, member) {
+  const shop = await c.db.get('SELECT * FROM shops WHERE id = ?', member.shop_id);
+  const passJson = apple.buildPassJson(shop, member, { ...cfg, origin: c.origin, authToken: await apple.authTokenFor(cfg.authSecret, member.token) });
+  const bytes = await apple.buildPkpass({ passJson, images: await passImages(c, shop), ...cfg });
+  const updated = Math.max(member.updated_at || member.created_at, shop.updated_at || shop.created_at);
+  return { bytes, updated };
+}
+
+function pkpassResponse(bytes, updated, extra = {}) {
+  return new Response(bytes, {
+    headers: {
+      'content-type': 'application/vnd.apple.pkpass',
+      'content-disposition': 'attachment; filename="card.pkpass"',
+      'last-modified': new Date(Math.floor(updated / 1000) * 1000).toUTCString(),
+      'cache-control': 'no-store',
+      ...extra,
+    },
+  });
+}
+
+async function appleSave(c, token) {
+  const m = TOKEN_RE.test(token) ? await c.db.get('SELECT * FROM members WHERE token = ?', token) : null;
+  if (!m) return notFound(c);
+  const cfg = await appleConfig(c);
+  if (!cfg) return new Response(null, { status: 302, headers: { location: `/c/${token}?apple=off` } });
+  const { bytes, updated } = await pkpassFor(c, cfg, m);
+  return pkpassResponse(bytes, updated);
+}
+
+// خدمة Apple لتحديث البطاقات (PassKit Web Service): ‎/apple/v1/…
+const ID_RE = /^[A-Za-z0-9._-]{1,128}$/;
+async function appleService(c) {
+  const parts = c.url.pathname.split('/').slice(3); // بعد ‎/apple/v1/
+  const method = c.req.method;
+  if (method === 'POST' && parts[0] === 'log') {
+    const body = await c.req.json().catch(() => ({}));
+    for (const line of (body.logs || []).slice(0, 20)) console.log('apple wallet:', String(line).slice(0, 300));
+    return new Response(null, { status: 200 });
+  }
+  const cfg = await appleConfig(c);
+  if (!cfg) return new Response(null, { status: 404 });
+  const authorized = async (serial) => {
+    const header = c.req.headers.get('authorization') || '';
+    const want = `ApplePass ${await apple.authTokenFor(cfg.authSecret, serial)}`;
+    if (header.length !== want.length) return false;
+    let diff = 0;
+    for (let i = 0; i < want.length; i++) diff |= header.charCodeAt(i) ^ want.charCodeAt(i);
+    return diff === 0;
+  };
+  // تسجيل جهاز / إلغاء تسجيله
+  if (parts[0] === 'devices' && parts[2] === 'registrations' && parts.length === 5 && (method === 'POST' || method === 'DELETE')) {
+    const [, device, , passType, serial] = parts;
+    if (!ID_RE.test(device) || passType !== cfg.passTypeId || !TOKEN_RE.test(serial)) return new Response(null, { status: 404 });
+    if (!(await authorized(serial))) return new Response(null, { status: 401 });
+    if (method === 'DELETE') {
+      await c.db.run('DELETE FROM apple_regs WHERE device_id = ? AND serial = ?', device, serial);
+      return new Response(null, { status: 200 });
+    }
+    if (!(await c.db.get('SELECT id FROM members WHERE token = ?', serial))) return new Response(null, { status: 404 });
+    const body = await c.req.json().catch(() => ({}));
+    const pushToken = clean(body.pushToken, 200);
+    if (!pushToken) return new Response(null, { status: 400 });
+    const existing = await c.db.get('SELECT push_token FROM apple_regs WHERE device_id = ? AND serial = ?', device, serial);
+    await c.db.run('INSERT OR REPLACE INTO apple_regs (device_id, serial, push_token, created_at) VALUES (?, ?, ?, ?)', device, serial, pushToken, Date.now());
+    return new Response(null, { status: existing ? 200 : 201 });
+  }
+  // شو البطاقات اللي تغيّرت على هالجهاز
+  if (method === 'GET' && parts[0] === 'devices' && parts[2] === 'registrations' && parts.length === 4) {
+    const [, device, , passType] = parts;
+    if (!ID_RE.test(device) || passType !== cfg.passTypeId) return new Response(null, { status: 404 });
+    const since = Number(c.url.searchParams.get('passesUpdatedSince')) || 0;
+    const rows = await c.db.all(
+      `SELECT m.token AS serial, MAX(COALESCE(m.updated_at, m.created_at), COALESCE(s.updated_at, s.created_at)) AS upd
+       FROM apple_regs r JOIN members m ON m.token = r.serial JOIN shops s ON s.id = m.shop_id WHERE r.device_id = ?`, device,
+    );
+    const changed = rows.filter((r) => r.upd > since);
+    if (!changed.length) return new Response(null, { status: 204 });
+    return json({ serialNumbers: changed.map((r) => r.serial), lastUpdated: String(Math.max(...changed.map((r) => r.upd))) });
+  }
+  // آخر نسخة من بطاقة
+  if (method === 'GET' && parts[0] === 'passes' && parts.length === 3) {
+    const [, passType, serial] = parts;
+    if (passType !== cfg.passTypeId || !TOKEN_RE.test(serial)) return new Response(null, { status: 404 });
+    if (!(await authorized(serial))) return new Response(null, { status: 401 });
+    const m = await c.db.get('SELECT * FROM members WHERE token = ?', serial);
+    if (!m) return new Response(null, { status: 404 });
+    const { bytes, updated } = await pkpassFor(c, cfg, m);
+    const ims = Date.parse(c.req.headers.get('if-modified-since') || '');
+    if (ims && Math.floor(updated / 1000) * 1000 <= ims) return new Response(null, { status: 304 });
+    return pkpassResponse(bytes, updated);
+  }
+  return new Response(null, { status: 404 });
+}
+
+// إعداد Apple من لوحة مدير المنصة: طلب شهادة ← رفع الشهادة من Apple
+async function adminApple(c) {
+  await requireAdmin(c);
+  const row = await c.db.get('SELECT * FROM apple_config WHERE id = 1');
+  return json({
+    hasKey: !!(row && row.private_key),
+    configured: !!(row && row.cert),
+    passTypeId: (row && row.pass_type_id) || null,
+    teamId: (row && row.team_id) || null,
+    certExpires: (row && row.cert_expires) || null,
+  });
+}
+
+// المتصفح بيولّد المفتاح وطلب الشهادة (توليد RSA تقيل على حد وقت Cloudflare)، والسيرفر بيتحقق وبيحفظ
+async function adminAppleKey(c) {
+  await requireAdmin(c);
+  const row = await c.db.get('SELECT * FROM apple_config WHERE id = 1');
+  if (row && row.cert && !c.body.regenerate) fail(409, 'Apple Wallet مفعّل. طلب جديد بيوقف البطاقات لحد ما ترفع شهادة جديدة');
+  let pkcs8;
+  let spki;
+  try { pkcs8 = b64ToBytes(String(c.body.privateKey || '')); spki = b64ToBytes(String(c.body.publicKey || '')); } catch { fail(400, 'المفتاح مش صالح'); }
+  if (pkcs8.length > 4096 || spki.length > 1024 || !(await apple.keyPairMatches(pkcs8, spki))) fail(400, 'المفتاح مش صالح');
+  await c.db.run(
+    `INSERT INTO apple_config (id, private_key, public_key, cert, pass_type_id, team_id, cert_expires, auth_secret, updated_at)
+     VALUES (1, ?, ?, NULL, NULL, NULL, NULL, ?, ?)
+     ON CONFLICT(id) DO UPDATE SET private_key = excluded.private_key, public_key = excluded.public_key, cert = NULL, pass_type_id = NULL, team_id = NULL, cert_expires = NULL, updated_at = excluded.updated_at`,
+    bytesToB64(pkcs8), bytesToB64(spki), (row && row.auth_secret) || randomToken(32), Date.now(),
+  );
+  return adminApple(c);
+}
+
+async function adminAppleCert(c) {
+  await requireAdmin(c);
+  const row = await c.db.get('SELECT * FROM apple_config WHERE id = 1');
+  if (!row || !row.public_key) fail(400, 'اعمل طلب الشهادة (CSR) أول');
+  const input = String(c.body.cert || '').trim();
+  let der;
+  try { der = /-----BEGIN/.test(input) ? pemToDer(input) : b64ToBytes(input.replace(/\s+/g, '')); } catch { fail(400, 'ملف الشهادة مش صالح'); }
+  let info;
+  try { info = apple.parseCertificate(der); } catch { fail(400, 'ملف الشهادة مش صالح. ارفع ملف pass.cer اللي نزّلته من Apple'); }
+  if (bytesToB64(info.spkiRaw) !== row.public_key) fail(400, 'هالشهادة مش مبنية على آخر طلب (CSR) عملته من هون. ارفع الشهادة الصحيحة أو اعمل طلب جديد');
+  if (!info.passTypeId || !info.passTypeId.startsWith('pass.') || !info.teamId) fail(400, 'هاي مش شهادة Pass Type ID');
+  if (info.notAfter && info.notAfter < Date.now()) fail(400, 'هالشهادة منتهية');
+  await c.db.run('UPDATE apple_config SET cert = ?, pass_type_id = ?, team_id = ?, cert_expires = ?, updated_at = ? WHERE id = 1',
+    bytesToB64(der), info.passTypeId, info.teamId, info.notAfter, Date.now());
+  return adminApple(c);
+}
+
 // ─── مساعدات ───
 async function shopBySlug(db, slug) {
   const shop = await db.get('SELECT * FROM shops WHERE slug = ?', String(slug).toLowerCase());
@@ -240,6 +405,7 @@ async function deleteMember(c, shop, m) {
   await c.db.batch([
     ['DELETE FROM txns WHERE member_id = ? AND shop_id = ?', [m.id, shop.id]],
     ['DELETE FROM members WHERE id = ? AND shop_id = ?', [m.id, shop.id]],
+    ['DELETE FROM apple_regs WHERE serial = ?', [m.token]],
   ]);
   const cfg = gw.googleConfig(c.env);
   if (cfg && m.gw_object) {
@@ -272,7 +438,7 @@ async function cardInfo(c, token) {
   const v = memberView(m, shop);
   delete v.phone;
   delete v.id;
-  return json({ shop: publicShopView(shop, c.origin), member: v, google: !!gw.googleConfig(c.env) });
+  return json({ shop: publicShopView(shop, c.origin), member: v, google: !!gw.googleConfig(c.env), apple: !!(await appleConfig(c)) });
 }
 
 // الزبون بيحذف بطاقته وبياناته بنفسه (رابط البطاقة نفسه هو الإثبات)
@@ -289,6 +455,7 @@ async function site(c) {
     contactEmail: c.env.CONTACT_EMAIL || null,
     whatsapp: /^\d{8,15}$/.test(String(c.env.WHATSAPP_NUMBER || '')) ? String(c.env.WHATSAPP_NUMBER) : null,
     signupOpen: !c.env.SIGNUP_CODE,
+    apple: !!(await appleConfig(c, { withKey: false })),
   });
 }
 
@@ -535,7 +702,7 @@ async function earn(c, id) {
   const now = Date.now();
   const res = await applyTxn(c, [
     ['INSERT INTO txns (shop_id, member_id, kind, delta, amount, user_id, idem, created_at) VALUES (?, ?, \'earn\', ?, ?, ?, ?, ?)', [c.shop.id, m.id, r.delta, r.amount, c.user.id, idemKey(c.body.key), now]],
-    ['UPDATE members SET balance = balance + ?, lifetime = lifetime + ?, visits = visits + 1, last_visit = ? WHERE id = ? AND shop_id = ?', [r.delta, r.delta, now, m.id, c.shop.id]],
+    ['UPDATE members SET balance = balance + ?, lifetime = lifetime + ?, visits = visits + 1, last_visit = ?, updated_at = ? WHERE id = ? AND shop_id = ?', [r.delta, r.delta, now, now, m.id, c.shop.id]],
   ]);
   return respondMember(c, m.id, res ? { delta: r.delta } : { duplicate: true });
 }
@@ -549,7 +716,7 @@ async function redeem(c, id) {
   const res = await applyTxn(c, [
     [`INSERT INTO txns (shop_id, member_id, kind, delta, user_id, idem, created_at)
       SELECT ?, id, 'redeem', ?, ?, ?, ? FROM members WHERE id = ? AND shop_id = ? AND balance >= ?`, [c.shop.id, -cost, c.user.id, idemKey(c.body.key), now, m.id, c.shop.id, cost]],
-    ['UPDATE members SET balance = balance - ?, redeemed = redeemed + 1 WHERE id = ? AND shop_id = ? AND balance >= ?', [cost, m.id, c.shop.id, cost]],
+    ['UPDATE members SET balance = balance - ?, redeemed = redeemed + 1, updated_at = ? WHERE id = ? AND shop_id = ? AND balance >= ?', [cost, now, m.id, c.shop.id, cost]],
   ]);
   if (!res || (!res[1].changes && (await seenKey(c, c.body.key)))) return respondMember(c, m.id, { duplicate: true });
   if (!res[1].changes) fail(409, `ما عنده ${c.shop.program_type === 'stamps' ? 'أختام' : 'نقاط'} كفاية للمكافأة`);
@@ -573,7 +740,7 @@ async function adjust(c, id) {
   const res = await applyTxn(c, [
     [`INSERT INTO txns (shop_id, member_id, kind, delta, user_id, note, idem, created_at)
       SELECT ?, id, 'adjust', ?, ?, ?, ?, ? FROM members WHERE id = ? AND shop_id = ? AND balance + ? >= 0`, [c.shop.id, delta, c.user.id, note, idemKey(c.body.key), now, m.id, c.shop.id, delta]],
-    ['UPDATE members SET balance = balance + ? WHERE id = ? AND shop_id = ? AND balance + ? >= 0', [delta, m.id, c.shop.id, delta]],
+    ['UPDATE members SET balance = balance + ?, updated_at = ? WHERE id = ? AND shop_id = ? AND balance + ? >= 0', [delta, now, m.id, c.shop.id, delta]],
   ]);
   if (!res || (!res[1].changes && (await seenKey(c, c.body.key)))) return respondMember(c, m.id, { duplicate: true });
   if (!res[1].changes) fail(409, 'الرصيد ما بيصير بالسالب');
@@ -653,6 +820,7 @@ async function updateShop(c) {
     await storeDefaultLogo(c.db, { ...s, color: next.color });
     await c.db.run('UPDATE shops SET logo_version = logo_version + 1 WHERE id = ?', s.id);
   }
+  await c.db.run('UPDATE shops SET updated_at = ? WHERE id = ?', Date.now(), s.id);
   const shop = await c.db.get('SELECT * FROM shops WHERE id = ?', s.id);
   const google = await syncClass(c, shop);
   return json({ shop: shopView(shop, c.origin), google: { ...googleStatus(c, shop), lastSync: google } });
@@ -674,6 +842,7 @@ async function updateLogo(c) {
     await c.db.run('INSERT OR REPLACE INTO shop_logos (shop_id, mime, data) VALUES (?, ?, ?)', s.id, m[1], m[2]);
     await c.db.run('UPDATE shops SET custom_logo = 1, logo_version = logo_version + 1 WHERE id = ?', s.id);
   }
+  await c.db.run('UPDATE shops SET updated_at = ? WHERE id = ?', Date.now(), s.id);
   const shop = await c.db.get('SELECT * FROM shops WHERE id = ?', s.id);
   const google = await syncClass(c, shop);
   return json({ shop: shopView(shop, c.origin), google: { ...googleStatus(c, shop), lastSync: google } });
@@ -743,6 +912,9 @@ const API = [
   ['PUT', /^\/api\/admin\/leads\/(\d+)$/, adminLeadStatus, 'staff'],
   ['GET', /^\/api\/admin\/shops$/, adminShops, 'staff'],
   ['POST', /^\/api\/admin\/shops\/(\d+)\/plan$/, adminShopPlan, 'staff'],
+  ['GET', /^\/api\/admin\/apple$/, adminApple, 'staff'],
+  ['POST', /^\/api\/admin\/apple\/key$/, adminAppleKey, 'staff'],
+  ['PUT', /^\/api\/admin\/apple\/cert$/, adminAppleCert, 'staff'],
   ['POST', /^\/api\/auth\/signup$/, signup],
   ['POST', /^\/api\/auth\/login$/, loginRoute],
   ['POST', /^\/api\/auth\/logout$/, logout],
@@ -828,6 +1000,7 @@ export async function handle(req, ctx) {
   const p = url.pathname;
   try {
     if (p.startsWith('/api/')) return await api(c);
+    if (p.startsWith('/apple/v1/')) return await appleService(c);
     if (req.method !== 'GET' && req.method !== 'HEAD') return notFound(c);
     let m;
     if ((m = p.match(/^\/media\/logo\/(\d+)\.png$/))) return await logo(c, m[1]);
@@ -836,6 +1009,7 @@ export async function handle(req, ctx) {
     if (p === '/app' || p === '/app/') return await page(c, '/app.html');
     if (/^\/j\/[a-z0-9-]{3,40}\/?$/.test(p)) return await page(c, '/join.html');
     if ((m = p.match(/^\/c\/([a-z2-9]{20})\/google$/))) return await googleSave(c, m[1]);
+    if ((m = p.match(/^\/c\/([a-z2-9]{20})\/apple$/))) return await appleSave(c, m[1]);
     if (/^\/c\/[a-z2-9]{20}\/?$/.test(p)) return await page(c, '/card.html');
     if (/\.html$/.test(p)) return notFound(c);
     const res = await c.asset(p);

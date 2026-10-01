@@ -22,6 +22,7 @@ function showWhatsApp(text = 'مرحبا، بدي أعرف أكتر عن نقا�
 api('/api/site').then((s) => {
   whatsapp = s.whatsapp;
   signupOpen = s.signupOpen;
+  if (s.apple) $('#faqIphone').textContent = 'بتنحفظ البطاقة بـ Apple Wallet، وبتفتح بكبستين على الزر الجانبي، ولما يقرّب الزبون من محلك بتطلعله على شاشة القفل برسالة الترحيب تبعتك.';
   showWhatsApp();
   setupAuth();
 }).catch(() => setupAuth());

@@ -88,6 +88,26 @@ export const SCHEMA = [
     status TEXT NOT NULL DEFAULT 'new' CHECK (status IN ('new', 'contacted', 'won', 'lost')),
     created_at INTEGER NOT NULL
   )`,
+  // Apple Wallet: مفتاح وشهادة المنصة (صف واحد)، والأجهزة المسجّلة لتحديث البطاقات
+  `CREATE TABLE IF NOT EXISTS apple_config (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    private_key TEXT,
+    public_key TEXT,
+    cert TEXT,
+    pass_type_id TEXT,
+    team_id TEXT,
+    cert_expires INTEGER,
+    auth_secret TEXT NOT NULL,
+    updated_at INTEGER NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS apple_regs (
+    device_id TEXT NOT NULL,
+    serial TEXT NOT NULL,
+    push_token TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (device_id, serial)
+  )`,
+  'CREATE INDEX IF NOT EXISTS apple_regs_serial ON apple_regs(serial)',
   'CREATE INDEX IF NOT EXISTS leads_time ON leads(created_at)',
   'CREATE INDEX IF NOT EXISTS members_shop ON members(shop_id, created_at)',
   'CREATE INDEX IF NOT EXISTS txns_shop_time ON txns(shop_id, created_at)',
@@ -100,4 +120,6 @@ export const SCHEMA = [
 export const MIGRATIONS = [
   'ALTER TABLE shops ADD COLUMN active_until INTEGER',
   'ALTER TABLE shops ADD COLUMN paid INTEGER NOT NULL DEFAULT 0',
+  'ALTER TABLE shops ADD COLUMN updated_at INTEGER',
+  'ALTER TABLE members ADD COLUMN updated_at INTEGER',
 ];

@@ -1,5 +1,6 @@
 // لوحة المحل: الكاشير (مسح وإضافة نقاط)، الزبائن، النشاط، رابط الانضمام، والإعدادات
 import { $, $$, ago, api, cardHTML, fmt, fmtDate, html, newKey, qrSVG, render, setBrand, stampsHTML, toast } from './common.js';
+import { generateKeyAndCsr } from './csr.js';
 import { parseLatLng } from './rules.js';
 import { startCameraScan } from './scan.js';
 
@@ -467,9 +468,17 @@ function ruleText(f) {
   return `${per === 1 ? `كل 1 ${f.currency} = نقطة` : `كل 1 ${f.currency} = ${per} نقطة`} · ${f.rewardThreshold} نقطة = ${f.rewardName}`;
 }
 
+// الشعار بيتحفظ PNG (Apple Wallet ما بتقبل غيره)، وإذا كبير منصغّره
 async function resizeLogo(file) {
   const img = await createImageBitmap(file);
-  const size = 660;
+  for (const size of [660, 520, 400]) {
+    const url = drawLogo(img, size, 'image/png');
+    if (url.length <= 900000) return url;
+  }
+  return drawLogo(img, 400, 'image/jpeg', 0.88);
+}
+
+function drawLogo(img, size, type, quality) {
   const canvas = document.createElement('canvas');
   canvas.width = size;
   canvas.height = size;
@@ -480,9 +489,7 @@ async function resizeLogo(file) {
   const w = img.width * scale;
   const h = img.height * scale;
   ctx.drawImage(img, (size - w) / 2, (size - h) / 2, w, h);
-  let url = canvas.toDataURL('image/png');
-  if (url.length > 900000) url = canvas.toDataURL('image/jpeg', 0.88);
-  return url;
+  return canvas.toDataURL(type, quality);
 }
 
 function googlePanel() {
@@ -732,8 +739,9 @@ async function admin() {
   let leads;
   let shops;
   let signupOpen;
+  let appleSt;
   try {
-    [{ leads }, { shops, signupOpen }] = await Promise.all([api('/api/admin/leads'), api('/api/admin/shops')]);
+    [{ leads }, { shops, signupOpen }, appleSt] = await Promise.all([api('/api/admin/leads'), api('/api/admin/shops'), api('/api/admin/apple')]);
   } catch (e) { render(view, html`<p class="alert bad">${e.message}</p>`); return; }
   const fresh = leads.filter((l) => l.status === 'new').length;
   render(view, html`
@@ -770,7 +778,9 @@ async function admin() {
             ${s.subscription.state === 'expired' ? '' : html`<button class="btn sm ghost" type="button" data-plan="stop" data-shop="${s.id}">إيقاف</button>`}
           </div>`}</div></li>`;
       })}</ul>` : html`<p class="muted">ما في محلات لسا.</p>`}
-    </section>`);
+    </section>
+    <section class="panel stack" id="applePanel">${applePanel(appleSt)}</section>`);
+  bindApple();
   $$('[data-plan]').forEach((b) => {
     b.onclick = async () => {
       const name = b.closest('li').querySelector('b').firstChild.textContent.trim();
@@ -784,6 +794,85 @@ async function admin() {
       try { await api(`/api/admin/leads/${sel.dataset.id}`, { method: 'PUT', body: { status: sel.value } }); admin(); toast('انحفظ', 'ok'); } catch (e) { toast(e.message, 'bad'); }
     };
   });
+}
+
+// ─── إعداد Apple Wallet (مرة وحدة للمنصة كلها) ───
+function applePanel(st) {
+  state.appleHasKey = st.hasKey;
+  if (st.configured) {
+    return html`<h2>Apple Wallet 🍏</h2>
+      <p class="alert ok">مفعّل ✅ بطاقات الآيفون شغّالة لكل المحلات.</p>
+      <p class="small muted" dir="ltr" style="text-align:right">${st.passTypeId} · Team ${st.teamId}</p>
+      ${st.certExpires ? html`<p class="small">الشهادة بتخلص بـ <b>${fmtDay(st.certExpires)}</b>. قبلها بشهر بنعمل طلب جديد.</p>` : ''}
+      <button class="btn ghost sm" type="button" id="appleRenew">طلب شهادة جديدة (تجديد)</button>`;
+  }
+  return html`<h2>Apple Wallet 🍏</h2>
+    <p class="small muted">بتعملها مرة وحدة، وبعدها كل محل بيصير عنده بطاقة آيفون. بدها حساب Apple Developer.</p>
+    <div class="step-row"><b>1</b><div>
+      <p>اعمل ملف «طلب الشهادة» ونزّله على جوالك:</p>
+      <button class="btn sm ${st.hasKey ? 'ghost' : ''}" type="button" id="appleCsr">${st.hasKey ? 'اعمل طلب جديد' : 'اعمل طلب الشهادة'}</button>
+      ${st.hasKey ? html`<span class="small muted">✅ انعمل طلب. إذا ضاع الملف، اعمل طلب جديد.</span>` : ''}
+    </div></div>
+    <div class="step-row"><b>2</b><div>
+      <p>اعمل <b>Pass Type ID</b> بموقع Apple. الوصف <span dir="ltr">Nuqatak Loyalty</span>، والمعرّف <span dir="ltr" class="num">pass.com.nuqatak.loyalty</span>:</p>
+      <a class="btn sm ghost" href="https://developer.apple.com/account/resources/identifiers/add/passTypeId" target="_blank" rel="noopener">افتح صفحة Pass Type ID</a>
+    </div></div>
+    <div class="step-row"><b>3</b><div>
+      <p>اعمل <b>Pass Type ID Certificate</b>: اختار المعرّف، وارفع ملف طلب الشهادة (الخطوة 1)، وبعدين نزّل ملف <span dir="ltr">pass.cer</span>:</p>
+      <a class="btn sm ghost" href="https://developer.apple.com/account/resources/certificates/add" target="_blank" rel="noopener">افتح صفحة الشهادات</a>
+    </div></div>
+    <div class="step-row"><b>4</b><div>
+      <p>ارفع ملف <span dir="ltr">pass.cer</span> هون:</p>
+      <label class="btn sm ${st.hasKey ? '' : 'ghost'}" style="margin:0">رفع الشهادة<input type="file" id="appleCert" accept=".cer,.pem,.crt,application/x-x509-ca-cert,application/pkix-cert" class="hidden"></label>
+    </div></div>`;
+}
+
+function downloadText(text, filename) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([text], { type: 'application/octet-stream' }));
+  a.download = filename;
+  document.body.append(a);
+  a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 2000);
+}
+
+function bindApple() {
+  // المفتاح وطلب الشهادة بينعملوا هون بالمتصفح، والملف بينزل على الجهاز
+  const makeCsr = async (regenerate) => {
+    const { pkcs8, spki, csrPem } = await generateKeyAndCsr();
+    const b64 = (u8) => { let s = ''; for (const b of u8) s += String.fromCharCode(b); return btoa(s); };
+    await api('/api/admin/apple/key', { method: 'POST', body: { privateKey: b64(pkcs8), publicKey: b64(spki), regenerate } });
+    downloadText(csrPem, 'nuqatak.certSigningRequest');
+  };
+  const csr = $('#appleCsr');
+  if (csr) csr.onclick = async () => {
+    if (state.appleHasKey && !confirm('في طلب سابق. طلب جديد بيلغي القديم، فلازم ترفع لـ Apple الملف الجديد. تكمّل؟')) return;
+    csr.disabled = true;
+    try {
+      await makeCsr(false);
+      toast('انحفظ ملف طلب الشهادة ✅', 'ok');
+      setTimeout(admin, 800);
+    } catch (e) { toast(e.message, 'bad'); csr.disabled = false; }
+  };
+  const renew = $('#appleRenew');
+  if (renew) renew.onclick = async () => {
+    if (!confirm('طلب جديد بيوقف بطاقات الآيفون الجديدة لحد ما ترفع الشهادة الجديدة. متأكد؟')) return;
+    try { await makeCsr(true); admin(); } catch (e) { toast(e.message, 'bad'); }
+  };
+  const cert = $('#appleCert');
+  if (cert) cert.onchange = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    try {
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      let s = '';
+      for (const b of bytes) s += String.fromCharCode(b);
+      const text = s.includes('-----BEGIN') ? s : btoa(s);
+      await api('/api/admin/apple/cert', { method: 'PUT', body: { cert: text } });
+      toast('Apple Wallet صار مفعّل 🍏', 'ok');
+      admin();
+    } catch (err) { toast(err.message, 'bad'); }
+  };
 }
 
 boot();

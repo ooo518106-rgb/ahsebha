@@ -118,6 +118,9 @@ input[type="radio"], input[type="checkbox"] { width: auto; min-height: 0; }
 .stepper output { min-width: 40px; text-align: center; font-size: 1.4rem; font-weight: 800; }
 .reward-ready { background: var(--ok-bg); color: var(--ok); border-radius: 12px; padding: 10px 12px; font-weight: 700; }
 
+.step-row { display: flex; gap: 10px; align-items: flex-start; }
+.step-row > b { flex: none; width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; background: var(--brand); color: #fff; font-size: .9rem; }
+.step-row > div { flex: 1; min-width: 0; display: grid; gap: 6px; justify-items: start; }
 .sub-banner { display: flex; align-items: center; gap: 10px; justify-content: space-between; flex-wrap: wrap; margin-top: 12px; }
 
 /* القوائم */
@@ -165,6 +168,7 @@ dialog .dlg-body { padding: 16px; }
 
 .gw-button { display: block; text-align: center; line-height: 0; }
 .gw-button img { height: 50px; width: auto; max-width: 100%; }
+.gw-button img.apple-badge { height: 52px; }
 .linkish { background: none; border: 0; padding: 0; font: inherit; color: var(--muted); text-decoration: underline; cursor: pointer; }
 
 /* صفحة الانضمام */
