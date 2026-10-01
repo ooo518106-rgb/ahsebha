@@ -462,3 +462,43 @@ test('ترحيل الجداول: الأعمدة الجديدة بتنضاف لق
   const row = await db.get("SELECT active_until, paid FROM shops WHERE slug = 'old'");
   assert.deepEqual(row, { active_until: null, paid: 0 });
 });
+
+test('الدفع بـ CliQ: المحل بيبلّغ عن الحوالة، ومدير المنصة بيأكد فبيتمدد الاشتراك', async () => {
+  const { client, db } = await setup();
+  const admin = client();
+  await signup(admin, { shopName: 'Platform' });
+  const owner = client();
+  const { shop } = await signup(owner, { shopName: 'Cafe' });
+  // قبل ما يحط مدير المنصة الـ Alias
+  assert.equal((await owner.get('/api/billing')).data.cliq, null);
+  assert.equal((await owner.post('/api/billing/claim', { plan: 'month', payer: 'أحمد' })).status, 400);
+  assert.equal((await owner.put('/api/admin/settings', { cliqAlias: 'NUQATAK' })).status, 403, 'بس مدير المنصة');
+  assert.equal((await admin.put('/api/admin/settings', { cliqAlias: 'bad<alias>' })).status, 400);
+  assert.equal((await admin.put('/api/admin/settings', { cliqAlias: 'NUQATAK', cliqName: 'نقاطك', cliqBank: 'البنك العربي' })).status, 200);
+  let b = (await owner.get('/api/billing')).data;
+  assert.deepEqual(b.cliq, { alias: 'NUQATAK', name: 'نقاطك', bank: 'البنك العربي' });
+  assert.deepEqual(b.prices, { month: 15, year: 150 });
+  assert.equal((await owner.post('/api/billing/claim', { plan: 'week', payer: 'أحمد' })).status, 400);
+  assert.equal((await owner.post('/api/billing/claim', { plan: 'year', payer: '' })).status, 400);
+  b = (await owner.post('/api/billing/claim', { plan: 'year', payer: 'أحمد محمد', ref: 'TX123' })).data;
+  assert.equal(b.payments[0].status, 'pending');
+  assert.equal(b.payments[0].amount, 150);
+  const before = (await db.get('SELECT active_until FROM shops WHERE id = ?', shop.id)).active_until;
+  const list = (await admin.get('/api/admin/payments')).data.payments;
+  assert.equal(list[0].shopName, 'Cafe');
+  assert.equal((await owner.post(`/api/admin/payments/${list[0].id}`, { action: 'approve' })).status, 403);
+  assert.equal((await admin.post(`/api/admin/payments/${list[0].id}`, { action: 'approve' })).status, 200);
+  assert.equal((await admin.post(`/api/admin/payments/${list[0].id}`, { action: 'approve' })).status, 404, 'مرة وحدة');
+  const after = await db.get('SELECT active_until, paid FROM shops WHERE id = ?', shop.id);
+  assert.equal(after.paid, 1);
+  const d = new Date(before); d.setFullYear(d.getFullYear() + 1);
+  assert.equal(after.active_until, d.getTime(), 'سنة من آخر يوم بالتجربة');
+  assert.equal((await owner.get('/api/me')).data.subscription.state, 'active');
+  // الرفض ما بيغيّر الاشتراك، وما في أكتر من حوالتين بيستنوا
+  await owner.post('/api/billing/claim', { plan: 'month', payer: 'أحمد' });
+  await owner.post('/api/billing/claim', { plan: 'month', payer: 'أحمد' });
+  assert.equal((await owner.post('/api/billing/claim', { plan: 'month', payer: 'أحمد' })).status, 409);
+  const p2 = (await admin.get('/api/admin/payments')).data.payments.find((p) => p.status === 'pending');
+  await admin.post(`/api/admin/payments/${p2.id}`, { action: 'reject' });
+  assert.equal((await db.get('SELECT active_until FROM shops WHERE id = ?', shop.id)).active_until, after.active_until);
+});

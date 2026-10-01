@@ -291,3 +291,4 @@ table.mini td { padding: 3px 6px; border-bottom: 1px solid var(--border); }
 .hbar .track { height: 12px; }
 .hbar .track i { display: block; height: 100%; background: var(--brand); border-start-end-radius: 4px; border-end-end-radius: 4px; }
 .hbar b { color: var(--muted); font-weight: 700; }
+code.alias { font-size: 1.15rem; font-weight: 800; background: var(--bg, #f6f4f1); border: 1px dashed var(--border); border-radius: 8px; padding: 4px 10px; letter-spacing: .03em; }

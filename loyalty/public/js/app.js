@@ -28,7 +28,8 @@ function renderSubBanner() {
   const box = $('#subBanner');
   const sub = state.me.subscription;
   const wa = state.me.whatsapp;
-  const link = (text) => (wa ? `https://wa.me/${wa}?text=${encodeURIComponent(text)}` : null);
+  // الزر بيفتح قسم الاشتراك بالإعدادات (الدفع بـ CliQ أو الواتساب)
+  const link = (text) => (isOwner() ? '#settings' : wa ? `https://wa.me/${wa}?text=${encodeURIComponent(text)}` : null);
   const ask = `مرحبا، بدي أشترك بنقاطك لمحل ${state.shop.name}`;
   let tpl = null;
   if (sub.state === 'expired') {
@@ -43,6 +44,8 @@ function renderSubBanner() {
   }
   box.classList.toggle('hidden', !tpl);
   if (tpl) render(box, tpl);
+  // رابط قسم الاشتراك بيفتح بنفس الصفحة (مش تبويب جديد)
+  $$('a[href^="#"]', box).forEach((a) => { a.removeAttribute('target'); a.onclick = () => setTimeout(() => $('#billing')?.scrollIntoView({ behavior: 'smooth' }), 300); });
 }
 
 function applyShop() {
@@ -669,6 +672,7 @@ async function settings() {
         </form>
       </div>
       <div>
+        ${state.me.subscription.state === 'owner' ? '' : html`<section class="panel stack" id="billing"><h2>💳 الاشتراك</h2><p class="muted small">جاري التحميل…</p></section>`}
         <section class="panel stack">
           <h2>شكل البطاقة</h2>
           <div id="preview"></div>
@@ -788,6 +792,7 @@ async function settings() {
   }
   bindGoogle();
 
+  loadBilling();
   $('#pwForm').onsubmit = async (e) => {
     e.preventDefault();
     try { await api('/api/me/password', { method: 'PUT', body: Object.fromEntries(new FormData(e.target)) }); e.target.reset(); toast('تغيّرت كلمة السر ✅', 'ok'); } catch (err) { toast(err.message, 'bad'); }
@@ -948,6 +953,62 @@ function offers() {
   });
 }
 
+
+// ─── الاشتراك والدفع بـ CliQ ───
+const PAY_STATUS = { pending: ['⏳ عم نتأكد منها', 'warn'], approved: ['✅ تأكدت', 'ok'], rejected: ['❌ ما وصلت', 'bad'] };
+
+async function loadBilling() {
+  const box = $('#billing');
+  if (!box) return;
+  let b;
+  try { b = await api('/api/billing'); } catch (e) { render(box, html`<h2>💳 الاشتراك</h2><p class="alert bad">${e.message}</p>`); return; }
+  const sub = b.subscription;
+  const status = sub.state === 'trial' ? html`<p class="alert warn small">🎁 تجربة مجانية: باقي <b class="num">${sub.daysLeft}</b> يوم.</p>`
+    : sub.state === 'active' ? html`<p class="alert ok small">✅ مشترك لحد <b>${fmtDay(sub.until)}</b> (باقي <span class="num">${sub.daysLeft}</span> يوم).</p>`
+      : html`<p class="alert bad small">⏳ الاشتراك خالص. الكاشير متوقف لحد ما تجدّد، وزبائنك ونقاطهم محفوظين.</p>`;
+  const wa = b.whatsapp ? `https://wa.me/${b.whatsapp}?text=${encodeURIComponent(`مرحبا، بدي أشترك بنقاطك لمحل ${state.shop.name}`)}` : null;
+  render(box, html`<h2>💳 الاشتراك</h2>${status}
+    ${b.cliq ? html`<form class="stack" id="payForm">
+        <div class="seg" id="planSeg">
+          <button type="button" data-plan="month" class="on">شهر · <span class="num">${b.prices.month}</span> دينار</button>
+          <button type="button" data-plan="year">سنة · <span class="num">${b.prices.year}</span> دينار <span class="small">(وفّر شهرين)</span></button>
+        </div>
+        <ol class="small" style="padding-inline-start:20px;display:grid;gap:6px">
+          <li>افتح تطبيق البنك ← <b>CliQ</b> ← حوّل <b class="num" id="payAmount">${b.prices.month}</b> دينار على الاسم المستعار:
+            <div class="row" style="margin-top:4px"><code class="alias" dir="ltr">${b.cliq.alias}</code><button class="btn ghost sm" type="button" data-copy="${b.cliq.alias}">نسخ</button></div>
+            ${b.cliq.name ? html`<span class="muted">باسم: ${b.cliq.name}${b.cliq.bank ? ` · ${b.cliq.bank}` : ''}</span>` : ''}</li>
+          <li>بعد ما تحوّل، اكتب اسمك متل ما بيطلع بالحوالة واكبس «حوّلت».</li>
+        </ol>
+        <input name="payer" placeholder="اسم اللي حوّل" maxlength="60" required>
+        <input name="ref" placeholder="رقم الحوالة (اختياري)" maxlength="60" dir="ltr">
+        <button class="btn" type="submit">حوّلت ✅</button>
+        <p class="hint">منتأكد من الحوالة ومنفعّل اشتراكك عادةً بنفس اليوم.</p>
+      </form>` : ''}
+    ${wa ? html`<a class="btn ${b.cliq ? 'ghost' : ''} block wa" href="${wa}" target="_blank" rel="noopener">${b.cliq ? 'سؤال؟ احكي معنا عالواتساب' : 'اشترك عالواتساب'}</a>` : ''}
+    ${b.payments.length ? html`<h3 style="margin-top:6px">حوالاتك</h3><ul class="list">${b.payments.map((p) => html`<li><div class="main"><b>${p.plan === 'year' ? 'سنة' : 'شهر'} · <span class="num">${p.amount}</span> دينار</b>
+        <span class="small muted">${p.payer}${p.ref ? ` · ${p.ref}` : ''} · ${ago(p.createdAt)}</span></div><span class="badge ${PAY_STATUS[p.status][1]}">${PAY_STATUS[p.status][0]}</span></li>`)}</ul>` : ''}`);
+  bindCopy(box);
+  const form = $('#payForm', box);
+  if (!form) return;
+  let plan = 'month';
+  $$('#planSeg button', box).forEach((btn) => {
+    btn.onclick = () => {
+      plan = btn.dataset.plan;
+      $$('#planSeg button', box).forEach((x) => x.classList.toggle('on', x === btn));
+      $('#payAmount', box).textContent = b.prices[plan];
+    };
+  });
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    const f = new FormData(form);
+    try {
+      await api('/api/billing/claim', { method: 'POST', body: { plan, payer: f.get('payer'), ref: f.get('ref') } });
+      toast('وصلنا تبليغك ✅ منتأكد ومنفعّل', 'ok');
+      loadBilling();
+    } catch (err) { toast(err.message, 'bad'); }
+  };
+}
+
 async function loadStaff(data) {
   const panel = $('#staffPanel');
   if (!panel) return;
@@ -994,8 +1055,9 @@ async function admin() {
   let shops;
   let signupOpen;
   let appleSt;
+  let pay;
   try {
-    [{ leads }, { shops, signupOpen }, appleSt] = await Promise.all([api('/api/admin/leads'), api('/api/admin/shops'), api('/api/admin/apple')]);
+    [{ leads }, { shops, signupOpen }, appleSt, pay] = await Promise.all([api('/api/admin/leads'), api('/api/admin/shops'), api('/api/admin/apple'), api('/api/admin/payments')]);
   } catch (e) { render(view, html`<p class="alert bad">${e.message}</p>`); return; }
   const fresh = leads.filter((l) => l.status === 'new').length;
   render(view, html`
@@ -1006,7 +1068,9 @@ async function admin() {
       <div class="stat"><b class="num">${fresh}</b><span class="small muted">طلبات جديدة</span></div>
       <div class="stat"><b class="num">${leads.length}</b><span class="small muted">كل الطلبات</span></div>
       <div class="stat"><b class="num">${shops.length}</b><span class="small muted">محلات مسجّلة</span></div>
+      <div class="stat"><b class="num">${pay.payments.filter((p) => p.status === 'pending').length}</b><span class="small muted">حوالات بتستنى</span></div>
     </div>
+    ${paymentsPanel(pay)}
     <section class="panel" style="margin-top:14px">
       <h2>طلبات الاشتراك</h2>
       ${leads.length ? html`<ul class="list" id="leadList">${leads.map((l) => html`<li style="align-items:flex-start">
@@ -1035,6 +1099,7 @@ async function admin() {
     </section>
     <section class="panel stack" id="applePanel">${applePanel(appleSt)}</section>`);
   bindApple();
+  bindPayments();
   $$('[data-plan]').forEach((b) => {
     b.onclick = async () => {
       const name = b.closest('li').querySelector('b').firstChild.textContent.trim();
@@ -1048,6 +1113,46 @@ async function admin() {
       try { await api(`/api/admin/leads/${sel.dataset.id}`, { method: 'PUT', body: { status: sel.value } }); admin(); toast('انحفظ', 'ok'); } catch (e) { toast(e.message, 'bad'); }
     };
   });
+}
+
+
+// ─── لوحة مدير المنصة: حوالات CliQ وإعداداتها ───
+function paymentsPanel(pay) {
+  const c = pay.cliq || {};
+  return html`<section class="panel stack" style="margin-top:14px" id="payPanel">
+    <h2>💳 حوالات الاشتراك</h2>
+    ${pay.payments.length ? html`<ul class="list">${pay.payments.map((p) => html`<li style="align-items:flex-start"><div class="main">
+        <b>${p.shopName} <span class="badge ${PAY_STATUS[p.status][1]}">${PAY_STATUS[p.status][0]}</span></b>
+        <span class="small">${p.plan === 'year' ? 'سنة' : 'شهر'} · <span class="num">${p.amount}</span> دينار</span>
+        <span class="small muted">من: ${p.payer}${p.ref ? html` · رقم: <span dir="ltr">${p.ref}</span>` : ''} · ${ago(p.createdAt)}</span>
+        ${p.status === 'pending' ? html`<div class="row" style="margin-top:6px">
+          <button class="btn sm" type="button" data-pay="${p.id}" data-act="approve">✅ وصلت، فعّل</button>
+          <button class="btn sm ghost" type="button" data-pay="${p.id}" data-act="reject">❌ ما وصلت</button></div>` : ''}
+      </div></li>`)}</ul>` : html`<p class="muted small">ما في حوالات لسا.</p>`}
+    <details${pay.cliq ? '' : ' open'}><summary class="btn ghost block">إعدادات CliQ (اللي بيحوّلوا عليه)</summary>
+      <form class="stack" id="cliqForm" style="margin-top:10px">
+        <input name="cliqAlias" placeholder="الاسم المستعار (Alias) أو رقم الجوال" dir="ltr" value="${c.alias || ''}" maxlength="40">
+        <input name="cliqName" placeholder="اسم صاحب الحساب" value="${c.name || ''}" maxlength="60">
+        <input name="cliqBank" placeholder="البنك (اختياري)" value="${c.bank || ''}" maxlength="60">
+        <button class="btn" type="submit">حفظ</button>
+        <p class="hint">بيطلع للمحلات بقسم «الاشتراك» عشان يحوّلوا عليه. فاضي = الدفع عالواتساب بس.</p>
+      </form></details>
+  </section>`;
+}
+
+function bindPayments() {
+  $$('[data-pay]').forEach((b) => {
+    b.onclick = async () => {
+      const ok = b.dataset.act === 'approve';
+      if (!confirm(ok ? 'تأكدت إنه المبلغ وصل حسابك؟ رح ينمدد اشتراك المحل.' : 'الحوالة ما وصلت؟')) return;
+      try { await api(`/api/admin/payments/${b.dataset.pay}`, { method: 'POST', body: { action: b.dataset.act } }); toast(ok ? 'انفعّل الاشتراك ✅' : 'انحفظ', 'ok'); admin(); } catch (e) { toast(e.message, 'bad'); }
+    };
+  });
+  const f = $('#cliqForm');
+  if (f) f.onsubmit = async (e) => {
+    e.preventDefault();
+    try { await api('/api/admin/settings', { method: 'PUT', body: Object.fromEntries(new FormData(f)) }); toast('انحفظ ✅', 'ok'); admin(); } catch (err) { toast(err.message, 'bad'); }
+  };
 }
 
 // ─── إعداد Apple Wallet (مرة وحدة للمنصة كلها) ───

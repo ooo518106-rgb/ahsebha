@@ -912,22 +912,88 @@ async function adminShopPlan(c, id) {
   await requireAdmin(c);
   const shop = await c.db.get('SELECT * FROM shops WHERE id = ?', Number(id));
   if (!shop) fail(404, 'ما لقينا المحل');
-  const now = Date.now();
-  const current = shop.active_until ?? shop.created_at + TRIAL_DAYS * DAY;
-  let until;
-  let paid = 1;
-  if (c.body.action === 'month' || c.body.action === 'year') {
-    const d = new Date(Math.max(now, current));
-    if (c.body.action === 'month') d.setMonth(d.getMonth() + 1); else d.setFullYear(d.getFullYear() + 1);
-    until = d.getTime();
-  } else if (c.body.action === 'stop') {
-    until = now - 1000;
-    paid = 0;
-  } else {
-    fail(400, 'إجراء غير معروف');
-  }
-  await c.db.run('UPDATE shops SET active_until = ?, paid = ? WHERE id = ?', until, paid, shop.id);
+  if (c.body.action === 'month' || c.body.action === 'year') await extendPlan(c.db, shop, c.body.action);
+  else if (c.body.action === 'stop') await c.db.run('UPDATE shops SET active_until = ?, paid = 0 WHERE id = ?', Date.now() - 1000, shop.id);
+  else fail(400, 'إجراء غير معروف');
   return adminShops(c);
+}
+
+// تمديد الاشتراك شهر أو سنة من آخر يوم فيه (أو من اليوم لو كان خالص)
+async function extendPlan(db, shop, plan) {
+  const current = shop.active_until ?? shop.created_at + TRIAL_DAYS * DAY;
+  const d = new Date(Math.max(Date.now(), current));
+  if (plan === 'month') d.setMonth(d.getMonth() + 1); else d.setFullYear(d.getFullYear() + 1);
+  await db.run('UPDATE shops SET active_until = ?, paid = 1 WHERE id = ?', d.getTime(), shop.id);
+}
+
+// ─── الدفع بـ CliQ: صاحب المحل بيحوّل وبيبلّغ، ومدير المنصة بيتأكد من حسابه وبيفعّل بكبسة ───
+export const PRICES = { month: 15, year: 150 };
+const CLIQ_RE = /^[A-Za-z0-9._+\- ]{3,40}$/;
+
+async function cliqInfo(db) {
+  const alias = await getSetting(db, 'cliq_alias');
+  if (!alias) return null;
+  return { alias, name: (await getSetting(db, 'cliq_name')) || '', bank: (await getSetting(db, 'cliq_bank')) || '' };
+}
+
+const paymentView = (p) => ({ id: p.id, plan: p.plan, amount: p.amount, payer: p.payer, ref: p.ref, status: p.status, createdAt: p.created_at, decidedAt: p.decided_at });
+
+async function billing(c) {
+  const payments = await c.db.all('SELECT * FROM payments WHERE shop_id = ? ORDER BY created_at DESC LIMIT 10', c.shop.id);
+  return json({
+    subscription: await subscription(c, c.shop),
+    prices: PRICES,
+    currency: 'JOD',
+    cliq: await cliqInfo(c.db),
+    whatsapp: /^\d{8,15}$/.test(String(c.env.WHATSAPP_NUMBER || '')) ? String(c.env.WHATSAPP_NUMBER) : null,
+    payments: payments.map(paymentView),
+  });
+}
+
+async function billingClaim(c) {
+  if (!(await cliqInfo(c.db))) fail(400, 'الدفع بـ CliQ مش مفعّل لسا، تواصل معنا عالواتساب');
+  const plan = c.body.plan;
+  if (!PRICES[plan]) fail(400, 'اختار شهر أو سنة');
+  const payer = clean(c.body.payer, 60);
+  if (payer.length < 2) fail(400, 'اكتب اسم اللي حوّل (متل ما بيطلع بالحوالة)');
+  await rateLimit(c, `claim:${c.shop.id}`, 5, 24 * 60 * MIN, 'بلّغت كتير اليوم، استنى لنتأكد من الحوالات');
+  const pending = await c.db.get("SELECT COUNT(*) AS n FROM payments WHERE shop_id = ? AND status = 'pending'", c.shop.id);
+  if (pending.n >= 2) fail(409, 'عندك حوالات لسا عم نتأكد منها');
+  await c.db.run('INSERT INTO payments (shop_id, plan, amount, payer, ref, created_at) VALUES (?, ?, ?, ?, ?, ?)', c.shop.id, plan, PRICES[plan], payer, clean(c.body.ref, 60), Date.now());
+  return billing(c);
+}
+
+async function adminPayments(c) {
+  await requireAdmin(c);
+  const rows = await c.db.all(
+    `SELECT p.*, s.name AS shopName FROM payments p JOIN shops s ON s.id = p.shop_id
+     ORDER BY CASE p.status WHEN 'pending' THEN 0 ELSE 1 END, p.created_at DESC LIMIT 60`,
+  );
+  return json({ payments: rows.map((p) => ({ ...paymentView(p), shopId: p.shop_id, shopName: p.shopName })), cliq: await cliqInfo(c.db) });
+}
+
+async function adminPaymentDecide(c, id) {
+  await requireAdmin(c);
+  const action = c.body.action;
+  if (!['approve', 'reject'].includes(action)) fail(400, 'إجراء غير معروف');
+  const p = await c.db.get("SELECT * FROM payments WHERE id = ? AND status = 'pending'", Number(id));
+  if (!p) fail(404, 'ما لقينا حوالة بتستنى');
+  // العلامة أول، عشان لو انكبس الزر مرتين ما ينمدد الاشتراك مرتين
+  const r = await c.db.run("UPDATE payments SET status = ?, decided_at = ? WHERE id = ? AND status = 'pending'", action === 'approve' ? 'approved' : 'rejected', Date.now(), p.id);
+  if (r.changes && action === 'approve') await extendPlan(c.db, await c.db.get('SELECT * FROM shops WHERE id = ?', p.shop_id), p.plan);
+  return adminPayments(c);
+}
+
+async function adminSettings(c) {
+  await requireAdmin(c);
+  if (c.req.method === 'PUT') {
+    const alias = String(c.body.cliqAlias || '').trim();
+    if (alias && !CLIQ_RE.test(alias)) fail(400, 'الاسم المستعار (Alias) مش صحيح');
+    await setSetting(c.db, 'cliq_alias', alias);
+    await setSetting(c.db, 'cliq_name', clean(c.body.cliqName, 60));
+    await setSetting(c.db, 'cliq_bank', clean(c.body.cliqBank, 60));
+  }
+  return json({ cliq: await cliqInfo(c.db) });
 }
 
 async function logo(c, shopId) {
@@ -1471,6 +1537,12 @@ const API = [
   ['GET', /^\/api\/admin\/apple$/, adminApple, 'staff'],
   ['POST', /^\/api\/admin\/apple\/key$/, adminAppleKey, 'staff'],
   ['PUT', /^\/api\/admin\/apple\/cert$/, adminAppleCert, 'staff'],
+  ['GET', /^\/api\/admin\/payments$/, adminPayments, 'staff'],
+  ['POST', /^\/api\/admin\/payments\/(\d+)$/, adminPaymentDecide, 'staff'],
+  ['GET', /^\/api\/admin\/settings$/, adminSettings, 'staff'],
+  ['PUT', /^\/api\/admin\/settings$/, adminSettings, 'staff'],
+  ['GET', /^\/api\/billing$/, billing, 'owner'],
+  ['POST', /^\/api\/billing\/claim$/, billingClaim, 'owner'],
   ['POST', /^\/api\/auth\/signup$/, signup],
   ['POST', /^\/api\/auth\/login$/, loginRoute],
   ['POST', /^\/api\/auth\/logout$/, logout],
