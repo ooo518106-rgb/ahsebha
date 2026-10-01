@@ -276,3 +276,41 @@ test('الإنجليزي: الزبون اللي اختار English بتوصله 
   assert.match(to(dev)[2].body, /^انضافلك 10 نقطة/);
   assert.equal((await p.client().post('/api/cards/aaaaaaaaaaaaaaaaaaaa/lang', { lang: 'en' })).status, 404);
 });
+
+test('المندوبين: رابط المندوب بيربط المحل فيه، والعمولة من الدفعات المؤكدة، وصفحة إله بالرابط السري', async () => {
+  const p = await platform();
+  const { admin, client, db } = p;
+  assert.equal((await p.owner.post('/api/admin/resellers', { name: 'خالد', pct: 20 })).status, 403);
+  assert.equal((await admin.post('/api/admin/resellers', { name: 'خالد المندوب', phone: '0795551111', pct: 95 })).status, 400);
+  let list = (await admin.post('/api/admin/resellers', { name: 'خالد المندوب', phone: '0795551111', pct: 20 })).data.resellers;
+  const r = list[0];
+  assert.match(r.link, /\/\?partner=[a-z2-9]{6}$/);
+  // محل سجّل من رابطه، وطلب اشتراك من رابطه
+  const shopOwner = client();
+  await shopOwner.post('/api/auth/signup', { shopName: 'Cafe Partner', email: 'cp@test.com', password: 'secret-pass-1', partner: r.code });
+  await client().post('/api/leads', { shopName: 'Lead Cafe', name: 'سامي', phone: '0790000001', partner: r.code });
+  await client().post('/api/auth/signup', { shopName: 'Cafe Bad', email: 'cb@test.com', password: 'secret-pass-1', partner: 'zzzzzz' });
+  const shops = (await admin.get('/api/admin/shops')).data.shops;
+  assert.equal(shops.find((s) => s.name === 'Cafe Partner').reseller, 'خالد المندوب');
+  assert.equal(shops.find((s) => s.name === 'Cafe Bad').reseller, null);
+  assert.equal((await admin.get('/api/admin/leads')).data.leads[0].reseller, 'خالد المندوب');
+  // تفعيل يدوي بسنة (150) ← عمولة 30
+  const cp = shops.find((s) => s.name === 'Cafe Partner');
+  await admin.post(`/api/admin/shops/${cp.id}/plan`, { action: 'year' });
+  list = (await admin.get('/api/admin/resellers')).data.resellers;
+  assert.equal(list[0].sales, 150);
+  assert.equal(list[0].earned, 30);
+  assert.equal(list[0].due, 30);
+  assert.equal(list[0].shops[0].state, 'active');
+  await admin.post(`/api/admin/resellers/${r.id}/payout`, { amount: 20 });
+  // صفحة المندوب
+  const token = list[0].statsUrl.split('/partner/')[1];
+  const pub = (await client().get(`/api/partner/${token}`)).data;
+  assert.equal(pub.name, 'خالد المندوب');
+  assert.equal(pub.paid, 20);
+  assert.equal(pub.due, 10);
+  assert.equal(pub.shops.length, 1);
+  assert.equal((await client().get('/api/partner/aaaaaaaaaaaaaaaaaaaa')).status, 404);
+  assert.equal((await client().get(`/partner/${token}`)).status, 200);
+  assert.equal((await db.get("SELECT COUNT(*) AS n FROM payments WHERE payer = 'تفعيل يدوي'")).n, 1);
+});

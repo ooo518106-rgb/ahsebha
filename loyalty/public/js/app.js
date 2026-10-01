@@ -1304,8 +1304,9 @@ async function admin() {
   let signupOpen;
   let appleSt;
   let pay;
+  let resellers;
   try {
-    [{ leads }, { shops, signupOpen }, appleSt, pay] = await Promise.all([api('/api/admin/leads'), api('/api/admin/shops'), api('/api/admin/apple'), api('/api/admin/payments')]);
+    [{ leads }, { shops, signupOpen }, appleSt, pay, { resellers }] = await Promise.all([api('/api/admin/leads'), api('/api/admin/shops'), api('/api/admin/apple'), api('/api/admin/payments'), api('/api/admin/resellers')]);
   } catch (e) { render(view, html`<p class="alert bad">${e.message}</p>`); return; }
   const fresh = leads.filter((l) => l.status === 'new').length;
   render(view, html`
@@ -1323,7 +1324,7 @@ async function admin() {
       <h2>طلبات الاشتراك</h2>
       ${leads.length ? html`<ul class="list" id="leadList">${leads.map((l) => html`<li style="align-items:flex-start">
         <div class="main"><b>${l.shopName} <span class="badge ${LEAD_STATUS[l.status][1]}">${LEAD_STATUS[l.status][0]}</span></b>
-          <span class="small muted">${l.name} · <span class="num">${l.phone}</span>${l.city ? ` · ${l.city}` : ''}${l.kind ? ` · ${l.kind}` : ''} · ${ago(l.createdAt)}</span>
+          <span class="small muted">${l.name} · <span class="num">${l.phone}</span>${l.city ? ` · ${l.city}` : ''}${l.kind ? ` · ${l.kind}` : ''}${l.reseller ? ` · 🤝 ${l.reseller}` : ''} · ${ago(l.createdAt)}</span>
           ${l.note ? html`<div class="small" style="margin-top:4px">${l.note}</div>` : ''}
           <div class="row" style="margin-top:6px">
             <a class="btn sm wa" href="${waLink(l.phone, `مرحبا ${l.name}، معك فريق نقاطك بخصوص طلب التجربة لـ ${l.shopName} 🙌`)}" target="_blank" rel="noopener">واتساب</a>
@@ -1337,7 +1338,7 @@ async function admin() {
       ${shops.length ? html`<ul class="list" id="shopList">${shops.map((s) => {
         const [label, cls] = SUB_BADGE[s.subscription.state](s.subscription);
         return html`<li style="align-items:flex-start"><div class="main"><b>${s.name} <span class="badge ${cls}">${label}</span></b>
-          <span class="small muted"><span dir="ltr">${s.ownerEmail || ''}</span> · ${fmt(s.members)} زبون · من ${fmtDate(s.createdAt)} · آخر حركة ${ago(s.lastActivity)}</span>
+          <span class="small muted"><span dir="ltr">${s.ownerEmail || ''}</span> · ${fmt(s.members)} زبون · من ${fmtDate(s.createdAt)} · آخر حركة ${ago(s.lastActivity)}${s.reseller ? ` · 🤝 ${s.reseller}` : ''}</span>
           ${s.subscription.state === 'owner' ? '' : html`<div class="row" style="margin-top:6px">
             <button class="btn sm" type="button" data-plan="month" data-shop="${s.id}">+ شهر</button>
             <button class="btn sm soft" type="button" data-plan="year" data-shop="${s.id}">+ سنة</button>
@@ -1345,9 +1346,11 @@ async function admin() {
           </div>`}</div></li>`;
       })}</ul>` : html`<p class="muted">ما في محلات لسا.</p>`}
     </section>
+    ${resellersPanel(resellers)}
     <section class="panel stack" id="applePanel">${applePanel(appleSt)}</section>`);
   bindApple();
   bindPayments();
+  bindResellers();
   $$('[data-plan]').forEach((b) => {
     b.onclick = async () => {
       const name = b.closest('li').querySelector('b').firstChild.textContent.trim();
@@ -1363,6 +1366,48 @@ async function admin() {
   });
 }
 
+
+
+// ─── المندوبين (لوحة مدير المنصة) ───
+function resellersPanel(list) {
+  return html`<section class="panel stack" id="resellersPanel">
+    <h2>🤝 المندوبين</h2>
+    <p class="hint">كل مندوب إله رابط. المحلات اللي بتسجّل منه بتنحسبله، وعمولته نسبة من الدفعات المؤكدة (CliQ أو «+ شهر/سنة»).</p>
+    ${list.length ? html`<ul class="list">${list.map((r) => html`<li style="align-items:flex-start"><div class="main">
+        <b>${r.name} <span class="badge">${r.pct}%</span></b>
+        <span class="small muted">${fmt(r.shops.length)} محل · مبيعات ${fmt(r.sales)} · عمولة ${fmt(r.earned)} · انصرف ${fmt(r.paid)} · <b>إله ${fmt(r.due)}</b> دينار</span>
+        <div class="row" style="margin-top:6px">
+          <button class="btn sm ghost" type="button" data-copy="${r.link}">رابطه</button>
+          <button class="btn sm ghost" type="button" data-copy="${r.statsUrl}">صفحته</button>
+          ${r.phone ? html`<a class="btn sm wa" href="${waLink(r.phone, `مرحبا ${r.name}، هاي صفحتك بنقاطك: ${r.statsUrl}`)}" target="_blank" rel="noopener">ابعتله صفحته</a>` : ''}
+          ${r.due > 0 ? html`<button class="btn sm" type="button" data-payout="${r.id}" data-due="${r.due}">سجّل دفعة</button>` : ''}
+        </div></div></li>`)}</ul>` : html`<p class="muted small">ما في مندوبين لسا.</p>`}
+    <details><summary class="btn ghost block">+ أضف مندوب</summary>
+      <form class="stack" id="resellerForm" style="margin-top:10px">
+        <input name="name" placeholder="الاسم" required maxlength="60">
+        <input name="phone" placeholder="الجوال (اختياري)" type="tel" dir="ltr">
+        <div class="field"><label for="r-pct">العمولة (%)</label><input id="r-pct" name="pct" type="number" min="1" max="90" value="20" class="num"></div>
+        <button class="btn" type="submit">إضافة</button>
+      </form></details>
+  </section>`;
+}
+
+function bindResellers() {
+  const box = $('#resellersPanel');
+  if (!box) return;
+  bindCopy(box);
+  $$('[data-payout]', box).forEach((b) => {
+    b.onclick = async () => {
+      const v = prompt('كم دفعتله؟ (دينار)', b.dataset.due);
+      if (!v) return;
+      try { await api(`/api/admin/resellers/${b.dataset.payout}/payout`, { method: 'POST', body: { amount: v } }); toast('انسجلت الدفعة ✅', 'ok'); admin(); } catch (e) { toast(e.message, 'bad'); }
+    };
+  });
+  $('#resellerForm', box).onsubmit = async (e) => {
+    e.preventDefault();
+    try { await api('/api/admin/resellers', { method: 'POST', body: Object.fromEntries(new FormData(e.target)) }); toast('انضاف المندوب ✅', 'ok'); admin(); } catch (err) { toast(err.message, 'bad'); }
+  };
+}
 
 // ─── لوحة مدير المنصة: حوالات CliQ وإعداداتها ───
 function paymentsPanel(pay) {

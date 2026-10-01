@@ -3,6 +3,18 @@ import { $, $$, api, cardHTML, render } from './common.js';
 
 const params = new URLSearchParams(location.search);
 const code = params.get('code');
+// رابط المندوب (?partner=…): بنحفظه 60 يوم، وبيرافق التسجيل أو طلب الاشتراك
+const PARTNER_KEY = 'nq_partner';
+(() => {
+  const p = (params.get('partner') || '').toLowerCase();
+  try { if (/^[a-z2-9]{6}$/.test(p)) localStorage.setItem(PARTNER_KEY, JSON.stringify({ code: p, at: Date.now() })); } catch { /* اختياري */ }
+})();
+const partner = () => {
+  try {
+    const v = JSON.parse(localStorage.getItem(PARTNER_KEY) || 'null');
+    return v && Date.now() - v.at < 60 * 864e5 ? v.code : undefined;
+  } catch { return undefined; }
+};
 let mode = 'login';
 let signupOpen = false;
 let whatsapp = null;
@@ -39,7 +51,7 @@ $('#leadForm').addEventListener('submit', async (e) => {
   btn.disabled = true;
   $('#leadErr').textContent = '';
   try {
-    await api('/api/leads', { method: 'POST', body });
+    await api('/api/leads', { method: 'POST', body: { ...body, partner: partner() } });
     form.classList.add('hidden');
     $('#leadDone').classList.remove('hidden');
     showWhatsApp(`مرحبا، أنا ${body.name} من ${body.shopName}. بعتلكم طلب تجربة نقاطك 🙌`);
@@ -93,7 +105,7 @@ $('#auth').addEventListener('submit', async (e) => {
   $('#authError').textContent = '';
   try {
     if (mode === 'signup') {
-      await api('/api/auth/signup', { method: 'POST', body: Object.fromEntries(f) });
+      await api('/api/auth/signup', { method: 'POST', body: { ...Object.fromEntries(f), partner: partner() } });
       location.href = '/app#settings';
     } else {
       await api('/api/auth/login', { method: 'POST', body: { email: f.get('email'), password: f.get('password') } });

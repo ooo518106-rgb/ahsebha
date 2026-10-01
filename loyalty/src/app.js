@@ -1044,8 +1044,8 @@ async function createLead(c) {
   const phone = readPhone(b.phone);
   const kind = LEAD_KINDS.includes(b.kind) ? b.kind : '';
   await c.db.run(
-    'INSERT INTO leads (shop_name, name, phone, city, kind, note, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
-    shopName, name, phone, clean(b.city, 40), kind, clean(b.note, 500), Date.now(),
+    'INSERT INTO leads (shop_name, name, phone, city, kind, note, reseller_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+    shopName, name, phone, clean(b.city, 40), kind, clean(b.note, 500), (await resellerByCode(c.db, b.partner))?.id ?? null, Date.now(),
   );
   await notifyAdmin(c, { title: '📩 طلب اشتراك جديد', body: `${shopName} · ${name}${kind ? ` · ${kind}` : ''}`, url: `${c.origin}/app#admin` });
   return json({ ok: true }, 201);
@@ -1063,7 +1063,8 @@ async function requireAdmin(c) {
 
 async function adminLeads(c) {
   await requireAdmin(c);
-  const leads = await c.db.all('SELECT id, shop_name AS shopName, name, phone, city, kind, note, status, created_at AS createdAt FROM leads ORDER BY created_at DESC LIMIT 200');
+  const leads = await c.db.all(`SELECT l.id, l.shop_name AS shopName, l.name, l.phone, l.city, l.kind, l.note, l.status, l.created_at AS createdAt, r.name AS reseller
+    FROM leads l LEFT JOIN resellers r ON r.id = l.reseller_id ORDER BY l.created_at DESC LIMIT 200`);
   return json({ leads });
 }
 
@@ -1081,7 +1082,8 @@ async function adminShops(c) {
     `SELECT s.id, s.name, s.slug, s.created_at AS createdAt, s.active_until, s.paid, s.created_at,
        (SELECT COUNT(*) FROM members m WHERE m.shop_id = s.id) AS members,
        (SELECT MAX(t.created_at) FROM txns t WHERE t.shop_id = s.id) AS lastActivity,
-       (SELECT u.email FROM users u WHERE u.shop_id = s.id AND u.role = 'owner' ORDER BY u.id LIMIT 1) AS ownerEmail
+       (SELECT u.email FROM users u WHERE u.shop_id = s.id AND u.role = 'owner' ORDER BY u.id LIMIT 1) AS ownerEmail,
+       (SELECT r.name FROM resellers r WHERE r.id = s.reseller_id) AS reseller
      FROM shops s ORDER BY s.created_at DESC LIMIT 500`,
   );
   const platformShop = await platformShopId(c.db);
@@ -1094,7 +1096,11 @@ async function adminShopPlan(c, id) {
   await requireAdmin(c);
   const shop = await c.db.get('SELECT * FROM shops WHERE id = ?', Number(id));
   if (!shop) fail(404, 'ما لقينا المحل');
-  if (c.body.action === 'month' || c.body.action === 'year') await extendPlan(c.db, shop, c.body.action);
+  if (c.body.action === 'month' || c.body.action === 'year') {
+    await extendPlan(c.db, shop, c.body.action);
+    // بنسجّلها كدفعة (كاش أو تحويل برّا المنصة) عشان الإيرادات وعمولة المندوب
+    await c.db.run("INSERT INTO payments (shop_id, plan, amount, payer, status, created_at, decided_at) VALUES (?, ?, ?, 'تفعيل يدوي', 'approved', ?, ?)", shop.id, c.body.action, PRICES[c.body.action], Date.now(), Date.now());
+  }
   else if (c.body.action === 'stop') await c.db.run('UPDATE shops SET active_until = ?, paid = 0 WHERE id = ?', Date.now() - 1000, shop.id);
   else fail(400, 'إجراء غير معروف');
   return adminShops(c);
@@ -1226,6 +1232,8 @@ async function signup(c) {
   }
   const shop = await c.db.get('SELECT * FROM shops WHERE slug = ?', slug);
   await storeDefaultLogo(c.db, shop);
+  const reseller = await resellerByCode(c.db, b.partner);
+  if (reseller) await c.db.run('UPDATE shops SET reseller_id = ? WHERE id = ?', reseller.id, shop.id);
   await notifyAdmin(c, { title: '🎉 محل جديد بلّش تجربة', body: `${shopName} · ${email}`, url: `${c.origin}/app#admin` });
   const user = await c.db.get('SELECT id FROM users WHERE email = ?', email);
   const token = await auth.createSession(c.db, user.id);
@@ -1974,6 +1982,70 @@ async function setStaffBranch(c, id) {
   return listStaff(c);
 }
 
+// ─── المندوبين: كل مندوب إله رابط، والمحلات اللي بتسجّل منه بتنحسبله عمولة من اشتراكاتها ───
+const PARTNER_RE = /^[a-z2-9]{6}$/;
+async function resellerByCode(db, code) {
+  const v = String(code || '').toLowerCase();
+  return PARTNER_RE.test(v) ? db.get('SELECT * FROM resellers WHERE code = ?', v) : null;
+}
+
+async function resellerStats(c, r) {
+  const platformShop = await platformShopId(c.db);
+  const shops = await c.db.all('SELECT * FROM shops WHERE reseller_id = ? ORDER BY created_at DESC', r.id);
+  const paidRow = await c.db.get("SELECT COALESCE(SUM(p.amount), 0) AS n FROM payments p JOIN shops s ON s.id = p.shop_id WHERE s.reseller_id = ? AND p.status = 'approved'", r.id);
+  const out = await c.db.get('SELECT COALESCE(SUM(amount), 0) AS n FROM reseller_payouts WHERE reseller_id = ?', r.id);
+  const earned = Math.round(paidRow.n * r.pct) / 100;
+  return {
+    id: r.id, name: r.name, phone: r.phone, code: r.code, pct: r.pct,
+    link: `${c.origin}/?partner=${r.code}`,
+    shops: shops.map((s) => ({ name: s.name, createdAt: s.created_at, state: subscriptionOf(s, platformShop).state })),
+    sales: paidRow.n, earned, paid: out.n, due: Math.round((earned - out.n) * 100) / 100,
+  };
+}
+
+async function adminResellers(c) {
+  await requireAdmin(c);
+  const rows = await c.db.all('SELECT * FROM resellers ORDER BY created_at DESC');
+  const list = [];
+  for (const r of rows) list.push({ ...(await resellerStats(c, r)), statsUrl: `${c.origin}/partner/${r.token}` });
+  return json({ resellers: list });
+}
+
+async function adminAddReseller(c) {
+  await requireAdmin(c);
+  const name = readName(c.body.name);
+  const pct = int(c.body.pct ?? 20, 1, 90, 'النسبة لازم تكون بين 1 و 90%');
+  const phone = c.body.phone ? readPhone(c.body.phone) : '';
+  for (let i = 0; i < 5; i++) {
+    try {
+      await c.db.run('INSERT INTO resellers (name, phone, code, token, pct, created_at) VALUES (?, ?, ?, ?, ?, ?)', name, phone, randomToken().slice(0, 6), randomToken(), pct, Date.now());
+      return adminResellers(c);
+    } catch (e) {
+      if (!isUniqueError(e)) throw e;
+    }
+  }
+  fail(500, 'جرّب كمان مرة');
+}
+
+async function adminResellerPayout(c, id) {
+  await requireAdmin(c);
+  const r = await c.db.get('SELECT * FROM resellers WHERE id = ?', Number(id));
+  if (!r) fail(404, 'ما لقينا المندوب');
+  const n = Number(c.body.amount);
+  if (!Number.isFinite(n) || n <= 0 || n > 100000) fail(400, 'اكتب المبلغ اللي دفعته');
+  await c.db.run('INSERT INTO reseller_payouts (reseller_id, amount, created_at) VALUES (?, ?, ?)', r.id, Math.round(n * 100) / 100, Date.now());
+  return adminResellers(c);
+}
+
+// صفحة المندوب (برابط سري): محلاته وعمولته
+async function partnerStats(c, token) {
+  const r = await c.db.get('SELECT * FROM resellers WHERE token = ?', token);
+  if (!r) fail(404, 'الرابط مش صحيح');
+  const st = await resellerStats(c, r);
+  delete st.id;
+  return json(st);
+}
+
 // ─── الموظفين ───
 async function listStaff(c) {
   const users = await c.db.all('SELECT id, name, email, role, branch_id AS branchId, created_at AS createdAt FROM users WHERE shop_id = ? ORDER BY id', c.shop.id);
@@ -2026,6 +2098,10 @@ const API = [
   ['POST', /^\/api\/admin\/payments\/(\d+)$/, adminPaymentDecide, 'staff'],
   ['GET', /^\/api\/admin\/settings$/, adminSettings, 'staff'],
   ['PUT', /^\/api\/admin\/settings$/, adminSettings, 'staff'],
+  ['GET', /^\/api\/admin\/resellers$/, adminResellers, 'staff'],
+  ['POST', /^\/api\/admin\/resellers$/, adminAddReseller, 'staff'],
+  ['POST', /^\/api\/admin\/resellers\/(\d+)\/payout$/, adminResellerPayout, 'staff'],
+  ['GET', /^\/api\/partner\/([a-z2-9]{20})$/, partnerStats],
   ['GET', /^\/api\/billing$/, billing, 'owner'],
   ['POST', /^\/api\/billing\/claim$/, billingClaim, 'owner'],
   ['POST', /^\/api\/auth\/signup$/, signup],
@@ -2137,6 +2213,7 @@ export async function handle(req, ctx) {
     if ((m = p.match(/^\/media\/logo\/(\d+)\.png$/))) return await logo(c, m[1]);
     if (p === '/' || p === '/index.html') return await page(c, '/index.html');
     if (p === '/privacy' || p === '/privacy/') return await page(c, '/privacy.html');
+    if (/^\/partner\/[a-z2-9]{20}\/?$/.test(p)) return await page(c, '/partner.html');
     if (p === '/app' || p === '/app/') return await page(c, '/app.html');
     if (/^\/j\/[a-z0-9-]{3,40}\/?$/.test(p)) return await page(c, '/join.html');
     if ((m = p.match(/^\/c\/([a-z2-9]{20})\/google$/))) return await googleSave(c, m[1]);
