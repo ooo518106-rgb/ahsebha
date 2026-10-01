@@ -262,16 +262,24 @@ async function redeem(m) {
   }
 }
 
+// زبون جديد: الزبون بيمسح QR الانضمام وبيكتب اسمه ورقمه بنفسه (الموظف ما بيشوف رقمه)،
+// والمالك بس بيقدر يكتب البيانات بإيده للي ما معه نت
 function newMemberDialog() {
+  const s = state.shop;
   const body = openDialog('زبون جديد', html`
-    <form class="stack" id="nm" novalidate>
-      <div class="field"><label for="nmName">الاسم</label><input id="nmName" name="name" required maxlength="60"></div>
-      <div class="field"><label for="nmPhone">رقم الجوال</label><input id="nmPhone" name="phone" type="tel" inputmode="tel" dir="ltr" required></div>
-      <p class="error" id="nmErr"></p>
-      <button class="btn big block" type="submit">إنشاء البطاقة</button>
-      <p class="hint">أسهل للزبون يمسح QR الانضمام بنفسه (تبويب «الانضمام»). هون للي ما معه نت أو مستعجل.</p>
-    </form>`);
-  $('#nmName', body).focus();
+    <div class="stack">
+      <div class="center"><div style="width:220px;margin:0 auto">${qrSVG(s.joinUrl, 'رابط الانضمام')}</div>
+        <p><b>خلّي الزبون يمسح هالرمز بكاميرا جواله</b></p>
+        <p class="small muted">بيكتب اسمه ورقمه بنفسه وبتطلعله بطاقته. بعدها بيعرضلك البطاقة وبتمسحها لتضيفله النقاط.</p></div>
+      ${isOwner() ? html`<details><summary class="btn ghost block">أو اكتب بياناته إنت (للي ما معه نت)</summary>
+        <form class="stack" id="nm" novalidate style="margin-top:10px">
+          <div class="field"><label for="nmName">الاسم</label><input id="nmName" name="name" required maxlength="60"></div>
+          <div class="field"><label for="nmPhone">رقم الجوال</label><input id="nmPhone" name="phone" type="tel" inputmode="tel" dir="ltr" required></div>
+          <p class="error" id="nmErr"></p>
+          <button class="btn big block" type="submit">إنشاء البطاقة</button>
+        </form></details>` : ''}
+    </div>`);
+  if (!isOwner()) return;
   $('#nm', body).onsubmit = async (e) => {
     e.preventDefault();
     try {
@@ -751,7 +759,7 @@ async function loadStaff(data) {
         <input name="email" type="email" placeholder="الإيميل" dir="ltr" required>
         <input name="password" type="password" placeholder="كلمة سر (8 حروف أو أكتر)" dir="ltr" minlength="8" required autocomplete="new-password">
         <button class="btn" type="submit">إضافة</button>
-        <p class="hint">الكاشير بيقدر يمسح ويضيف نقاط ويصرف مكافآت وينشئ بطاقات. ما بيشوف رقم جوال الزبون (بس آخر 3 أرقام)، وما بيقدر يغيّر الإعدادات أو يعدّل الرصيد يدوياً أو يحذف زبائن. بيدخل من نفس الموقع بالإيميل وكلمة السر اللي بتعطيه ياهم.</p>
+        <p class="hint">الكاشير بيقدر يمسح ويضيف نقاط ويصرف مكافآت. ما بيشوف رقم جوال الزبون (بس آخر 3 أرقام) وما بيكتبه: الزبون الجديد بيمسح QR الانضمام وبيعبّي بياناته بنفسه. وما بيقدر يغيّر الإعدادات أو يعدّل الرصيد يدوياً أو يحذف زبائن. بيدخل من نفس الموقع بالإيميل وكلمة السر اللي بتعطيه ياهم.</p>
       </form></details>`);
   $$('[data-rm]', panel).forEach((b) => {
     b.onclick = async () => {

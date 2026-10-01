@@ -807,8 +807,7 @@ async function addMember(c) {
   const existing = await c.db.get('SELECT id FROM members WHERE shop_id = ? AND phone = ?', c.shop.id, phone);
   if (existing) return json({ error: 'هالرقم إله بطاقة من قبل', memberId: existing.id }, 409);
   const m = await createMember(c.db, c.shop, name, phone);
-  // الرقم كامل هون حتى للموظف: هو اللي كتبه، وبيلزمه ليبعت البطاقة للزبون عالواتساب
-  return json({ member: memberView(m, c.shop), cardUrl: `${c.origin}/c/${m.token}` }, 201);
+  return json({ member: viewFor(c, m), cardUrl: `${c.origin}/c/${m.token}` }, 201);
 }
 
 // الكاشير بيمسح QR (توكن أو رابط البطاقة) أو بيكتب رقم البطاقة أو الجوال
@@ -1104,7 +1103,8 @@ const API = [
   ['GET', /^\/api\/me$/, me, 'staff'],
   ['PUT', /^\/api\/me\/password$/, changePassword, 'staff'],
   ['GET', /^\/api\/members$/, listMembers, 'staff'],
-  ['POST', /^\/api\/members$/, addMember, 'staff'],
+  // الموظف ما بيكتب رقم الزبون: الزبون بينضم بنفسه من QR الانضمام
+  ['POST', /^\/api\/members$/, addMember, 'owner'],
   ['GET', /^\/api\/members\/lookup$/, lookup, 'staff'],
   ['GET', /^\/api\/members\/(\d+)$/, memberDetail, 'staff'],
   ['POST', /^\/api\/members\/(\d+)\/earn$/, earn, 'staff'],

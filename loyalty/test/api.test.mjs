@@ -185,7 +185,8 @@ test('الصلاحيات: الموظف بيسجّل نقاط بس ما بيغي�
   assert.equal((await staff.get('/api/me')).status, 401);
   assert.equal((await staff.post('/api/auth/login', { email: 'CASHIER@test.com', password: 'cashier-pass' })).status, 200);
   assert.equal((await staff.get('/api/me')).data.user.role, 'staff');
-  const id = (await staff.post('/api/members', { name: 'زبون', phone: '0790000004' })).data.member.id;
+  assert.equal((await staff.post('/api/members', { name: 'زبون', phone: '0790000004' })).status, 403, 'الموظف ما بيكتب رقم الزبون');
+  const id = (await owner.post('/api/members', { name: 'زبون', phone: '0790000004' })).data.member.id;
   assert.equal((await staff.post(`/api/members/${id}/earn`, { amount: 10 })).status, 200);
   assert.equal((await staff.put('/api/shop', { name: 'اسم جديد' })).status, 403);
   assert.equal((await staff.post(`/api/members/${id}/adjust`, { delta: 100, note: 'هدية' })).status, 403);
@@ -204,8 +205,7 @@ test('الصلاحيات: الموظف بيسجّل نقاط بس ما بيغي�
   assert.equal((await staff.get('/api/members?q=07912')).data.total, 0);
   assert.equal((await staff.get('/api/members?q=0791234567')).data.total, 1);
   assert.equal((await owner.get('/api/members?q=07912')).data.total, 1);
-  // البطاقة اللي بينشئها الموظف بترجعله بالرقم اللي كتبه (ليبعتها عالواتساب)
-  assert.equal((await staff.post('/api/members', { name: 'جديد', phone: '0795550001' })).data.member.phone, '0795550001');
+
 
   // المالك بيحذف الموظف وجلسته بتنتهي
   const staffId = r.data.users.find((u) => u.role === 'staff').id;
