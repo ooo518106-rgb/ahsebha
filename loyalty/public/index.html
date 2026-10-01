@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#3b2418">
+  <title>نقاط الولاء — بطاقة ولاء بمحفظة الجوال لمحلك</title>
+  <meta name="description" content="بطاقة ولاء لمطعمك أو الكوفي شوب بتنحفظ بمحفظة الجوال مع QR، وبتطلع للزبون لما يقرّب من المحل. نقاط أو أختام، والكاشير بيمسح بكاميرا الجوال.">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <header class="hero">
+    <div class="wrap">
+      <h1>بطاقة ولاء لمحلك… جوّا محفظة الجوال</h1>
+      <p>زبونك بيمسح QR عالكاونتر، بتنضاف بطاقته لـ Google Wallet جنب بطاقة البنك، وبتطلعله لحالها لما يقرّب من المحل. وإنت بتمسحها بكاميرا جوالك وبتضيفله نقاط أو أختام.</p>
+    </div>
+  </header>
+  <main class="wrap">
+    <section class="features">
+      <div class="feature"><span>📱</span><h3>بالمحفظة مش بتطبيق</h3><p class="muted small">ما في تطبيق ينزّله الزبون. البطاقة بتنحفظ بـ Google Wallet، وبطاقة الآيفون (Apple Wallet) جاية قريباً.</p></div>
+      <div class="feature"><span>📍</span><h3>بتطلع لما يقرّب</h3><p class="muted small">بتحط مواقع فروعك (لحد 10)، والجوال بيطلّع بطاقتك على شاشة القفل لما يكون الزبون قريب.</p></div>
+      <div class="feature"><span>☕</span><h3>نقاط أو أختام</h3><p class="muted small">«كل دينار = نقطة» أو «اشتري 9 والعاشر مجاني». المكافأة إنت بتحددها.</p></div>
+      <div class="feature"><span>📷</span><h3>الكاشير بجوال عادي</h3><p class="muted small">بتمسح QR الزبون بكاميرا الجوال أو التابلت، وبتضيف النقاط بكبسة، والبطاقة بتتحدّث عنده فوراً.</p></div>
+      <div class="feature"><span>🔔</span><h3>رسائل وعروض</h3><p class="muted small">بتبعت إشعار لكل زبائنك: «خصم 20% اليوم».</p></div>
+      <div class="feature"><span>👥</span><h3>موظفين وفروع</h3><p class="muted small">كل كاشير إله حسابه، وكل حركة بتنسجل مين عملها.</p></div>
+    </section>
+
+    <section class="narrow" style="margin-top:24px">
+      <div class="panel">
+        <div class="seg" role="tablist">
+          <button type="button" class="on" data-mode="signup">سجّل محلك</button>
+          <button type="button" data-mode="login">تسجيل الدخول</button>
+        </div>
+        <form id="auth" class="stack" style="margin-top:14px" novalidate>
+          <div class="signup-only field"><label for="shopName">اسم المحل</label><input id="shopName" name="shopName" autocomplete="organization" placeholder="موكا كوفي هاوس" required>
+            <div class="hint">لو كتبته بالإنجليزي كمان (Mocha Coffee) بيطلع رابط أحلى، وبتقدر تغيّره بعدين.</div></div>
+          <div class="signup-only field"><label for="name">اسمك</label><input id="name" name="name" autocomplete="name"></div>
+          <div class="signup-only field"><label for="country">الدولة</label>
+            <select id="country" name="country">
+              <option value="JO">الأردن</option><option value="PS">فلسطين</option><option value="SA">السعودية</option><option value="AE">الإمارات</option>
+              <option value="KW">الكويت</option><option value="QA">قطر</option><option value="BH">البحرين</option><option value="OM">عُمان</option>
+              <option value="EG">مصر</option><option value="IQ">العراق</option><option value="LB">لبنان</option><option value="SY">سوريا</option><option value="TR">تركيا</option><option value="US">أمريكا</option>
+            </select></div>
+          <div class="field"><label for="email">الإيميل</label><input id="email" name="email" type="email" autocomplete="email" dir="ltr" required></div>
+          <div class="field"><label for="password">كلمة السر</label><input id="password" name="password" type="password" autocomplete="new-password" dir="ltr" minlength="8" required>
+            <div class="hint signup-only">8 حروف على الأقل.</div></div>
+          <div class="signup-only field hidden" id="codeField"><label for="code">رمز التسجيل</label><input id="code" name="code" dir="ltr"><div class="hint">إذا عندك رمز من فريقنا.</div></div>
+          <p class="error" id="authError" role="alert"></p>
+          <button class="btn big block" type="submit" id="authBtn">ابدأ مجاناً</button>
+        </form>
+      </div>
+    </section>
+  </main>
+  <script type="module" src="/js/landing.js"></script>
+</body>
+</html>
