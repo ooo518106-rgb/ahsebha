@@ -1,57 +1,51 @@
 {
+  "id": "./",
   "name": "برنامج محاسبة احسبها",
-  "short_name": "محاسبة احسبها",
+  "short_name": "احسبها",
+  "description": "برنامج محاسبة عربي مجاني: كاشير وباركود، فواتير ضريبية مع رمز QR، قراءة الإيصالات بالكاميرا، مخزون، رواتب، سندات، قيود وتقارير مالية. بياناتك على جهازك.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
+  "orientation": "any",
   "background_color": "#f8fafc",
   "theme_color": "#4f46e5",
   "lang": "ar",
   "dir": "rtl",
-  "description": "برنامج محاسبة عربي مجاني: كاشير وباركود، فواتير ضريبية، مخزون، سندات، قيود وتقارير مالية.",
+  "categories": ["business", "finance", "productivity"],
+  "prefer_related_applications": false,
+  "launch_handler": { "client_mode": ["navigate-existing", "auto"] },
   "icons": [
-    {
-      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'><rect width='192' height='192' rx='40' fill='%234f46e5'/><text x='96' y='128' font-size='96' text-anchor='middle'>📒</text></svg>",
-      "sizes": "192x192",
-      "type": "image/svg+xml"
-    }
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/maskable-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+    { "src": "icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
+    { "src": "icons/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ],
+  "screenshots": [
+    { "src": "store/phone-1.jpg", "sizes": "1080x1920", "type": "image/jpeg", "form_factor": "narrow", "label": "لوحة التحكم: المبيعات والأرباح والنقدية" },
+    { "src": "store/phone-2.jpg", "sizes": "1080x1920", "type": "image/jpeg", "form_factor": "narrow", "label": "الكاشير: بيع سريع بالباركود" },
+    { "src": "store/phone-3.jpg", "sizes": "1080x1920", "type": "image/jpeg", "form_factor": "narrow", "label": "فاتورة ضريبية بالعربي والإنجليزي مع رمز QR" },
+    { "src": "store/phone-4.jpg", "sizes": "1080x1920", "type": "image/jpeg", "form_factor": "narrow", "label": "قراءة الإيصال بالكاميرا وتعبئة المصروف" },
+    { "src": "store/phone-5.jpg", "sizes": "1080x1920", "type": "image/jpeg", "form_factor": "narrow", "label": "قائمة الدخل وكل التقارير المالية" },
+    { "src": "store/wide-1.jpg", "sizes": "1920x1080", "type": "image/jpeg", "form_factor": "wide", "label": "لوحة التحكم" },
+    { "src": "store/wide-2.jpg", "sizes": "1920x1080", "type": "image/jpeg", "form_factor": "wide", "label": "فواتير المبيعات" },
+    { "src": "store/wide-3.jpg", "sizes": "1920x1080", "type": "image/jpeg", "form_factor": "wide", "label": "قائمة الدخل" }
   ],
   "shortcuts": [
-    {
-      "name": "الكاشير",
-      "short_name": "الكاشير",
-      "url": "./#/pos",
-      "icons": [
-        {
-          "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'><rect width='192' height='192' rx='40' fill='%234f46e5'/><text x='96' y='128' font-size='96' text-anchor='middle'>📒</text></svg>",
-          "sizes": "192x192",
-          "type": "image/svg+xml"
-        }
-      ]
-    },
-    {
-      "name": "فاتورة مبيعات جديدة",
-      "short_name": "فاتورة",
-      "url": "./#/sales/new",
-      "icons": [
-        {
-          "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'><rect width='192' height='192' rx='40' fill='%234f46e5'/><text x='96' y='128' font-size='96' text-anchor='middle'>📒</text></svg>",
-          "sizes": "192x192",
-          "type": "image/svg+xml"
-        }
-      ]
-    },
-    {
-      "name": "مصروف جديد",
-      "short_name": "مصروف",
-      "url": "./#/expenses/new",
-      "icons": [
-        {
-          "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'><rect width='192' height='192' rx='40' fill='%234f46e5'/><text x='96' y='128' font-size='96' text-anchor='middle'>📒</text></svg>",
-          "sizes": "192x192",
-          "type": "image/svg+xml"
-        }
-      ]
+    { "name": "الكاشير", "short_name": "الكاشير", "url": "./#/pos", "icons": [{ "src": "icons/icon-96.png", "sizes": "96x96", "type": "image/png" }] },
+    { "name": "فاتورة مبيعات جديدة", "short_name": "فاتورة", "url": "./#/sales/new", "icons": [{ "src": "icons/icon-96.png", "sizes": "96x96", "type": "image/png" }] },
+    { "name": "مصروف من إيصال", "short_name": "إيصال", "url": "./#/expenses/new?read=1", "icons": [{ "src": "icons/icon-96.png", "sizes": "96x96", "type": "image/png" }] },
+    { "name": "التقارير", "short_name": "التقارير", "url": "./#/reports", "icons": [{ "src": "icons/icon-96.png", "sizes": "96x96", "type": "image/png" }] }
+  ],
+  "share_target": {
+    "action": "./share-target",
+    "method": "POST",
+    "enctype": "multipart/form-data",
+    "params": {
+      "title": "title",
+      "text": "text",
+      "files": [{ "name": "files", "accept": ["image/*", "application/pdf"] }]
     }
-  ]
+  }
 }

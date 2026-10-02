@@ -153,10 +153,17 @@ export function normalize(d) {
   for (const x of out.docs) {
     const n = Number(x.no) || 0;
     if ((out.seq[x.type] || 1) <= n) out.seq[x.type] = n + 1;
+    if (x.files != null) x.files = cleanFiles(x.files);
   }
   if (out.settings.logo && !/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(out.settings.logo)) out.settings.logo = '';
   return out;
 }
+
+// وصف المرفقات على المستند: معرّف آمن واسم ونوع وحجم فقط
+export const cleanFiles = (xs) => (Array.isArray(xs) ? xs : [])
+  .filter((f) => isObj(f) && typeof f.id === 'string' && /^[\w-]{1,40}$/.test(f.id))
+  .map((f) => ({ id: f.id, name: String(f.name || 'مرفق').slice(0, 120), type: /^[\w.+-]+\/[\w.+-]+$/.test(f.type || '') ? f.type : 'application/octet-stream', size: Number(f.size) || 0 }))
+  .slice(0, 30);
 
 function mutate(fn) {
   fn(db);
@@ -185,6 +192,7 @@ export async function wipe() {
   db = null;
   rev++;
   try { await idbOp('readwrite', (s) => s.delete('db')); } catch (e) { /* قد لا يكون موجوداً */ }
+  try { await deleteFiles(await fileIds()); } catch (e) { /* لا مرفقات */ }
   try { localStorage.removeItem(LS_KEY); } catch (e) { /* قد لا يكون موجوداً */ }
   if (channel) channel.postMessage({ type: 'saved', from: tabId });
 }
@@ -248,7 +256,9 @@ export function saveDoc(doc) {
 }
 
 export function deleteDoc(id) {
-  assertOpen(db.docs.find((x) => x.id === id));
+  const gone = db.docs.find((x) => x.id === id);
+  assertOpen(gone);
+  if (gone && gone.files && gone.files.length) deleteFiles(gone.files.map((f) => f.id)).catch(() => {});
   mutate((d) => {
     const doc = d.docs.find((x) => x.id === id);
     if (doc) audit(d, 'delete', doc, snapshot(doc));
@@ -368,7 +378,7 @@ export function nextRun(date, freq, day) {
   const last = Number(monthEnd(m).slice(8));
   return m.slice(0, 8) + String(Math.min(Number(day) || Number(date.slice(8)), last)).padStart(2, '0');
 }
-const DROP = ['id', 'no', 'createdAt', 'updatedAt', 'time', 'by', 'editedBy', 'convertedTo', 'fromQuote', 'refId', 'link', 'tendered', 'change', 'pos', 'recurring', 'cleared', 'bounced'];
+const DROP = ['id', 'no', 'createdAt', 'updatedAt', 'time', 'by', 'editedBy', 'convertedTo', 'fromQuote', 'refId', 'link', 'tendered', 'change', 'pos', 'recurring', 'cleared', 'bounced', 'files', 'scan'];
 export function templateOf(doc) {
   const t = snapshot(doc);
   for (const k of DROP) delete t[k];
@@ -472,6 +482,47 @@ export function saveUser(u) {
 export function deleteUser(id) { mutate((d) => { d.users = d.users.filter((x) => x.id !== id); }); }
 export function setRecovery(secret) { mutate((d) => { d.recovery = secret; }); }
 export function clearUsers() { mutate((d) => { d.users = []; d.recovery = null; }); }
+
+// ─── المرفقات: صور الإيصالات والفواتير وملفات PDF ───
+// تُحفظ في IndexedDB بجانب البيانات (المفتاح file:<id>) والمستند يحمل وصفها فقط: files: [{ id, name, type, size }]
+export const filesSupported = () => typeof indexedDB !== 'undefined' && backend === 'idb';
+export async function putFile(meta, blob) {
+  const rec = { ...meta, data: await blob.arrayBuffer() };
+  await idbOp('readwrite', (s) => s.put(rec, 'file:' + meta.id));
+  return meta;
+}
+export async function getFile(id) {
+  const rec = await idbOp('readonly', (s) => s.get('file:' + id));
+  return rec ? new Blob([rec.data], { type: rec.type || 'application/octet-stream' }) : null;
+}
+export async function deleteFiles(ids) {
+  if (!ids.length || typeof indexedDB === 'undefined') return;
+  await idbOp('readwrite', (s) => { ids.forEach((id) => s.delete('file:' + id)); });
+}
+export async function fileIds() {
+  if (typeof indexedDB === 'undefined') return [];
+  const keys = await idbOp('readonly', (s) => s.getAllKeys());
+  return (keys || []).filter((k) => typeof k === 'string' && k.startsWith('file:')).map((k) => k.slice(5));
+}
+export const usedFileIds = () => new Set((db ? db.docs : []).flatMap((d) => (d.files || []).map((f) => f.id)));
+// يحذف الملفات التي لا يشير إليها أي مستند (نموذج أُلغي، أو مرفق أُزيل) بعد يوم من رفعها
+export async function gcFiles() {
+  if (!db || !filesSupported()) return 0;
+  const used = usedFileIds();
+  const old = Date.now() - 864e5;
+  const orphans = (await fileIds()).filter((id) => !used.has(id) && !(parseInt(id.slice(0, 8), 36) > old));
+  await deleteFiles(orphans);
+  return orphans.length;
+}
+
+// الملفات المشتركة من تطبيق آخر (مشاركة صورة إيصال إلى البرنامج): يضعها عامل الخدمة هنا
+export async function takeShared() {
+  if (typeof indexedDB === 'undefined') return [];
+  const rec = await idbOp('readonly', (s) => s.get('shared'));
+  if (!rec) return [];
+  await idbOp('readwrite', (s) => s.delete('shared'));
+  return (rec.files || []).map((f) => new File([f.data], f.name || 'receipt.jpg', { type: f.type || 'image/jpeg' }));
+}
 
 // ─── النسخ الاحتياطي ───
 export function backupJSON() {

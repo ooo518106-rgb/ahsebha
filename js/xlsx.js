@@ -75,15 +75,17 @@ export function unzipEntries(buf) {
   return out;
 }
 
-async function entryText(entries, name) {
+export async function entryBytes(entries, name) {
   const e = entries.get(name);
   if (!e) return null;
-  let bytes = e.raw;
-  if (e.method === 8) {
-    const stream = new Blob([e.raw]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
-    bytes = new Uint8Array(await new Response(stream).arrayBuffer());
-  } else if (e.method !== 0) throw new Error('صيغة ضغط غير مدعومة في الملف');
-  return new TextDecoder().decode(bytes);
+  if (e.method === 0) return e.raw;
+  if (e.method !== 8) throw new Error('صيغة ضغط غير مدعومة في الملف');
+  const stream = new Blob([e.raw]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
+  return new Uint8Array(await new Response(stream).arrayBuffer());
+}
+export async function entryText(entries, name) {
+  const bytes = await entryBytes(entries, name);
+  return bytes ? new TextDecoder().decode(bytes) : null;
 }
 
 // ─── XML مبسط (ملفات Excel منتظمة، فالتعابير النمطية تكفي) ───
