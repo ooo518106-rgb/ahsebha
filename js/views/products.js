@@ -3,7 +3,7 @@ import * as store from '../store.js';
 import { docNo, DOC_TYPES, num, round, validateDoc, lineFactor } from '../core.js';
 import { html, raw, money, qty, fmtDate, toast, confirmBox, combo, showErrors, empty, norm, $, $$, exportTable, field, attr } from '../ui.js';
 import { go, guard, setTitle, docHref } from '../nav.js';
-import { head, bindRows, today, S, dec, taxLabel, taxOptions, productItems, periodOf, periodBar, bindPeriod, inPeriod, entryTable, csvName, printPaper, cameraDialog, docLocked, lockedNote, lockedPage } from './common.js';
+import { head, bindRows, today, S, dec, taxLabel, taxOptions, productItems, periodOf, periodBar, bindPeriod, inPeriod, entryTable, csvName, printPaper, cameraDialog, docLocked, lockedNote, lockedPage, whField, defaultWh, whLabel } from './common.js';
 import { makeStoreBarcode, isEan13, code128Supported, barcodeSVG } from '../barcode.js';
 
 const clone = (x) => JSON.parse(JSON.stringify(x));
@@ -197,6 +197,8 @@ export function productShow({ root, params, query, path }) {
         ${p.type === 'stock' ? html`<a class="btn btn-ghost" href="#/purchases/new?product=${p.id}">🛒 شراء</a><a class="btn btn-ghost" href="#/adjustments/new?product=${p.id}">⚖️ تسوية</a>` : ''}
         <a class="btn btn-ghost" href="#/products/${p.id}/edit">✏️ تعديل</a><button class="btn btn-text-danger" data-del>🗑️ حذف</button>` })}
     ${p.barcode ? html`<div class="bc" style="margin-bottom:14px">${raw(barcodeSVG(p.barcode))}</div>` : ''}
+    ${p.type === 'stock' && store.getDb().warehouses.length ? html`<div class="card" style="margin-bottom:14px"><div class="card-h"><h3>🏬 الكمية في المستودعات</h3><a class="btn btn-ghost btn-sm" href="#/stock-transfers/new?product=${p.id}">🚚 تحويل</a></div><div class="list-mini">
+      ${store.getDb().warehouses.map((w) => { const q = store.getBooks().whQty.get(p.id)?.get(w.id) || 0; return html`<div class="it"><span>${whLabel(w.id)}</span><b class="${q < 0 ? 'neg' : ''}">${qty(q)} ${p.unit || ''}</b></div>`; })}</div></div>` : ''}
     ${(p.units || []).length ? html`<p class="muted small" style="margin-bottom:12px">الوحدات: ${p.unit || 'حبة'} (${money(p.price)})${p.units.map((u) => ` · ${u.name} = ${u.factor} (${money(u.price !== '' && u.price != null ? u.price : u.factor * num(p.price))})`)}</p>` : ''}
     <div class="grid g4" style="margin-bottom:14px">
       ${p.type === 'stock' ? html`<div class="kpi"><span class="kpi-l">الكمية المتوفرة</span><span class="kpi-v ${st.qty < 0 || (num(p.reorder) && st.qty <= num(p.reorder)) ? 'neg' : ''}">${qty(st.qty)} <small class="cur">${p.unit || ''}</small></span>${num(p.reorder) ? html`<span class="kpi-s">حد الطلب ${num(p.reorder)}</span>` : ''}</div>
@@ -251,7 +253,7 @@ export function form(type, { root, params, query }) {
   const existing = params.id ? store.findDoc(params.id) : null;
   if (params.id && (!existing || existing.type !== 'adjust')) { root.innerHTML = String(empty('🔎', 'المستند غير موجود')); return; }
   if (existing && docLocked(existing)) { setTitle('تسوية مخزون'); root.innerHTML = String(lockedPage(existing)); return; }
-  const d = existing ? clone(existing) : { type: 'adjust', date: today(), account: 'adj', notes: '', lines: [] };
+  const d = existing ? clone(existing) : { type: 'adjust', date: today(), account: 'adj', notes: '', lines: [], ...(defaultWh() ? { wh: defaultWh() } : {}) };
   if (!existing && query.product) { const p = store.findProduct(query.product); if (p) d.lines.push({ product: p.id, qty: '', cost: '' }); }
   if (!d.lines.length) d.lines.push({ product: null, qty: '', cost: '' });
   const title = existing ? `تعديل تسوية ${docNo(existing, s)}` : 'تسوية مخزون جديدة';
@@ -268,6 +270,7 @@ export function form(type, { root, params, query }) {
         ${field('التاريخ', html`<input class="inp" type="date" data-f="date" data-k="date" value="${d.date}">`)}
         ${field('الحساب المقابل', html`<select class="inp" data-k="account">${store.getDb().accounts.filter((a) => !a.group && a.type === 'expense').map((a) => html`<option value="${a.id}" ${a.id === d.account ? raw('selected') : ''}>${a.name}</option>`)}</select>`, { hint: 'فروقات الجرد والتالف افتراضياً' })}
         <div class="span2">${field('السبب', html`<input class="inp" data-k="notes" value="${d.notes || ''}" placeholder="مثال: جرد نهاية الشهر، تالف، عينات مجانية">`)}</div>
+        ${whField(d)}
       </div></div>
       <div class="card" style="margin-top:14px"><div class="card-h"><h3>الأصناف</h3><span class="muted small">اكتب الكمية الفعلية بعد العد، أو الفرق مباشرة</span></div>
         <div data-lines></div><small class="fld-e" data-err="lines" hidden></small>

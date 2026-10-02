@@ -3,7 +3,7 @@ import * as store from '../store.js';
 import { calcDoc, validateDoc, num, round, docNo, moneyAccounts, balances, paymentList, nextAccountCode, lineFactor } from '../core.js';
 import { html, raw, money, moneyText, toast, confirmBox, modal, combo, $, $$, norm, field, fmtDate } from '../ui.js';
 import { go, setTitle, docHref, withQuery } from '../nav.js';
-import { S, dec, today, partyItems, quickParty, docPaper, printPaper, cameraDialog, partyName, accName } from './common.js';
+import { S, dec, today, partyItems, quickParty, docPaper, printPaper, cameraDialog, partyName, accName, defaultWh } from './common.js';
 import { can, usersEnabled } from '../auth.js';
 
 const HELD_KEY = 'ahsebha-pos-held';
@@ -185,6 +185,9 @@ export function pos({ root }) {
       lines: cart.lines.map((l) => ({ product: l.product, desc: l.desc, qty: num(l.qty), price: num(l.price), disc: num(l.disc), tax: l.tax || 'S', ...(l.unit ? { unit: l.unit, factor: num(l.factor) } : {}) })),
       notes: '', payments: result.payments.filter((p) => p.amount > 0), pos: true,
     };
+    const wh = store.getDb().warehouses.some((w) => w.id === s.posWh) ? s.posWh : defaultWh();
+    if (wh) doc.wh = wh;
+    if (s.posCc && store.getDb().centers.some((c) => c.id === s.posCc)) doc.cc = s.posCc;
     if (result.tendered) { doc.tendered = result.tendered; doc.change = round(result.tendered - (result.payments.find((p) => p.acc === accs.cash.id)?.amount || 0), dec()); }
     const errs = validateDoc(store.getDb(), doc);
     if (Object.keys(errs).length) { toast(Object.values(errs)[0], 'err'); return; }
@@ -308,13 +311,15 @@ export function pos({ root }) {
       body: html`<form class="form-grid" novalidate>
         ${field('حساب النقد', html`<select class="inp" name="posCash">${accs.money.map((a) => html`<option value="${a.id}" ${a.id === accs.cash.id ? raw('selected') : ''}>${a.name}</option>`)}</select>`)}
         ${field('حساب البطاقة / مدى', html`<select class="inp" name="posCard">${accs.money.map((a) => html`<option value="${a.id}" ${a.id === accs.card.id ? raw('selected') : ''}>${a.name}</option>`)}</select>`)}
+        ${store.getDb().warehouses.length ? field('المستودع', html`<select class="inp" name="posWh">${store.getDb().warehouses.map((w) => html`<option value="${w.id}" ${w.id === (s.posWh || defaultWh()) ? raw('selected') : ''}>${w.name}</option>`)}</select>`) : ''}
+        ${store.getDb().centers.length ? field('الفرع', html`<select class="inp" name="posCc"><option value="">— بدون —</option>${store.getDb().centers.map((c) => html`<option value="${c.id}" ${c.id === s.posCc ? raw('selected') : ''}>${c.name}</option>`)}</select>`) : ''}
         ${field('حجم الإيصال', html`<select class="inp" name="posPrintSize"><option value="receipt" ${s.posPrintSize !== 'a4' ? raw('selected') : ''}>حراري 80 مم</option><option value="a4" ${s.posPrintSize === 'a4' ? raw('selected') : ''}>A4</option></select>`)}
         <label class="check span-all"><input type="checkbox" name="posAutoPrint" ${s.posAutoPrint !== false ? raw('checked') : ''}> طباعة الإيصال تلقائياً بعد كل بيع</label>
         <p class="muted small span-all">لإضافة حساب مدى أو محفظة: دليل الحسابات ← حساب جديد تحت «الأصول المتداولة» مع تفعيل «صندوق أو بنك».</p>
         <div class="dlg-actions span-all"><button class="btn btn-primary">حفظ</button></div></form>`,
       onMount: (dlg, done) => {
         const f = $('form', dlg);
-        f.onsubmit = (e) => { e.preventDefault(); store.saveSettings({ posCash: f.posCash.value, posCard: f.posCard.value, posPrintSize: f.posPrintSize.value, posAutoPrint: f.posAutoPrint.checked }); done(true); };
+        f.onsubmit = (e) => { e.preventDefault(); store.saveSettings({ posCash: f.posCash.value, posCard: f.posCard.value, posPrintSize: f.posPrintSize.value, posAutoPrint: f.posAutoPrint.checked, ...(f.posWh ? { posWh: f.posWh.value } : {}), ...(f.posCc ? { posCc: f.posCc.value } : {}) }); done(true); };
       },
     }).then((ok) => { if (ok) go('#/pos'); });
   }

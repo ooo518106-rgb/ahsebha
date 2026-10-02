@@ -135,12 +135,21 @@ export function normalize(d) {
     users: arr(d.users).filter((u) => typeof u.name === 'string' && isObj(u.pin)),
     recovery: isObj(d.recovery) ? d.recovery : null,
     assets: arr(d.assets).filter((a) => typeof a.name === 'string'),
+    employees: arr(d.employees).filter((x) => typeof x.name === 'string'),
+    warehouses: arr(d.warehouses).filter((x) => typeof x.name === 'string'),
+    centers: arr(d.centers).filter((x) => typeof x.name === 'string'),
+    recons: arr(d.recons).filter((x) => typeof x.account === 'string'),
     recurring: arr(d.recurring).filter((r) => isObj(r.src) && typeof r.src.type === 'string'),
     audit: arr(d.audit).slice(-AUDIT_MAX),
   };
   if (d.demo) out.demo = true;
-  const ids = new Set(out.accounts.map((a) => a.id));
-  for (const a of defaultAccounts()) if (a.sys && !ids.has(a.id)) out.accounts.push(a);
+  const byId = new Map(out.accounts.map((a) => [a.id, a]));
+  // حسابات النظام الجديدة تُضاف للدليل القديم، والموجود منها يصير أساسياً لا يُحذف
+  for (const a of defaultAccounts()) {
+    if (!a.sys) continue;
+    if (!byId.has(a.id)) out.accounts.push(a);
+    else byId.get(a.id).sys = true;
+  }
   for (const x of out.docs) {
     const n = Number(x.no) || 0;
     if ((out.seq[x.type] || 1) <= n) out.seq[x.type] = n + 1;
@@ -402,6 +411,53 @@ export function runRecurring(today = ymd(new Date()), { only } = {}) {
 }
 export const recurringDue = (today = ymd(new Date())) => (db ? db.recurring.filter((r) => r.active !== false && isDate(r.next) && r.next <= today).length : 0);
 export const daysUntil = (date) => daysBetween(ymd(new Date()), date);
+
+// ─── الموظفون ───
+export const findEmployee = (id) => (db ? db.employees.find((x) => x.id === id) : null);
+export function saveEmployee(e) {
+  mutate((d) => {
+    const i = e.id ? d.employees.findIndex((x) => x.id === e.id) : -1;
+    if (i >= 0) d.employees[i] = { ...d.employees[i], ...e };
+    else { e.id = 'em' + newId(); e.createdAt = now(); e.no = d.employees.reduce((m, x) => Math.max(m, x.no || 0), 0) + 1; d.employees.push(e); }
+  });
+  return e;
+}
+export const employeeUsage = (id) => db.docs.filter((x) => x.employee === id || (x.type === 'payroll' && (x.lines || []).some((l) => l.employee === id))).length;
+export function deleteEmployee(id) {
+  if (employeeUsage(id)) throw new Error('لا يمكن الحذف: للموظف مسيرات أو سلف مسجلة. يمكنك إيقافه بدلاً من ذلك');
+  mutate((d) => { d.employees = d.employees.filter((x) => x.id !== id); });
+}
+
+// ─── المستودعات والفروع (مراكز التكلفة) ───
+// kind: warehouses | centers
+export function saveListItem(kind, item) {
+  mutate((d) => {
+    const i = item.id ? d[kind].findIndex((x) => x.id === item.id) : -1;
+    if (i >= 0) d[kind][i] = { ...d[kind][i], ...item };
+    else { item.id = (kind === 'warehouses' ? 'wh' : 'cc') + newId(); d[kind].push(item); }
+  });
+  return item;
+}
+export function listItemUsage(kind, id) {
+  if (kind === 'warehouses') return db.docs.filter((x) => x.wh === id || x.from === id || x.to === id).length;
+  return db.docs.filter((x) => x.cc === id || (x.lines || []).some((l) => l.cc === id)).length + db.employees.filter((x) => x.cc === id).length + db.assets.filter((x) => x.cc === id).length;
+}
+export function deleteListItem(kind, id) {
+  if (listItemUsage(kind, id)) throw new Error('لا يمكن الحذف: مستخدم في مستندات. يمكنك إعادة تسميته');
+  mutate((d) => { d[kind] = d[kind].filter((x) => x.id !== id); });
+}
+
+// ─── مطابقة البنك ───
+export const findRecon = (id) => (db ? db.recons.find((x) => x.id === id) : null);
+export function saveRecon(r) {
+  mutate((d) => {
+    const i = r.id ? d.recons.findIndex((x) => x.id === r.id) : -1;
+    if (i >= 0) d.recons[i] = { ...d.recons[i], ...r };
+    else { r.id = 'rn' + newId(); r.createdAt = now(); r.by = actor; d.recons.push(r); }
+  });
+  return r;
+}
+export function deleteRecon(id) { mutate((d) => { d.recons = d.recons.filter((x) => x.id !== id); }); }
 
 // ─── المستخدمون ───
 export const findUser = (id) => (db && id ? db.users.find((x) => x.id === id) : null);

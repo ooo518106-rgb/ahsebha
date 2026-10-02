@@ -6,7 +6,7 @@ import { go, guard, setTitle, docHref, SEG } from '../nav.js';
 import {
   head, bindRows, today, S, dec, taxLabel, partyName, docStatus, periodOf, periodBar, bindPeriod, inPeriod,
   moneyList, partyItems, productItems, quickParty, quickProduct, taxOptions, docPaper, printPaper, entryTable, waLink, csvName,
-  docLocked, lockedNote, lockedPage, deliveryPaper,
+  docLocked, lockedNote, lockedPage, deliveryPaper, whField, ccField, defaultWh, whLabel, ccLabel,
 } from './common.js';
 import { repeatDialog } from './recurring.js';
 
@@ -153,6 +153,8 @@ export function form(type, { root, params, query }) {
   }
   const showTax = !!s.vat || num(d.vatRate) > 0;
   if (!showTax) d.vatRate = 0;
+  const stockDoc = type !== 'quote';
+  if (!existing && stockDoc && !d.wh && defaultWh()) d.wh = defaultWh();
 
   // الدفع: حساب نقدي أو آجل، والمبلغ يتبع الإجمالي حتى يعدّله المستخدم
   const hasPay = !NO_POSTING.includes(type);
@@ -205,6 +207,7 @@ export function form(type, { root, params, query }) {
         ${type === 'sale' || type === 'purchase' ? field('تاريخ الاستحقاق', html`<input class="inp" type="date" data-k="dueDate" value="${d.dueDate || ''}">`, { hint: 'للبيع أو الشراء الآجل' }) : ''}
         ${type === 'quote' ? field('صالح حتى', html`<input class="inp" type="date" data-k="validUntil" value="${d.validUntil || ''}">`) : ''}
         ${isOrder(type) ? field('تاريخ التسليم المتوقع', html`<input class="inp" type="date" data-k="deliveryDate" value="${d.deliveryDate || ''}">`) : ''}
+        ${stockDoc ? whField(d) : ''}${ccField(d)}
         ${type === 'purchase' ? field('رقم فاتورة المورد', html`<input class="inp" data-k="ref" value="${d.ref || ''}" dir="auto">`) : ''}
         ${C.ref ? html`<label class="fld span2"><span class="fld-l">الفاتورة الأصلية</span>
           <div class="inline"><select class="inp" data-ref>${refOptions()}</select><button type="button" class="btn btn-ghost btn-sm" data-copy-ref ${d.refId ? '' : raw('hidden')}>📋 نسخ بنودها</button></div>
@@ -244,8 +247,9 @@ export function form(type, { root, params, query }) {
   function stockHint(l) {
     const p = store.findProduct(l.product);
     if (!p || p.type !== 'stock' || !(type === 'sale' || type === 'preturn')) return '';
-    const have = stock().get(p.id)?.qty || 0;
-    const mine = existing ? (existing.lines || []).filter((x) => x.product === p.id).reduce((t, x) => t + num(x.qty) * lineFactor(x), 0) : 0;
+    const multi = store.getDb().warehouses.length && d.wh;
+    const have = multi ? store.getBooks().whQty.get(p.id)?.get(d.wh) || 0 : stock().get(p.id)?.qty || 0;
+    const mine = existing && (!multi || existing.wh === d.wh) ? (existing.lines || []).filter((x) => x.product === p.id).reduce((t, x) => t + num(x.qty) * lineFactor(x), 0) : 0;
     const avail = round(have + mine, 3);
     const want = round(d.lines.filter((x) => x.product === p.id).reduce((t, x) => t + num(x.qty) * lineFactor(x), 0), 3);
     return html`<small class="c-sub ${want > avail ? 'neg' : ''}">المتوفر: ${avail} ${p.unit || ''}${want > avail ? ' — الكمية أكبر من المتوفر' : ''}</small>`;
@@ -547,6 +551,7 @@ export function show(type, { root, params, query }) {
         <div class="kpi"><span class="kpi-l">المتبقي كرصيد</span><span class="kpi-v">${money(st ? st.open : 0, { sym: true })}</span><span class="kpi-s">يُخصم من الفواتير القادمة</span></div>` : ''}
       ${NO_POSTING.includes(type) ? html`<div class="kpi"><span class="kpi-l">الحالة</span><span class="kpi-v">${badge(conv ? 'converted' : d.validUntil && d.validUntil < today() ? 'expired' : 'open')}</span>${conv ? html`<a class="kpi-s" href="${docHref(conv)}">${DOC_TYPES[conv.type]?.name || ''} ${docNo(conv, s)}</a>` : ''}</div>` : ''}
     </div>
+    ${d.wh || d.cc ? html`<p class="muted small" style="margin-bottom:10px">${[d.wh ? '🏬 ' + whLabel(d.wh) : '', d.cc ? '📍 ' + ccLabel(d.cc) : ''].filter(Boolean).join(' · ')}</p>` : ''}
     ${ref ? html`<p class="note note-info" style="margin-bottom:12px">مرتبط بالفاتورة الأصلية <a href="${docHref(ref)}">${docNo(ref, s)}</a></p>` : ''}
     ${quote ? html`<p class="note note-info" style="margin-bottom:12px">محوّل من ${DOC_TYPES[quote.type]?.name || 'مستند'} <a href="${docHref(quote)}">${docNo(quote, s)}</a></p>` : ''}
     ${returns.length ? html`<p class="note note-warn" style="margin-bottom:12px">عليها مرتجعات: ${returns.map((r, i) => html`${i ? '، ' : ''}<a href="${docHref(r)}">${docNo(r, s)}</a>`)}</p>` : ''}

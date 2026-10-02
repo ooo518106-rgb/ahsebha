@@ -34,6 +34,27 @@ export const lockedNote = (d) => html`<p class="note note-warn" style="margin-bo
 export const lockedPage = (d) => html`<div class="empty"><div class="empty-ic">🔒</div><h3>المستند في فترة مقفلة</h3><p>الفترة مقفلة حتى ${fmtDate(S().lockDate)}. يمكن للمالك تغيير تاريخ القفل من الإعدادات.</p><p><a class="btn btn-ghost" href="${docHrefOf(d)}">العودة للمستند</a></p></div>`;
 
 export const partyName = (id, fallback = '') => store.findParty(id)?.name || fallback;
+
+// العدد مع المعدود بالعربي: سنة، سنتان، 3 سنوات، 11 سنة
+export const countAr = (n, [one, two, few, many]) => (n === 1 ? one : n === 2 ? two : n <= 10 ? `${n} ${few}` : `${n} ${many}`);
+export const YEARS = ['سنة', 'سنتان', 'سنوات', 'سنة'];
+export const MONTHS_N = ['شهر', 'شهران', 'أشهر', 'شهراً'];
+
+// ─── المستودعات والفروع في النماذج (تظهر فقط عند تعريفها) ───
+export const defaultWh = () => { const w = store.getDb().warehouses; return w.length ? (w.some((x) => x.id === S().defaultWh) ? S().defaultWh : w[0].id) : ''; };
+export const whLabel = (id) => store.getDb().warehouses.find((w) => w.id === id)?.name || '';
+export const ccLabel = (id) => store.getDb().centers.find((c) => c.id === id)?.name || '';
+export function whField(d) {
+  const whs = store.getDb().warehouses;
+  if (!whs.length) return '';
+  const cur = d.wh || defaultWh();
+  return field('المستودع', html`<select class="inp" data-k="wh" data-f="wh">${whs.map((w) => html`<option value="${w.id}" ${w.id === cur ? raw('selected') : ''}>${w.name}</option>`)}</select>`);
+}
+export function ccField(d) {
+  const cs = store.getDb().centers;
+  if (!cs.length) return '';
+  return field('الفرع / مركز التكلفة', html`<select class="inp" data-k="cc" data-f="cc"><option value="">— بدون —</option>${cs.map((c) => html`<option value="${c.id}" ${c.id === d.cc ? raw('selected') : ''}>${c.name}</option>`)}</select>`);
+}
 export const accName = (id) => store.findAccount(id)?.name || 'حساب محذوف';
 export const productName = (id) => store.findProduct(id)?.name || '';
 

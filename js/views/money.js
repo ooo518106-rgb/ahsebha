@@ -1,12 +1,12 @@
 // ═══ المصروفات، سندات القبض والصرف، والتحويلات بين الصندوق والبنوك ═══
 import * as store from '../store.js';
-import { calcDoc, expenseAsDoc, docNo, DOC_TYPES, validateDoc, num, round, nextAccountCode, tafqeet, isPdc } from '../core.js';
+import { calcDoc, expenseAsDoc, docNo, DOC_TYPES, validateDoc, num, round, nextAccountCode, tafqeet, isPdc, isDate } from '../core.js';
 import { html, raw, money, fmtDate, toast, confirmBox, combo, showErrors, empty, norm, $, $$, exportTable, moneyText, field } from '../ui.js';
 import { go, guard, setTitle, docHref, partyHref, SEG } from '../nav.js';
 import {
   head, bindRows, today, S, dec, taxLabel, partyName, accName, periodOf, periodBar, bindPeriod, inPeriod,
   moneyList, moneyOptions, partyItems, accountItems, quickParty, taxOptions, voucherPaper, printPaper, entryTable, waLink, csvName, METHODS,
-  docLocked, lockedNote, lockedPage,
+  docLocked, lockedNote, lockedPage, ccField,
 } from './common.js';
 import { repeatDialog } from './recurring.js';
 
@@ -126,18 +126,20 @@ function expenseForm({ root, query }, existing, title) {
   const s = S();
   const db = store.getDb();
   const d = existing ? clone(existing) : {
-    type: 'expense', date: today(), account: query.account || '', amount: query.amount ? num(query.amount) : '', tax: 'S', inclusive: !query.amount,
+    type: 'expense', date: today(), account: query.account || '', amount: query.amount ? num(query.amount) : '', tax: 'S', inclusive: !query.amount || !!query.inc,
     vatRate: s.vat ? num(s.vatRate) : 0, party: query.party || null, payee: '', paid: 0, payAcc: 'cash', ref: '', notes: query.notes || '',
   };
   const showTax = !!s.vat || num(d.vatRate) > 0;
   if (!showTax) d.vatRate = 0;
-  let pay = existing ? (num(existing.paid) > 0 ? existing.payAcc : '') : (moneyList()[0]?.id || '');
+  let pay = existing ? (num(existing.paid) > 0 ? existing.payAcc : '') : (moneyList().some((a) => a.id === query.pay) ? query.pay : moneyList()[0]?.id || '');
+  if (!existing && isDate(query.date)) d.date = query.date;
 
   root.innerHTML = String(formShell(title, existing ? docHref(existing) : '#/expenses', html`
     <div class="card"><div class="form-grid">
       ${field('التاريخ', html`<input class="inp" type="date" data-f="date" data-k="date" value="${d.date}">`)}
       <div class="fld span2"><span class="fld-l">بند المصروف</span><input class="inp" data-f="account" data-acc placeholder="مثال: إيجار، رواتب، كهرباء…" value="${d.account ? accName(d.account) : ''}"><small class="fld-e" data-err="account" hidden></small></div>
       <div class="fld"><span class="fld-l">المبلغ</span><input class="inp" type="text" inputmode="decimal" data-num autocomplete="off" data-f="amount" data-k="amount" value="${d.amount}"><small class="fld-e" data-err="amount" hidden></small></div>
+      ${ccField(d)}
       ${showTax ? html`${field(taxLabel(), html`<select class="inp" data-k="tax">${taxOptions(d.tax || 'S')}</select>`)}
         <label class="check" style="align-self:end;min-height:40px"><input type="checkbox" data-k="inclusive" ${d.inclusive ? raw('checked') : ''}> المبلغ شامل ${taxLabel()}</label>` : ''}
     </div></div>
@@ -215,8 +217,8 @@ function voucherForm(type, { root, query }, existing, title) {
   const B = store.getBooks();
   const isR = type === 'receipt';
   const d = existing ? clone(existing) : {
-    type, date: today(), party: query.party || null, account: query.account || '', amount: query.amount ? num(query.amount) : '',
-    money: moneyList()[0]?.id || 'cash', method: 'cash', chequeNo: '', link: query.link || null, notes: '',
+    type, date: isDate(query.date) ? query.date : today(), party: query.party || null, account: query.account || '', amount: query.amount ? num(query.amount) : '',
+    money: moneyList().some((a) => a.id === query.money) ? query.money : moneyList()[0]?.id || 'cash', method: 'cash', chequeNo: '', link: query.link || null, notes: query.notes || '',
   };
   const qp = store.findParty(d.party);
   let mode = d.party ? (qp ? qp.kind : (isR ? 'customer' : 'supplier')) : d.account ? 'account' : (isR ? 'customer' : 'supplier');
@@ -233,6 +235,7 @@ function voucherForm(type, { root, query }, existing, title) {
       <label class="fld"><span class="fld-l">${isR ? 'أودع في' : 'صُرف من'}</span><select class="inp" data-f="money" data-k="money">${moneyOptions(d.money)}</select><small class="fld-e" data-err="money" hidden></small></label>
       <label class="fld"><span class="fld-l">طريقة الدفع</span><select class="inp" data-k="method">${Object.entries(METHODS).map(([k, v]) => html`<option value="${k}" ${k === d.method ? raw('selected') : ''}>${v}</option>`)}</select></label>
       ${field('رقم الشيك / المرجع', html`<input class="inp" data-k="chequeNo" value="${d.chequeNo || ''}" dir="auto">`)}
+      ${ccField(d)}
       <div class="span-all" data-chq-box><div class="form-grid">
         ${field('البنك المسحوب عليه', html`<input class="inp" data-k="chequeBank" value="${d.chequeBank || ''}" placeholder="مثال: البنك الأهلي">`)}
         <div class="fld"><span class="fld-l">تاريخ استحقاق الشيك</span><input class="inp" type="date" data-f="chequeDue" data-k="chequeDue" value="${d.chequeDue || ''}"><small class="fld-e" data-err="chequeDue" hidden></small></div>

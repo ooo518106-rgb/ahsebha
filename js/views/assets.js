@@ -3,15 +3,13 @@ import * as store from '../store.js';
 import { assetSchedule, assetAccum, descendantIds, num, round, isDate, isLockedDate, monthsBetween } from '../core.js';
 import { html, raw, money, fmtDate, toast, confirmBox, modal, $, field, empty, showErrors, exportTable } from '../ui.js';
 import { go, guard, setTitle, withQuery } from '../nav.js';
-import { head, S, dec, today, accName, moneyOptions, csvName } from './common.js';
+import { head, S, dec, today, accName, moneyOptions, csvName, countAr, YEARS, MONTHS_N } from './common.js';
 
 const fixedAccounts = () => {
   const ids = descendantIds(store.getDb(), 'g12');
   return store.getDb().accounts.filter((a) => ids.has(a.id) && !a.group && a.id !== 'accdep');
 };
-// العدد مع المعدود بالعربي: سنة، سنتان، 3 سنوات، 11 سنة
-const count = (n, [one, two, few, many]) => (n === 1 ? one : n === 2 ? two : n <= 10 ? `${n} ${few}` : `${n} ${many}`);
-const lifeText = (m) => { const y = Math.floor(m / 12), r = m % 12; return [y ? count(y, ['سنة', 'سنتان', 'سنوات', 'سنة']) : '', r ? count(r, ['شهر', 'شهران', 'أشهر', 'شهراً']) : ''].filter(Boolean).join(' و') || '—'; };
+const lifeText = (m) => { const y = Math.floor(m / 12), r = m % 12; return [y ? countAr(y, YEARS) : '', r ? countAr(r, MONTHS_N) : ''].filter(Boolean).join(' و') || '—'; };
 function info(a) {
   const s = S();
   const sc = store.getBooks().schedules.get(a.id) || assetSchedule(a, { startDate: s.startDate, dec: dec() });
