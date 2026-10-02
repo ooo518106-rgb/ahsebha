@@ -9,6 +9,8 @@ import {
   docLocked, lockedNote, lockedPage, ccField,
 } from './common.js';
 import { repeatDialog } from './recurring.js';
+import { scanForExpense, takeDraft, receiptCheck } from './scan.js';
+import { bindFiles, bindDocFiles, saveUploads } from './attach.js';
 
 const NEW = { expense: 'مصروف جديد', receipt: 'سند قبض جديد', payment: 'سند صرف جديد', transfer: 'تحويل جديد' };
 const ICON = { expense: '💸', receipt: '📥', payment: '📤', transfer: '🔁' };
@@ -42,7 +44,7 @@ export function list(type, { root, query, path }) {
   const cats = type === 'expense' ? [...new Set(all.map((d) => d.account))] : [];
 
   root.innerHTML = String(html`
-    ${head(T.plural, { sub: `${all.length} مستند`, actions: html`<a class="btn btn-primary" href="#/${SEG[type]}/new">➕ ${NEW[type]}</a>` })}
+    ${head(T.plural, { sub: `${all.length} مستند`, actions: html`<a class="btn btn-primary" href="#/${SEG[type]}/new">➕ ${NEW[type]}</a>${type === 'expense' ? html`<a class="btn btn-ghost" href="#/expenses/new?read=1">📷 من إيصال</a>` : ''}` })}
     <div class="toolbar">
       <input class="inp grow" type="search" data-q placeholder="بحث بالرقم أو الطرف أو البيان" value="${state.q}">
       ${type === 'expense' ? html`<select class="inp" data-cat><option value="">كل البنود</option>${cats.map((c) => html`<option value="${c}">${accName(c)}</option>`)}</select>` : ''}
@@ -106,8 +108,8 @@ export function form(type, ctx) {
   return voucherForm(type, ctx, existing, title);
 }
 
-function formShell(title, back, body) {
-  return html`${head(title, { actions: html`<a class="btn btn-ghost" href="${back}">إلغاء</a>` })}
+function formShell(title, back, body, extra = '') {
+  return html`${head(title, { actions: html`${extra}<a class="btn btn-ghost" href="${back}">إلغاء</a>` })}
     <form novalidate data-form>${body}
       <div class="form-actions sticky-actions"><button class="btn btn-primary" data-save="view">💾 حفظ</button>
       <button type="button" class="btn btn-ghost" data-save="print">🖨️ حفظ وطباعة</button>
@@ -125,14 +127,19 @@ function finish(type, doc, after) {
 function expenseForm({ root, query }, existing, title) {
   const s = S();
   const db = store.getDb();
-  const d = existing ? clone(existing) : {
+  // مسودة من قراءة إيصال (scan.js)
+  const pre = !existing && query.draft ? takeDraft(query.draft) : null;
+  const d = existing ? clone(existing) : pre || {
     type: 'expense', date: today(), account: query.account || '', amount: query.amount ? num(query.amount) : '', tax: 'S', inclusive: !query.amount || !!query.inc,
     vatRate: s.vat ? num(s.vatRate) : 0, party: query.party || null, payee: '', paid: 0, payAcc: 'cash', ref: '', notes: query.notes || '',
   };
   const showTax = !!s.vat || num(d.vatRate) > 0;
   if (!showTax) d.vatRate = 0;
   let pay = existing ? (num(existing.paid) > 0 ? existing.payAcc : '') : (moneyList().some((a) => a.id === query.pay) ? query.pay : moneyList()[0]?.id || '');
-  if (!existing && isDate(query.date)) d.date = query.date;
+  if (pre && pre._pay != null && (moneyList().some((a) => a.id === pre._pay) || (pre._pay === '' && d.party))) pay = pre._pay;
+  delete d._pay;
+  if (!existing && !pre && isDate(query.date)) d.date = query.date;
+  const scanBtn = existing ? '' : html`<button type="button" class="btn btn-ghost" data-scan>📷 قراءة إيصال</button>`;
 
   root.innerHTML = String(formShell(title, existing ? docHref(existing) : '#/expenses', html`
     <div class="card"><div class="form-grid">
@@ -146,11 +153,12 @@ function expenseForm({ root, query }, existing, title) {
     <div class="card"><div class="fld"><span class="fld-l">طريقة الدفع</span><div class="seg" data-pay></div><small class="fld-e" data-err="payAcc" hidden></small></div>
       <div class="form-grid" style="margin-top:12px">
         <div class="fld span2"><span class="fld-l">المورد <small class="muted" data-sup-hint></small></span><input class="inp" data-f="party" data-party placeholder="اختياري — مطلوب للمصروف الآجل" value="${partyName(d.party)}"><small class="fld-e" data-err="party" hidden></small></div>
-        ${field('الجهة المستفيدة', html`<input class="inp" data-k="payee" value="${d.payee || ''}" placeholder="مثال: شركة الكهرباء">`, { hint: 'إن لم تكن مسجلة كمورد' })}
+        ${field('الجهة المستفيدة', html`<input class="inp" data-k="payee" value="${d.payee || ''}" placeholder="مثال: شركة الكهرباء">`, { hint: d.payeeVat && !d.party ? `الرقم الضريبي: ${d.payeeVat}` : 'إن لم تكن مسجلة كمورد' })}
         ${field('رقم الفاتورة / الإيصال', html`<input class="inp" data-k="ref" value="${d.ref || ''}">`)}
         <div class="span-all">${field('البيان', html`<textarea class="inp" data-k="notes" rows="2">${d.notes || ''}</textarea>`)}</div>
       </div></div>
-    <div class="card" data-sum></div>`));
+    <div class="card" data-sum></div>
+    <div data-att></div>`, scanBtn));
 
   const calc = () => calcDoc(expenseAsDoc(d), dec());
   const dirty = () => { guard.dirty = true; };
@@ -158,7 +166,8 @@ function expenseForm({ root, query }, existing, title) {
     const t = calc();
     $('[data-sum]', root).innerHTML = String(html`<div class="totals">
       ${showTax ? html`<div class="row"><span>المبلغ قبل الضريبة</span>${money(t.net)}</div><div class="row"><span>${taxLabel()} القابلة للخصم</span>${money(t.vat)}</div>` : ''}
-      <div class="row grand"><span>الإجمالي</span><span>${money(t.total, { sym: true })}</span></div></div>`);
+      <div class="row grand"><span>الإجمالي</span><span>${money(t.total, { sym: true })}</span></div></div>
+      ${receiptCheck(d.scan, t)}`);
     const seg = $('[data-pay]', root);
     seg.innerHTML = String(html`${[...moneyList().map((a) => [a.id, (a.id === 'cash' ? '💵 ' : '🏦 ') + a.name]), ['', '⏳ آجل على المورد']].map(([v, t2]) => html`<button type="button" data-pay-v="${v}" class="${v === pay ? 'on' : ''}">${t2}</button>`)}`);
     $('[data-sup-hint]', root).textContent = pay ? '(اختياري)' : '(مطلوب)';
@@ -193,6 +202,7 @@ function expenseForm({ root, query }, existing, title) {
     if (k === 'tax') { d.tax = e.target.value; dirty(); drawSum(); }
   });
   root.addEventListener('click', (e) => {
+    if (e.target.closest('[data-scan]')) { scanForExpense({ ...d, _pay: pay }); return; }
     const b = e.target.closest('[data-pay-v]');
     if (b) { pay = b.dataset.payV; dirty(); drawSum(); return; }
     const sv = e.target.closest('[data-save]');
@@ -201,6 +211,8 @@ function expenseForm({ root, query }, existing, title) {
   $('[data-form]', root).onsubmit = (e) => { e.preventDefault(); save('view'); };
   function save(after) {
     const doc = { ...d, amount: num(d.amount), vatRate: showTax ? num(d.vatRate) : 0, tax: showTax ? d.tax : 'S', payee: String(d.payee || '').trim(), notes: String(d.notes || '').trim() };
+    if (doc.party || !doc.payeeVat) delete doc.payeeVat;
+    if (!doc.files || !doc.files.length) delete doc.files;
     const total = calcDoc(expenseAsDoc(doc), dec()).total;
     doc.paid = pay ? total : 0;
     doc.payAcc = pay || null;
@@ -209,6 +221,21 @@ function expenseForm({ root, query }, existing, title) {
     finish('expense', doc, after);
   }
   drawSum();
+  bindFiles(root, { get: () => d.files || [], set: (files) => { d.files = files; dirty(); } });
+  if (pre) guard.dirty = true;
+  // من القائمة السريعة («مصروف من إيصال») أو صورة مشتركة من تطبيق آخر
+  if (!existing && !pre && (query.read || query.shared)) {
+    history.replaceState(null, '', '#/expenses/new');
+    (async () => {
+      let file = null;
+      if (query.shared) {
+        const shared = await store.takeShared().catch(() => []);
+        file = shared[0] || null;
+        if (shared.length > 1) d.files = [...(d.files || []), ...(await saveUploads(shared.slice(1)))];
+      }
+      scanForExpense({ ...d, _pay: pay }, { file });
+    })();
+  }
 }
 
 // ── سند القبض والصرف ──
@@ -396,7 +423,10 @@ export function show(type, { root, params, query }) {
     ${locked ? lockedNote(d) : ''}
     ${chqState ? html`<p class="note note-${chqState[0] === 'ok' ? 'ok' : chqState[0] === 'bad' ? 'bad' : 'warn'}" style="margin-bottom:12px">🧾 شيك رقم ${d.chequeNo || '—'}: ${chqState[1]}</p>` : ''}
     ${type === 'expense' && st && st.due > 0 ? html`<p class="note note-warn" style="margin-bottom:12px">مصروف آجل: المتبقي للمورد ${money(st.due, { sym: true })}. <a href="#/payments/new?party=${d.party}&link=${d.id}&amount=${st.due}">سجّل السداد</a></p>` : ''}
+    ${d.scan ? html`<p class="note note-info" style="margin-bottom:12px">🧾 ${d.scan.kind === 'qr' ? 'مقروء من رمز QR الضريبي' : 'مقروء من صورة الإيصال'}${d.scan.seller ? ` · ${d.scan.seller}` : ''}${d.scan.vat ? html` · <span dir="ltr">${d.scan.vat}</span>` : ''}
+      ${type === 'expense' ? receiptCheck(d.scan, { total: amount }) : ''}</p>` : ''}
     <div class="paper-wrap">${voucherPaper(d)}</div>
+    <div data-att></div>
     ${apps.length ? html`<div class="card" style="margin-top:14px"><div class="card-h"><h3>${type === 'expense' ? 'التسديدات' : 'خُصم من'}</h3>${st && st.open ? html`<span class="muted small">غير مخصص: ${money(st.open, { sym: true })}</span>` : ''}</div><div class="list-mini">
       ${apps.map((a) => {
         const x = store.findDoc(a.doc);
@@ -410,6 +440,7 @@ export function show(type, { root, params, query }) {
   const doPrint = () => printPaper(voucherPaper(d), { title: `${no} - ${s.name || ''}` });
   $('[data-print]', root).onclick = doPrint;
   if (query.print) setTimeout(doPrint, 300);
+  bindDocFiles(root, d, { locked });
   const wa = $('[data-wa]', root);
   if (wa) wa.onclick = () => {
     const bal = B.partyBalance.get(party.id) || 0;

@@ -11,6 +11,7 @@ import {
   accountItems, partyItems, entryTable, printReport, printPaper, csvName, docOf, docLocked, lockedNote, lockedPage, ccField,
 } from './common.js';
 import { repeatDialog } from './recurring.js';
+import { bindDocFiles } from './attach.js';
 
 const clone = (x) => JSON.parse(JSON.stringify(x));
 const natural = (a, v) => (a && !isDebitNature(a.type) ? -v : v);
@@ -274,7 +275,9 @@ export function show(type, { root, params, query }) {
   root.innerHTML = String(html`
     ${head('قيد يومية ' + no, { sub: `${fmtDate(d.date)}${d.notes ? ' · ' + d.notes : ''}`, actions: html`<button class="btn btn-primary" data-print>🖨️ طباعة</button><button class="btn btn-ghost" data-repeat>♻️ تكرار</button>${docLocked(d) ? '' : html`<a class="btn btn-ghost" href="#/journal/${d.id}/edit">✏️ تعديل</a>`}<a class="btn btn-ghost" href="#/journal/new">➕ قيد جديد</a>${docLocked(d) ? '' : html`<button class="btn btn-text-danger" data-del>🗑️ حذف</button>`}` })}
     ${docLocked(d) ? lockedNote(d) : ''}
-    <div data-entry>${entryTable(entry)}</div>`);
+    <div data-entry>${entryTable(entry)}</div>
+    <div data-att></div>`);
+  bindDocFiles(root, d, { locked: docLocked(d) });
   const doPrint = () => printPaper(html`<div class="paper pp-report"><div class="pp-head"><div><h2 style="font-size:18px;font-weight:900">${s.name || ''}</h2></div><div class="pp-title"><h1>قيد يومية</h1><div class="en" dir="ltr">${no}</div></div></div>
     <div class="pp-meta"><div><span>التاريخ</span><b>${fmtDate(d.date)}</b></div><div><span>البيان</span><b>${d.notes || '—'}</b></div></div>${raw($('[data-entry]', root).innerHTML)}
     <div class="pp-sign"><div>أعدّه</div><div>راجعه</div><div>اعتمده</div></div></div>`, { title: no });

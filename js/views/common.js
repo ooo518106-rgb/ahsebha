@@ -352,6 +352,8 @@ export function voucherPaper(d) {
     amount = T.total;
     rows.push(['بند المصروف', accName(d.account)]);
     if (party || d.payee) rows.push(['الجهة', party ? party.name : d.payee]);
+    const vatNo = party ? party.vatNo : d.payeeVat;
+    if (vatNo) rows.push(['الرقم الضريبي للجهة', vatNo]);
     if (d.notes) rows.push(['البيان', d.notes]);
     if (T.vat) rows.push(['المبلغ قبل الضريبة', moneyText(T.net)], [s.taxLabel || 'الضريبة', moneyText(T.vat)]);
     rows.push(['طريقة الدفع', num(d.paid) > 0 ? accName(d.payAcc) : 'آجل على المورد']);

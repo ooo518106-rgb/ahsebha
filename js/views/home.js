@@ -6,6 +6,7 @@ import { go, setTitle, docHref } from '../nav.js';
 import { today, S, partyName, docStatus } from './common.js';
 import { monthlyChart } from './chart.js';
 import { demoData } from '../demo.js';
+import { zipBytes, unzipEntries, entryBytes, entryText } from '../xlsx.js';
 
 const FEATURES = [
   ['🧾', 'فواتير ضريبية ورمز QR', 'فاتورة ضريبية ومبسطة وإشعارات دائنة، مع رمز QR حسب متطلبات هيئة الزكاة والضريبة والجمارك، وطباعة A4 أو إيصال حراري.'],
@@ -26,7 +27,7 @@ export function welcome({ root }) {
   root.innerHTML = String(html`<section class="welcome">
     <div class="hero-acc"><div class="ic">📒</div><h1>برنامج محاسبة مجاني متكامل</h1>
       <p>للمحلات والمتاجر والمؤسسات الصغيرة: بِع واشترِ وسجّل مصاريفك، والبرنامج يعمل القيود والمخزون والضريبة والتقارير عنك.</p>
-      <div class="actions"><button class="btn btn-primary" data-start>🚀 ابدأ منشأتك الآن</button><button class="btn btn-ghost" data-demo>🧪 جرّب ببيانات تجريبية</button><label class="btn btn-ghost">📂 استعادة نسخة احتياطية<input type="file" accept=".json,application/json" data-restore hidden></label></div>
+      <div class="actions"><button class="btn btn-primary" data-start>🚀 ابدأ منشأتك الآن</button><button class="btn btn-ghost" data-demo>🧪 جرّب ببيانات تجريبية</button><label class="btn btn-ghost">📂 استعادة نسخة احتياطية<input type="file" accept=".json,.zip,application/json,application/zip" data-restore hidden></label></div>
     </div>
     <form class="card" data-setup hidden novalidate style="max-width:720px;margin:0 auto 22px">
       <div class="card-h"><h3>بيانات منشأتك</h3><span class="muted small">يمكنك تعديلها لاحقاً من الإعدادات</span></div>
@@ -80,15 +81,34 @@ export async function loadDemo() {
   go('#/');
 }
 
+// النسخة الكاملة ملف zip: البيانات (ahsebha-backup.json) والمرفقات (files/<id>.<ext>)
+const BACKUP_JSON = 'ahsebha-backup.json';
 export async function restoreFile(file) {
   if (!file) return;
   try {
-    const data = store.parseBackup(await file.text());
+    const buf = new Uint8Array(await file.arrayBuffer());
+    let entries = null;
+    let data;
+    if (buf[0] === 0x50 && buf[1] === 0x4b) {
+      entries = unzipEntries(buf);
+      const json = await entryText(entries, BACKUP_JSON);
+      if (json == null) throw new Error('هذا الملف ليس نسخة احتياطية من برنامج محاسبة احسبها');
+      data = store.parseBackup(json);
+    } else data = store.parseBackup(new TextDecoder().decode(buf));
     const docs = data.docs.length;
-    if (store.getDb() && !(await confirmBox(`سيتم استبدال كل البيانات الحالية بالنسخة الاحتياطية «${data.settings.name || ''}» (${docs} مستند).`, { ok: 'استعادة', danger: true }))) return;
+    const metas = new Map(data.docs.flatMap((d) => (d.files || []).map((f) => [f.id, f])));
+    const inZip = entries ? [...entries.keys()].map((n) => [n, /^files\/([\w-]{1,40})(?:\.\w{1,5})?$/.exec(n)]).filter(([, m]) => m && metas.has(m[1])) : [];
+    if (store.getDb() && !(await confirmBox(`سيتم استبدال كل البيانات الحالية بالنسخة الاحتياطية «${data.settings.name || ''}» (${docs} مستند${inZip.length ? ` و${inZip.length} مرفق` : ''}).`, { ok: 'استعادة', danger: true }))) return;
+    let lost = 0;
+    for (const [name, m] of inZip) {
+      try {
+        const meta = metas.get(m[1]);
+        await store.putFile(meta, new Blob([await entryBytes(entries, name)], { type: meta.type }));
+      } catch (e) { lost++; }
+    }
     store.replaceDb(data);
     window.dispatchEvent(new Event('acc:shell'));
-    toast('تمت الاستعادة ✓');
+    toast(lost ? `تمت الاستعادة، لكن ${lost} مرفق ما انحفظ على هذا الجهاز` : 'تمت الاستعادة ✓', lost ? 'warn' : 'ok');
     go('#/');
   } catch (e) { toast(e.message, 'err'); }
 }
@@ -156,14 +176,32 @@ export function dashboard({ root }) {
   if (bk) bk.onclick = (e) => { e.preventDefault(); downloadBackup(); };
 }
 
-export function downloadBackup() {
-  const s = S();
-  const json = store.backupJSON();
-  const name = `احسبها-نسخة-احتياطية-${(s.name || 'منشأتي').replace(/[\\/:*?"<>|\s]+/g, '-')}-${ymd(new Date())}.json`;
-  const url = URL.createObjectURL(new Blob([json], { type: 'application/json' }));
+const backupName = (kind, ext) => `احسبها-${kind}-${(S().name || 'منشأتي').replace(/[\\/:*?"<>|\s]+/g, '-')}-${ymd(new Date())}.${ext}`;
+function save(blob, name) {
+  const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url; a.download = name;
   document.body.append(a); a.click();
   setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 1500);
-  toast('تم تنزيل النسخة الاحتياطية ✓ احفظها في مكان آمن');
+}
+export function downloadBackup() {
+  save(new Blob([store.backupJSON()], { type: 'application/json' }), backupName('نسخة-احتياطية', 'json'));
+  toast(store.usedFileIds().size ? 'تم تنزيل البيانات ✓ (بدون المرفقات؛ للمرفقات نزّل النسخة الكاملة من الإعدادات)' : 'تم تنزيل النسخة الاحتياطية ✓ احفظها في مكان آمن');
+}
+const EXT = { 'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp', 'image/gif': '.gif', 'application/pdf': '.pdf' };
+export async function downloadFullBackup() {
+  const files = [{ name: BACKUP_JSON, data: store.backupJSON() }];
+  const seen = new Set();
+  let missing = 0;
+  for (const d of store.getDb().docs) {
+    for (const f of d.files || []) {
+      if (seen.has(f.id)) continue;
+      seen.add(f.id);
+      const blob = await store.getFile(f.id).catch(() => null);
+      if (blob) files.push({ name: `files/${f.id}${EXT[f.type] || ''}`, data: new Uint8Array(await blob.arrayBuffer()) });
+      else missing++;
+    }
+  }
+  save(new Blob([zipBytes(files)], { type: 'application/zip' }), backupName('نسخة-كاملة', 'zip'));
+  toast(`تم تنزيل النسخة الكاملة ✓ (${files.length - 1} مرفق)${missing ? ` — ${missing} مرفق مش موجود على هذا الجهاز` : ''}`, missing ? 'warn' : 'ok');
 }
