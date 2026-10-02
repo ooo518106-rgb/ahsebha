@@ -1,6 +1,6 @@
 // ═══ بيانات تجريبية واقعية: متجر إلكترونيات صغير لآخر خمسة أشهر ═══
 // مولّد ثابت (نفس النتيجة لنفس التاريخ) حتى تكون التجربة قابلة للتكرار.
-import { defaultAccounts, defaultSettings, addDays, addMonths, monthStart, monthEnd, calcDoc, expenseAsDoc } from './core.js';
+import { defaultAccounts, defaultSettings, addDays, addMonths, monthStart, monthEnd, calcDoc, expenseAsDoc, gosiFor, payrollRates, payrollTotals } from './core.js';
 import { eanCheckDigit } from './barcode.js';
 
 export function demoData(today) {
@@ -63,6 +63,15 @@ export function demoData(today) {
   const byId = Object.fromEntries(products.map((p) => [p.id, p]));
   const goods = products.filter((p) => p.type === 'stock');
 
+  // الموظفون والفروع والمستودعات
+  const employees = [
+    { id: 'em1', no: 1, name: 'عبدالله القحطاني', nationality: 'citizen', nationalId: '1087654321', job: 'مسؤول مبيعات', joinDate: addMonths(start, -30), basic: 3000, housing: 750, transport: 300, other: 0, gosi: true, cc: 'riyadh', bank: 'مصرف الراجحي', iban: 'SA0380000000608010167519', active: true },
+    { id: 'em2', no: 2, name: 'محمد أنور', nationality: 'expat', nationalId: '2456789012', job: 'فني صيانة', joinDate: addMonths(start, -14), basic: 1200, housing: 300, transport: 150, other: 0, gosi: true, cc: 'jeddah', bank: 'البنك الأهلي', iban: 'SA4410000001234567890123', active: true },
+  ];
+  const centers = [{ id: 'riyadh', name: 'فرع الرياض' }, { id: 'jeddah', name: 'فرع جدة' }];
+  const warehouses = [{ id: 'main', name: 'المستودع الرئيسي — الرياض' }, { id: 'wh2', name: 'مستودع فرع جدة' }];
+  const rates = payrollRates(settings);
+
   const docs = [];
   const no = {};
   let tick = 0;
@@ -78,7 +87,7 @@ export function demoData(today) {
   };
   const expense = (date, account, amount, o = {}) => {
     if (!date) return null;
-    const d = { type: 'expense', date, account, amount, tax: o.tax || 'S', inclusive: o.inclusive ?? true, vatRate: 15, party: o.party || null, payee: o.payee || '', ref: '', notes: o.notes || '' };
+    const d = { type: 'expense', date, account, amount, tax: o.tax || 'S', inclusive: o.inclusive ?? true, vatRate: 15, party: o.party || null, payee: o.payee || '', ref: '', notes: o.notes || '', ...(o.cc ? { cc: o.cc } : {}) };
     const t = calcDoc(expenseAsDoc(d), 2).total;
     const payAcc = o.party && o.credit ? null : (o.from || 'bank');
     if (payAcc === 'cash' || payAcc === 'wallet') bal[payAcc] -= t;
@@ -92,6 +101,8 @@ export function demoData(today) {
     const d = { type: 'purchase', date, party: supplier, ref: 'F-' + between(10000, 99999), vatRate: 15, inclusive: false, lines, dueDate: addDays(date, 30), notes: '' };
     return add({ ...d, paid: paid ? total(d) : 0, payAcc: paid ? 'bank' : null });
   };
+  let lastGosi = 0;
+  let advLeft = 0;
   const unpaidPurchases = [];
   const receivable = [];
   const creditShipping = [];
@@ -103,7 +114,7 @@ export function demoData(today) {
     // الشهر الحالي لا يتجاوز اليوم: ما بعده لم يحدث بعد
     const day = (n) => { const d = addDays(ms, n - 1); return d > last ? null : d; };
 
-    expense(day(1), 'e_rent', 3450, { payee: 'مكتب العقار', notes: 'إيجار المعرض الشهري' });
+    expense(day(1), 'e_rent', 3450, { payee: 'مكتب العقار', notes: 'إيجار المعرض الشهري', cc: 'riyadh' });
 
     // سداد مشتريات ومصاريف الشهر السابق للموردين
     if (day(4)) for (const pu of unpaidPurchases.splice(0)) add({ type: 'payment', date: day(4), party: pu.party, amount: total(pu), money: 'bank', method: 'transfer', link: pu.id, notes: 'سداد فاتورة ' + pu.ref });
@@ -141,7 +152,7 @@ export function demoData(today) {
       }
       if (rnd() < 0.12) lines.push({ product: 'p7', desc: byId.p7.name, qty: 1, price: 50, disc: 0, tax: 'S' });
       if (!lines.length) continue;
-      const d = { type: 'sale', date, party: rnd() < 0.15 ? 'c3' : null, vatRate: 15, inclusive: true, lines, notes: '' };
+      const d = { type: 'sale', date, party: rnd() < 0.15 ? 'c3' : null, vatRate: 15, inclusive: true, lines, notes: '', cc: 'riyadh', wh: 'main' };
       const t = total(d);
       const payAcc = rnd() < 0.55 ? 'wallet' : 'cash';
       bal[payAcc] += t;
@@ -163,7 +174,7 @@ export function demoData(today) {
         }
         if (!lines.length) continue;
         if (rnd() < 0.5) lines.push({ product: 'p8', desc: byId.p8.name, qty: 1, price: 25, disc: 0, tax: 'S' });
-        const d = { type: 'sale', date, party: c, vatRate: 15, inclusive: false, lines, dueDate: addDays(date, 30), notes: 'السداد خلال 30 يوماً من تاريخ الفاتورة' };
+        const d = { type: 'sale', date, party: c, vatRate: 15, inclusive: false, lines, dueDate: addDays(date, 30), notes: 'السداد خلال 30 يوماً من تاريخ الفاتورة', cc: c === 'c2' ? 'jeddah' : 'riyadh', wh: 'main' };
         const inv = add({ ...d, paid: 0, payAcc: null });
         receivable.push({ inv, left: total(d) });
       }
@@ -176,7 +187,16 @@ export function demoData(today) {
     const ship = expense(day(20), 'e_ship', between(5, 9) * 100, { party: 's3', credit: true, inclusive: false, notes: 'شحنات الشهر' });
     if (ship) creditShipping.push(ship);
     expense(day(25), 'e_fees', between(150, 260), { payee: 'مدى وتابي', from: 'wallet', notes: 'رسوم عمليات البطاقات' });
-    expense(day(27), 'e_sal', 5500, { tax: 'O', inclusive: false, payee: 'رواتب الموظفين', notes: 'رواتب الشهر' });
+    // مسير رواتب الشهر، وسداد التأمينات عن الشهر السابق
+    if (day(12) && lastGosi) { add({ type: 'payment', date: day(12), party: null, account: 'gosi_pay', amount: lastGosi, money: 'bank', method: 'transfer', notes: 'سداد اشتراكات التأمينات الاجتماعية' }); lastGosi = 0; }
+    if (m === 2 && day(6)) { add({ type: 'payment', date: day(6), party: null, account: 'adv', employee: 'em2', amount: 600, money: 'cash', method: 'cash', notes: 'سلفة للموظف محمد أنور' }); bal.cash -= 600; advLeft = 600; }
+    if (day(27)) {
+      const lines = employees.map((e) => ({ employee: e.id, name: e.name, basic: e.basic, housing: e.housing, transport: e.transport, other: 0, additions: e.id === 'em1' ? between(0, 4) * 100 : 0, absence: 0, advance: e.id === 'em2' && advLeft ? 300 : 0, ...gosiFor(e, rates, 2) }));
+      advLeft = Math.max(0, advLeft - (lines[1].advance || 0));
+      const pr = add({ type: 'payroll', date: day(27), period: day(27).slice(0, 7), money: 'bank', lines, notes: '' });
+      const P = payrollTotals(pr, 2);
+      lastGosi = Math.round((P.gosiEmp + P.gosiCo) * 100) / 100;
+    }
     expense(day(22), 'e_office', between(80, 180), { payee: 'مكتبة جرير', from: 'cash', notes: 'مستلزمات مكتبية' });
 
     // إيداع النقدية وتسوية البطاقات في البنك
@@ -218,8 +238,10 @@ export function demoData(today) {
   const chqDate = (n) => { const d = addDays(today, n); return d < start ? start : d; };
   add({ type: 'receipt', date: chqDate(-40), party: 'c2', amount: 2000, money: 'bank', method: 'cheque', chequeNo: '104521', chequeBank: 'البنك الأهلي', pdc: true, chequeDue: chqDate(-20), cleared: chqDate(-19), notes: 'شيك مؤجل' });
   add({ type: 'receipt', date: chqDate(-3), party: 'c1', amount: 3000, money: 'bank', method: 'cheque', chequeNo: '778810', chequeBank: 'مصرف الراجحي', pdc: true, chequeDue: addDays(today, 5), notes: 'شيك مؤجل الدفع' });
+  // تغذية مستودع جدة
+  add({ type: 'stransfer', date: chqDate(-8), from: 'main', to: 'wh2', lines: [{ product: 'p2', qty: 10 }, { product: 'p3', qty: 40 }, { product: 'p5', qty: 20 }], notes: 'تغذية فرع جدة' });
   // أمر بيع مفتوح وأمر شراء مفتوح
-  add({ type: 'sorder', date: chqDate(-2), party: 'c2', vatRate: 15, inclusive: false, deliveryDate: addDays(today, 4), lines: [{ product: 'p4', desc: byId.p4.name, qty: 12, price: 99, disc: 0, tax: 'S' }, { product: 'p3', desc: byId.p3.name, qty: 5, price: 250, disc: 0, tax: 'S', unit: 'علبة', factor: 10 }], notes: 'التسليم لفرع جدة' });
+  add({ type: 'sorder', date: chqDate(-2), party: 'c2', vatRate: 15, inclusive: false, deliveryDate: addDays(today, 4), lines: [{ product: 'p5', desc: byId.p5.name, qty: 12, price: 40, disc: 0, tax: 'S' }, { product: 'p3', desc: byId.p3.name, qty: 5, price: 250, disc: 0, tax: 'S', unit: 'علبة', factor: 10 }], notes: 'التسليم لفرع جدة' });
   add({ type: 'porder', date: chqDate(-1), party: 's2', vatRate: 15, inclusive: false, deliveryDate: addDays(today, 10), lines: [{ product: 'p5', desc: byId.p5.name, qty: 100, price: 12, disc: 0, tax: 'S' }, { product: 'p3', desc: byId.p3.name, qty: 150, price: 8, disc: 0, tax: 'S' }], notes: '' });
   // جهاز جديد اشتُري خلال الفترة ويُهلك على 3 سنوات
   const buyDate = addDays(addMonths(start, 2), 4) <= today ? addDays(addMonths(start, 2), 4) : start;
@@ -239,5 +261,5 @@ export function demoData(today) {
   docs.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   const seq = {};
   for (const d of docs) d.no = seq[d.type] = (seq[d.type] || 0) + 1;
-  return { settings, accounts, parties, products, docs, assets, recurring };
+  return { settings, accounts, parties, products, docs, assets, recurring, employees, centers, warehouses };
 }

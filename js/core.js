@@ -117,6 +117,7 @@ export function defaultAccounts() {
     acc('vin', '1105', 'ضريبة المشتريات (مدخلات)', 'asset', 'g11', S),
     acc('prepaid', '1106', 'مصروفات مدفوعة مقدماً', 'asset', 'g11'),
     acc('chq_in', '1150', 'شيكات تحت التحصيل', 'asset', 'g11', S),
+    acc('adv', '1160', 'سلف الموظفين', 'asset', 'g11', S),
     grp('g12', '12', 'الأصول الثابتة', 'asset', 'g1'),
     acc('furn', '1201', 'الأثاث والتجهيزات', 'asset', 'g12'),
     acc('equip', '1202', 'الأجهزة والمعدات', 'asset', 'g12'),
@@ -127,9 +128,11 @@ export function defaultAccounts() {
     acc('ap', '2101', 'الموردون', 'liability', 'g21', S),
     acc('vout', '2102', 'ضريبة المبيعات (مخرجات)', 'liability', 'g21', S),
     acc('vdue', '2103', 'ضريبة مستحقة للهيئة', 'liability', 'g21', S),
-    acc('wages', '2104', 'رواتب مستحقة', 'liability', 'g21'),
+    acc('wages', '2104', 'رواتب مستحقة', 'liability', 'g21', S),
     acc('loans', '2105', 'القروض والتمويل', 'liability', 'g21'),
     acc('chq_out', '2150', 'شيكات مؤجلة الدفع', 'liability', 'g21', S),
+    acc('gosi_pay', '2160', 'التأمينات الاجتماعية المستحقة', 'liability', 'g21', S),
+    acc('eos_pay', '2170', 'مخصص مكافأة نهاية الخدمة', 'liability', 'g21', S),
     grp('g3', '3', 'حقوق الملكية', 'equity'),
     acc('cap', '3101', 'رأس المال', 'equity', 'g3', S),
     acc('draw', '3102', 'جاري المالك (المسحوبات)', 'equity', 'g3', S),
@@ -157,6 +160,8 @@ export function defaultAccounts() {
     acc('e_office', '5211', 'مستلزمات مكتبية ونظافة', 'expense', 'g52'),
     acc('e_misc', '5212', 'مصروفات متنوعة', 'expense', 'g52'),
     acc('e_dep', '5290', 'مصروف الإهلاك', 'expense', 'g52', S),
+    acc('e_gosi', '5291', 'التأمينات الاجتماعية (حصة المنشأة)', 'expense', 'g52', S),
+    acc('e_eos', '5292', 'مكافأة نهاية الخدمة', 'expense', 'g52', S),
   ];
 }
 
@@ -220,6 +225,8 @@ export const DOC_TYPES = {
   transfer: { name: 'تحويل بين الحسابات', plural: 'التحويلات', prefix: 'TR-' },
   journal: { name: 'قيد يومية', plural: 'قيود اليومية', prefix: 'JV-' },
   adjust: { name: 'تسوية مخزون', plural: 'تسويات المخزون', prefix: 'ADJ-' },
+  payroll: { name: 'مسير رواتب', plural: 'مسيرات الرواتب', prefix: 'PR-' },
+  stransfer: { name: 'تحويل مخزني', plural: 'التحويلات المخزنية', prefix: 'ST-' },
   sorder: { name: 'أمر بيع', plural: 'أوامر البيع', prefix: 'SO-', party: 'customer', lines: true, order: true },
   porder: { name: 'أمر شراء', plural: 'أوامر الشراء', prefix: 'PO-', party: 'supplier', lines: true, order: true },
   // قيود يولّدها البرنامج من سجلات أخرى (لا تُحفظ كمستندات)
@@ -230,6 +237,8 @@ export const DOC_TYPES = {
 };
 // مستندات بلا قيد: عروض الأسعار والأوامر
 export const NO_POSTING = ['quote', 'sorder', 'porder'];
+// المستودع الافتراضي عند عدم تعريف مستودعات
+export const MAIN_WH = 'main';
 
 // معامل الوحدة في البند: الكرتون = 12 حبة مثلاً؛ المخزون دائماً بالوحدة الأساسية
 export const lineFactor = (l) => (num(l && l.factor) > 0 ? num(l.factor) : 1);
@@ -243,7 +252,8 @@ export function docAmount(d, dec = 2) {
   if (DOC_TYPES[d.type]?.lines) return calcDoc(d, dec).total;
   if (d.type === 'expense') return calcDoc(expenseAsDoc(d), dec).total;
   if (d.type === 'journal') return round((d.lines || []).reduce((t, l) => t + num(l.dr), 0), dec);
-  if (d.type === 'adjust') return 0;
+  if (d.type === 'adjust' || d.type === 'stransfer') return 0;
+  if (d.type === 'payroll') return payrollTotals(d, dec).gross;
   return round(num(d.amount), dec);
 }
 
@@ -304,6 +314,74 @@ export function docOrder(a, b) {
     || ((PRIORITY[a.type] ?? 6) - (PRIORITY[b.type] ?? 6))
     || String(a.createdAt || '').localeCompare(String(b.createdAt || ''))
     || String(a.id).localeCompare(String(b.id));
+}
+
+// ═══ الرواتب: التأمينات الاجتماعية، صافي الراتب، ومكافأة نهاية الخدمة ═══
+// النسب الافتراضية حسب الدولة (قابلة للتعديل من إعدادات الرواتب)؛ base: bh = الأساسي + السكن، gross = كل البدلات
+export const PAYROLL_DEFAULTS = {
+  SA: { citizenEmp: 9.75, citizenCo: 11.75, expatEmp: 0, expatCo: 2, cap: 45000, base: 'bh' },
+  JO: { citizenEmp: 7.5, citizenCo: 14.25, expatEmp: 7.5, expatCo: 14.25, cap: 0, base: 'gross' },
+  AE: { citizenEmp: 5, citizenCo: 12.5, expatEmp: 0, expatCo: 0, cap: 0, base: 'bh' },
+  BH: { citizenEmp: 7, citizenCo: 12, expatEmp: 1, expatCo: 3, cap: 4000, base: 'bh' },
+  OM: { citizenEmp: 7, citizenCo: 10.5, expatEmp: 0, expatCo: 1, cap: 3000, base: 'bh' },
+  KW: { citizenEmp: 10.5, citizenCo: 11.5, expatEmp: 0, expatCo: 0, cap: 2750, base: 'bh' },
+};
+const NO_RATES = { citizenEmp: 0, citizenCo: 0, expatEmp: 0, expatCo: 0, cap: 0, base: 'bh' };
+export const payrollRates = (settings = {}) => ({ ...(PAYROLL_DEFAULTS[settings.country] || NO_RATES), ...(settings.payroll || {}) });
+
+// حصة الموظف والمنشأة من التأمينات لراتب واحد
+export function gosiFor(emp, rates, dec = 2) {
+  const citizen = emp.nationality !== 'expat';
+  const fixed = num(emp.basic) + num(emp.housing);
+  let base = rates.base === 'gross' ? fixed + num(emp.transport) + num(emp.other) : rates.base === 'basic' ? num(emp.basic) : fixed;
+  if (num(rates.cap) > 0) base = Math.min(base, num(rates.cap));
+  if (emp.gosi === false) return { gosiEmp: 0, gosiCo: 0 };
+  return { gosiEmp: round(base * num(citizen ? rates.citizenEmp : rates.expatEmp) / 100, dec), gosiCo: round(base * num(citizen ? rates.citizenCo : rates.expatCo) / 100, dec) };
+}
+
+// بند المسير: الإجمالي = الأساسي والبدلات والإضافي − الغياب، والصافي = الإجمالي − التأمينات − السلفة
+export function payLine(l, dec = 2) {
+  const gross = round(num(l.basic) + num(l.housing) + num(l.transport) + num(l.other) + num(l.additions) - num(l.absence), dec);
+  const deductions = round(num(l.gosiEmp) + num(l.advance), dec);
+  return { gross, deductions, net: round(gross - deductions, dec), gosiEmp: round(num(l.gosiEmp), dec), gosiCo: round(num(l.gosiCo), dec), advance: round(num(l.advance), dec) };
+}
+export function payrollTotals(d, dec = 2) {
+  const lines = (d.lines || []).map((l) => payLine(l, dec));
+  const sum = (k) => round(lines.reduce((t, x) => t + x[k], 0), dec);
+  return { lines, gross: sum('gross'), gosiEmp: sum('gosiEmp'), gosiCo: sum('gosiCo'), advance: sum('advance'), deductions: sum('deductions'), net: sum('net'), total: sum('net') };
+}
+
+// مكافأة نهاية الخدمة
+// السعودية: نصف شهر عن كل سنة من أول خمس، وشهر عن كل سنة بعدها؛ والاستقالة: أقل من سنتين لا شيء، 2–5 ثلث، 5–10 ثلثان، 10+ كاملة
+// الإمارات: 21 يوماً من الأجر الأساسي عن كل سنة من أول خمس، و30 يوماً بعدها، بحد أقصى أجر سنتين، ولا شيء قبل سنة
+export function eosAward(emp, { to, reason = 'end', country = 'SA', dec = 2 } = {}) {
+  const from = emp.joinDate;
+  if (!isDate(from) || !isDate(to) || to <= from) return { years: 0, wage: 0, full: 0, amount: 0 };
+  const years = daysBetween(from, to) / 365;
+  const R = (x) => round(x, dec);
+  if (country === 'AE') {
+    const wage = num(emp.basic);
+    const daily = wage / 30;
+    let full = years < 1 ? 0 : daily * (21 * Math.min(years, 5) + 30 * Math.max(0, years - 5));
+    full = Math.min(full, wage * 24);
+    return { years, wage, full: R(full), amount: R(full) };
+  }
+  const wage = num(emp.basic) + num(emp.housing) + num(emp.transport) + num(emp.other);
+  const full = wage / 2 * Math.min(years, 5) + wage * Math.max(0, years - 5);
+  const share = reason !== 'resign' ? 1 : years < 2 ? 0 : years < 5 ? 1 / 3 : years < 10 ? 2 / 3 : 1;
+  return { years, wage, full: R(full), amount: R(full * share), share };
+}
+
+// رصيد سلف كل موظف: سندات الصرف على حساب السلف ناقص ما استُرد في المسيرات
+export function employeeAdvances(db) {
+  const m = new Map();
+  for (const d of db.docs || []) {
+    if (d.type === 'payment' && d.account === 'adv' && d.employee) m.set(d.employee, (m.get(d.employee) || 0) + num(d.amount));
+    if (d.type === 'receipt' && d.account === 'adv' && d.employee) m.set(d.employee, (m.get(d.employee) || 0) - num(d.amount));
+    if (d.type === 'payroll') for (const l of d.lines || []) if (l.employee && num(l.advance)) m.set(l.employee, (m.get(l.employee) || 0) - num(l.advance));
+  }
+  for (const [k, v] of m) m.set(k, round(v, 2));
+  return m;
 }
 
 // ═══ الأصول الثابتة: جدول الإهلاك بالقسط الثابت شهرياً ═══
@@ -369,6 +447,16 @@ export function buildBooks(db, opts = {}) {
   const partyItems = new Map();
   const issues = [];
 
+  // ── الكميات حسب المستودع (التكلفة المتوسطة واحدة للمنشأة كلها) ──
+  const whQty = new Map();
+  const whMoves = [];
+  const whAdd = (pid, wh, q) => {
+    let m = whQty.get(pid);
+    if (!m) whQty.set(pid, m = new Map());
+    m.set(wh, qround((m.get(wh) || 0) + q));
+  };
+  const whOf = (d) => d.wh || MAIN_WH;
+
   // ── المخزون بالتكلفة المتوسطة المرجحة ──
   const st = (pid) => { let s = stock.get(pid); if (!s) stock.set(pid, s = { qty: 0, value: 0, last: null }); return s; };
   const unitOf = (s, p) => (s.qty > 0 ? Math.max(0, s.value / s.qty) : (s.last != null ? s.last : num(p.cost)));
@@ -390,6 +478,7 @@ export function buildBooks(db, opts = {}) {
       s.qty = qround(s.qty + q); s.value = R(s.value + val);
     }
     if (q > 0) s.last = val / q;
+    whAdd(p.id, whOf(d), q);
     move(p, d, i, q, val, s, variance);
     return variance;
   }
@@ -402,6 +491,7 @@ export function buildBooks(db, opts = {}) {
     s.value = R(s.value - cost);
     if (s.qty === 0 && s.value !== 0) { cost = R(cost + s.value); s.value = 0; }
     if (s.qty < 0) issues.push({ doc: d.id, product: p.id, msg: 'رصيد المخزون صار سالباً' });
+    whAdd(p.id, whOf(d), -q);
     move(p, d, i, -q, -cost, s);
     return { cost, unit };
   }
@@ -413,6 +503,7 @@ export function buildBooks(db, opts = {}) {
     s.value = R(s.value - val);
     let residue = 0;
     if (s.qty === 0 && s.value !== 0) { residue = s.value; s.value = 0; }
+    whAdd(p.id, whOf(d), -q);
     move(p, d, i, -q, -val, s, residue);
     return residue;
   }
@@ -424,14 +515,15 @@ export function buildBooks(db, opts = {}) {
     let a = R(amount);
     if (!a) return;
     if (a < 0) { a = -a; side = side === 'dr' ? 'cr' : 'dr'; }
-    cur.lines.push({ acc: accId, dr: side === 'dr' ? a : 0, cr: side === 'cr' ? a : 0, party: o.party || null, key: o.key || null, link: o.link || null, memo: o.memo || '' });
+    const cc = o.cc !== undefined ? o.cc : cur.doc.cc;
+    cur.lines.push({ acc: accId, dr: side === 'dr' ? a : 0, cr: side === 'cr' ? a : 0, party: o.party || null, key: o.key || null, link: o.link || null, memo: o.memo || '', cc: cc || null });
   }
   function commit() {
     const { doc } = cur;
     const merged = [];
     for (const l of cur.lines) {
       const side = l.dr ? 'dr' : 'cr';
-      const m = merged.find((x) => x.acc === l.acc && x.party === l.party && x.key === l.key && x.link === l.link && x.memo === l.memo && (x.dr ? 'dr' : 'cr') === side);
+      const m = merged.find((x) => x.acc === l.acc && x.party === l.party && x.key === l.key && x.link === l.link && x.memo === l.memo && x.cc === l.cc && (x.dr ? 'dr' : 'cr') === side);
       if (m) { m.dr = R(m.dr + l.dr); m.cr = R(m.cr + l.cr); } else merged.push({ ...l });
     }
     const dr = R(merged.reduce((s, l) => s + l.dr, 0));
@@ -439,9 +531,14 @@ export function buildBooks(db, opts = {}) {
     if (dr !== cr) issues.push({ doc: doc.id, msg: 'قيد غير متوازن' });
     if (!merged.length) return;
     entries.set(doc.id, { doc, date: doc.date, lines: merged, dr, cr });
+    const seen = new Map();
     merged.forEach((l, idx) => {
       if (!accounts.has(l.acc)) issues.push({ doc: doc.id, msg: 'حساب غير موجود في الدليل' });
-      postings.push({ ...l, doc: doc.id, type: doc.type, no: doc.no, date: doc.date });
+      // مفتاح ثابت للحركة (لمطابقة البنك): المستند والحساب والاتجاه، مع ترقيم عند التكرار
+      const tag = `${doc.id}:${l.acc}:${l.dr ? 'd' : 'c'}`;
+      const n = seen.get(tag) || 0;
+      seen.set(tag, n + 1);
+      postings.push({ ...l, doc: doc.id, type: doc.type, no: doc.no, date: doc.date, pk: n ? `${tag}:${n}` : tag });
       if (l.party && (l.acc === 'ar' || l.acc === 'ap')) {
         const charge = l.acc === 'ar' ? l.dr > 0 : l.cr > 0;
         if (!partyItems.has(l.party)) partyItems.set(l.party, []);
@@ -669,10 +766,41 @@ export function buildBooks(db, opts = {}) {
     commit();
   }
 
+  // مسير الرواتب: الإجمالي مصروف رواتب، وحصة المنشأة من التأمينات مصروف، والمستقطعات التزامات، والصافي من البنك أو رواتب مستحقة
+  const employees = new Map((db.employees || []).map((e) => [e.id, e]));
+  function postPayroll(d) {
+    const P = payrollTotals(d, dec);
+    totals.set(d.id, P);
+    begin(d);
+    const memo = 'رواتب ' + (d.period || '');
+    (d.lines || []).forEach((l, i) => {
+      const x = P.lines[i];
+      const cc = employees.get(l.employee)?.cc || d.cc || null;
+      add('e_sal', x.gross, 'dr', { memo, cc });
+      add('e_gosi', x.gosiCo, 'dr', { memo, cc });
+    });
+    add('gosi_pay', R(P.gosiEmp + P.gosiCo), 'cr', { memo, cc: null });
+    add('adv', P.advance, 'cr', { memo: 'استرداد سلف', cc: null });
+    const payAcc = d.money && accounts.get(d.money)?.money ? d.money : 'wages';
+    add(payAcc, P.net, 'cr', { memo, cc: null });
+    commit();
+  }
+  // التحويل بين المستودعات: كميات فقط بلا قيد (التكلفة واحدة للمنشأة)
+  function postStockTransfer(d) {
+    for (const l of d.lines || []) {
+      const p = products.get(l.product);
+      const q = qround(num(l.qty) * lineFactor(l));
+      if (!p || p.type !== 'stock' || !(q > 0) || !d.from || !d.to || d.from === d.to) continue;
+      whAdd(p.id, d.from, -q);
+      whAdd(p.id, d.to, q);
+      whMoves.push({ product: p.id, doc: d.id, no: d.no, date: d.date, from: d.from, to: d.to, qty: q });
+    }
+  }
+
   // الإهلاك الشهري لكل الأصول في قيد واحد بنهاية الشهر
   function postDepreciation(v) {
     begin(v);
-    for (const it of v.items) { add('e_dep', it.amount, 'dr', { memo: it.asset.name }); add('accdep', it.amount, 'cr', { memo: it.asset.name }); }
+    for (const it of v.items) { add('e_dep', it.amount, 'dr', { memo: it.asset.name, cc: it.asset.cc || null }); add('accdep', it.amount, 'cr', { memo: it.asset.name, cc: null }); }
     commit();
   }
   // استبعاد أصل (بيع أو إتلاف): إلغاء التكلفة ومجمع الإهلاك، والفرق ربح أو خسارة
@@ -699,7 +827,7 @@ export function buildBooks(db, opts = {}) {
   function postJournal(d) {
     begin(d);
     (d.lines || []).forEach((l, i) => {
-      const o = { memo: l.memo || '', party: l.party || null, key: l.party ? `${d.id}:${i}` : null };
+      const o = { memo: l.memo || '', party: l.party || null, key: l.party ? `${d.id}:${i}` : null, cc: l.cc || d.cc || null };
       add(l.account, num(l.dr), 'dr', o);
       add(l.account, num(l.cr), 'cr', o);
     });
@@ -733,6 +861,7 @@ export function buildBooks(db, opts = {}) {
     opening: postOpening, sale: postSale, sreturn: postSalesReturn, purchase: postPurchase, preturn: postPurchaseReturn,
     expense: postExpense, receipt: postVoucher, payment: postVoucher, transfer: postTransfer, journal: postJournal, adjust: postAdjust,
     chqclear: postChequeClear, chqbounce: postChequeBounce, depreciation: postDepreciation, disposal: postDisposal,
+    payroll: postPayroll, stransfer: postStockTransfer,
   };
   // قيود مشتقة: تحصيل الشيكات وارتجاعها، والإهلاك الشهري، واستبعاد الأصول
   const virtual = [];
@@ -799,7 +928,7 @@ export function buildBooks(db, opts = {}) {
     }
   }
 
-  return { dec, today, postings, entries, totals, lineCosts, stock, moves, partyItems, remaining, applications, partyBalance, openItems, status, issues, schedules };
+  return { dec, today, postings, entries, totals, lineCosts, stock, moves, partyItems, remaining, applications, partyBalance, openItems, status, issues, schedules, whQty, whMoves };
 }
 
 export function matchItems(list, R = (x) => round(x, 2)) {
@@ -833,10 +962,11 @@ export function matchItems(list, R = (x) => round(x, 2)) {
 // ═══ التقارير ═══
 
 // أرصدة الحسابات: الافتتاحي قبل from، والحركة بين from و to (مدين موجب)
-export function balances(books, { from, to } = {}) {
+export function balances(books, { from, to, cc } = {}) {
   const m = new Map();
   for (const p of books.postings) {
     if (to && p.date > to) continue;
+    if (cc && p.cc !== cc) continue;
     let b = m.get(p.acc);
     if (!b) m.set(p.acc, b = { open: 0, dr: 0, cr: 0, close: 0 });
     if (from && p.date < from) b.open += p.dr - p.cr;
@@ -904,9 +1034,9 @@ export function profit(db, books, { from, to } = {}) {
   return round(v, books.dec);
 }
 
-export function incomeStatement(db, books, { from, to } = {}) {
+export function incomeStatement(db, books, { from, to, cc } = {}) {
   const dec = books.dec;
-  const m = balances(books, { from, to });
+  const m = balances(books, { from, to, cc });
   const accs = accountMap(db);
   const cogsIds = descendantIds(db, 'g51');
   const revenue = [], cogs = [], expenses = [];
@@ -1054,7 +1184,7 @@ export function stockReport(db, books) {
 }
 
 // تحليل المبيعات والربحية حسب المنتج والعميل
-export function salesAnalysis(db, books, { from, to } = {}) {
+export function salesAnalysis(db, books, { from, to, cc } = {}) {
   const dec = books.dec;
   const R = (x) => round(x, dec);
   const byProduct = new Map(), byCustomer = new Map();
@@ -1062,7 +1192,7 @@ export function salesAnalysis(db, books, { from, to } = {}) {
   const parties = new Map((db.parties || []).map((p) => [p.id, p]));
   let net = 0, cost = 0, count = 0;
   for (const d of db.docs || []) {
-    if ((d.type !== 'sale' && d.type !== 'sreturn') || (from && d.date < from) || (to && d.date > to)) continue;
+    if ((d.type !== 'sale' && d.type !== 'sreturn') || (from && d.date < from) || (to && d.date > to) || (cc && d.cc !== cc)) continue;
     const T = books.totals.get(d.id);
     const costs = books.lineCosts.get(d.id) || [];
     const sg = d.type === 'sale' ? 1 : -1;
@@ -1200,6 +1330,8 @@ export function validateDoc(db, d) {
   const party = (db.parties || []).find((p) => p.id === d.party);
   const T = DOC_TYPES[d.type];
   if (!T || T.virtual) return { type: 'نوع مستند غير معروف' };
+  if (d.wh && (db.warehouses || []).length && !(db.warehouses || []).some((w) => w.id === d.wh)) e.wh = 'اختر المستودع';
+  if (d.cc && !(db.centers || []).some((c) => c.id === d.cc)) e.cc = 'اختر الفرع أو مركز التكلفة';
   if (!isDate(d.date)) e.date = 'اختر تاريخاً صحيحاً';
   else if (isLockedDate(db.settings, d.date)) e.date = `الفترة مقفلة حتى ${db.settings.lockDate}. اختر تاريخاً بعده`;
   const dec = currencyInfo(db.settings?.currency).dec;
@@ -1273,6 +1405,28 @@ export function validateDoc(db, d) {
       dr += x; cr += y;
     });
     if (!e.lines && round(dr, dec) !== round(cr, dec)) e.lines = 'القيد غير متوازن: مجموع المدين لا يساوي الدائن';
+  } else if (d.type === 'payroll') {
+    if (!/^\d{4}-\d{2}$/.test(String(d.period || ''))) e.period = 'اختر الشهر';
+    const lines = d.lines || [];
+    if (!lines.length) e.lines = 'لا يوجد موظفون في المسير';
+    lines.forEach((l, i) => {
+      const x = payLine(l, dec);
+      if (['basic', 'housing', 'transport', 'other', 'additions', 'absence', 'advance', 'gosiEmp', 'gosiCo'].some((k) => num(l[k]) < 0)) e['line' + i] = 'قيمة سالبة';
+      else if (x.net < 0) e['line' + i] = `صافي راتب ${l.name || ''} سالب`;
+    });
+    if (d.money && !isMoney(d.money)) e.money = 'اختر الصندوق أو البنك';
+  } else if (d.type === 'stransfer') {
+    const whs = new Set((db.warehouses || []).map((w) => w.id));
+    if (!whs.has(d.from)) e.from = 'اختر المستودع المحوَّل منه';
+    if (!whs.has(d.to)) e.to = 'اختر المستودع المحوَّل إليه';
+    if (d.from && d.from === d.to) e.to = 'اختر مستودعاً مختلفاً';
+    const lines = d.lines || [];
+    if (!lines.length) e.lines = 'أضف منتجاً واحداً على الأقل';
+    lines.forEach((l, i) => {
+      const p = (db.products || []).find((x) => x.id === l.product);
+      if (!p || p.type !== 'stock') e['product' + i] = 'اختر منتجاً مخزنياً';
+      if (!(num(l.qty) > 0)) e['qty' + i] = 'الكمية أكبر من صفر';
+    });
   } else if (d.type === 'adjust') {
     const lines = d.lines || [];
     if (!lines.length) e.lines = 'أضف منتجاً واحداً على الأقل';
@@ -1335,4 +1489,22 @@ export function tafqeet(amount, currency) {
   let s = `فقط ${numberToWords(whole)} ${c.name}`;
   if (frac && c.sub) s += ` و${frac} ${c.sub}`;
   return s + ' لا غير';
+}
+
+// ═══ مطابقة البنك: حركات الحساب حتى تاريخ الكشف مع حالة المطابقة ═══
+// cleared: مجموعة مفاتيح الحركات المطابقة سابقاً أو في المطابقة الحالية
+export function reconItems(books, account, { to } = {}) {
+  return books.postings.filter((p) => p.acc === account && (!to || p.date <= to))
+    .map((p) => ({ pk: p.pk, doc: p.doc, type: p.type, no: p.no, date: p.date, party: p.party, memo: p.memo, amount: round(p.dr - p.cr, books.dec) }));
+}
+export function reconSummary(items, cleared, statementBalance, dec = 2) {
+  let book = 0, done = 0, deposits = 0, payments = 0;
+  for (const it of items) {
+    book += it.amount;
+    if (cleared.has(it.pk)) done += it.amount;
+    else if (it.amount > 0) deposits += it.amount;
+    else payments -= it.amount;
+  }
+  const R = (x) => round(x, dec);
+  return { book: R(book), cleared: R(done), deposits: R(deposits), payments: R(payments), diff: R(num(statementBalance) - done) };
 }

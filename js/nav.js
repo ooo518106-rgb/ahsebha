@@ -4,7 +4,7 @@
 export const SEG = {
   sale: 'sales', quote: 'quotes', sreturn: 'sales-returns', purchase: 'purchases', preturn: 'purchase-returns',
   expense: 'expenses', receipt: 'receipts', payment: 'payments', transfer: 'transfers', journal: 'journal', adjust: 'adjustments',
-  sorder: 'sales-orders', porder: 'purchase-orders',
+  sorder: 'sales-orders', porder: 'purchase-orders', payroll: 'payroll', stransfer: 'stock-transfers',
 };
 
 // القيود المشتقة (الإهلاك، تحصيل الشيكات) تفتح مصدرها
