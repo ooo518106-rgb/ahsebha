@@ -84,7 +84,7 @@ export function barcodeSVG(code, { height = 40, text = true } = {}) {
 
 // ─── القراءة بالكاميرا ───
 let zxingLoading = null;
-function loadZxing() {
+export function loadZxing() {
   if (window.ZXing) return Promise.resolve(window.ZXing);
   if (!zxingLoading) {
     zxingLoading = new Promise((resolve, reject) => {

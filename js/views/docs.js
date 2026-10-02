@@ -9,6 +9,8 @@ import {
   docLocked, lockedNote, lockedPage, deliveryPaper, whField, ccField, defaultWh, whLabel, ccLabel,
 } from './common.js';
 import { repeatDialog } from './recurring.js';
+import { scanForPurchase, takeDraft, receiptCheck } from './scan.js';
+import { bindFiles, bindDocFiles } from './attach.js';
 
 const CFG = {
   sale: { icon: '🧾', kind: 'customer', priceKey: 'price', newLabel: 'فاتورة جديدة', payLabel: 'طريقة الدفع', credit: 'آجل على العميل', paidLabel: 'المبلغ المدفوع' },
@@ -39,7 +41,7 @@ export function list(type, { root, query, path }) {
     .sort((a, b) => b.date.localeCompare(a.date) || (b.no || 0) - (a.no || 0));
 
   root.innerHTML = String(html`
-    ${head(T.plural, { sub: `${all.length} مستند`, actions: html`<a class="btn btn-primary" href="#/${SEG[type]}/new">➕ ${C.newLabel}</a>` })}
+    ${head(T.plural, { sub: `${all.length} مستند`, actions: html`<a class="btn btn-primary" href="#/${SEG[type]}/new">➕ ${C.newLabel}</a>${type === 'purchase' ? html`<a class="btn btn-ghost" href="#/purchases/new?read=1">📷 من فاتورة</a>` : ''}` })}
     <div class="toolbar">
       <input class="inp grow" type="search" data-q placeholder="بحث بالرقم أو ${kindName(C.kind)} أو الملاحظات" value="${state.q}">
       ${hasPay ? html`<select class="inp" data-st><option value="">كل الحالات</option><option value="unpaid">غير مدفوعة</option><option value="partial">مدفوعة جزئياً</option><option value="overdue">متأخرة</option><option value="paid">مدفوعة</option></select>` : ''}
@@ -135,7 +137,9 @@ export function form(type, { root, params, query }) {
 
   // ── الحالة الابتدائية ──
   let d;
+  const pre = !existing && query.draft ? takeDraft(query.draft) : null; // من قراءة فاتورة (scan.js)
   if (existing) d = clone(existing);
+  else if (pre) d = pre;
   else {
     d = { type, date: today(), party: query.party || null, dueDate: '', vatRate: s.vat ? num(s.vatRate) : 0, inclusive: !!s.inclusive, lines: [emptyLine()], notes: '', ref: '' };
     if (type === 'quote') d.validUntil = addDays(d.date, 15);
@@ -196,7 +200,7 @@ export function form(type, { root, params, query }) {
   };
 
   root.innerHTML = String(html`
-    ${head(title, { actions: html`<a class="btn btn-ghost" href="${existing ? docHref(existing) : '#/' + SEG[type]}">إلغاء</a>` })}
+    ${head(title, { actions: html`${type === 'purchase' && !existing ? html`<button type="button" class="btn btn-ghost" data-scan>📷 قراءة فاتورة</button>` : ''}<a class="btn btn-ghost" href="${existing ? docHref(existing) : '#/' + SEG[type]}">إلغاء</a>` })}
     ${existing && (type === 'sale' || type === 'sreturn') && s.vat ? html`<p class="note note-warn" style="margin-bottom:12px">تنبيه: تعديل فاتورة صادرة يخالف قواعد الفوترة الإلكترونية. الأسلم إصدار ${type === 'sale' ? 'إشعار دائن (مرتجع)' : 'فاتورة جديدة'} لتصحيحها.</p>` : ''}
     <form novalidate data-form>
       <div class="card"><div class="form-grid">
@@ -232,6 +236,7 @@ export function form(type, { root, params, query }) {
         </div>
         <div class="card" data-totals></div>
       </div>
+      <div data-att></div>
 
       <div class="form-actions sticky-actions">
         <button class="btn btn-primary" data-save="view">💾 حفظ</button>
@@ -316,7 +321,7 @@ export function form(type, { root, params, query }) {
       ${t.discount ? html`<div class="row"><span>المجموع قبل الخصم</span>${money(t.gross)}</div><div class="row"><span>الخصم</span>${money(-t.discount)}</div>` : ''}
       ${showTax ? html`<div class="row"><span>الإجمالي قبل الضريبة</span>${money(t.net)}</div><div class="row"><span>${taxLabel()} (${num(d.vatRate)}%)</span>${money(t.vat)}</div>` : ''}
       <div class="row grand"><span>الإجمالي</span><span>${money(t.total, { sym: true })}</span></div>
-    </div>`);
+    </div>${receiptCheck(d.scan, t)}`);
     if (hasPay) drawPay(t.total);
   }
 
@@ -438,6 +443,7 @@ export function form(type, { root, params, query }) {
       paidAuto = true; dirty(); drawPay(calc().total);
       if (pay === '*') $('[data-split]', root)?.focus();
     } else if (t.closest('[data-copy-ref]')) copyRef();
+    else if (t.closest('[data-scan]')) scanForPurchase(d);
     else if (t.closest('[data-save]')) { e.preventDefault(); save(t.closest('[data-save]').dataset.save); }
   });
   $('[data-form]', root).addEventListener('submit', (e) => { e.preventDefault(); save('view'); });
@@ -467,6 +473,7 @@ export function form(type, { root, params, query }) {
       vatRate: showTax ? num(d.vatRate) : 0,
       notes: String(d.notes || '').trim(),
     };
+    if (!doc.files || !doc.files.length) delete doc.files;
     if (hasPay) {
       const total = calcDoc(doc, dec()).total;
       if (pay === '*') {
@@ -496,6 +503,9 @@ export function form(type, { root, params, query }) {
 
   drawLines();
   partyInfo();
+  bindFiles(root, { get: () => d.files || [], set: (files) => { d.files = files; dirty(); } });
+  if (pre) guard.dirty = true;
+  if (type === 'purchase' && !existing && !pre && query.read) { history.replaceState(null, '', '#/purchases/new'); scanForPurchase(d); }
   if (!existing && !d.party) setTimeout(() => $('[data-party]', root)?.blur(), 0);
 }
 
@@ -555,7 +565,9 @@ export function show(type, { root, params, query }) {
     ${ref ? html`<p class="note note-info" style="margin-bottom:12px">مرتبط بالفاتورة الأصلية <a href="${docHref(ref)}">${docNo(ref, s)}</a></p>` : ''}
     ${quote ? html`<p class="note note-info" style="margin-bottom:12px">محوّل من ${DOC_TYPES[quote.type]?.name || 'مستند'} <a href="${docHref(quote)}">${docNo(quote, s)}</a></p>` : ''}
     ${returns.length ? html`<p class="note note-warn" style="margin-bottom:12px">عليها مرتجعات: ${returns.map((r, i) => html`${i ? '، ' : ''}<a href="${docHref(r)}">${docNo(r, s)}</a>`)}</p>` : ''}
+    ${d.scan ? html`<p class="note note-info" style="margin-bottom:12px">🧾 ${d.scan.kind === 'qr' ? 'مقروءة من رمز QR الضريبي' : 'مقروءة من صورة الفاتورة'}${d.scan.seller ? ` · ${d.scan.seller}` : ''}${receiptCheck(d.scan, t)}</p>` : ''}
     <div class="paper-wrap">${docPaper(d, { size })}</div>
+    <div data-att></div>
     ${apps.length ? html`<div class="card" style="margin-top:14px"><div class="card-h"><h3>التسديدات المرتبطة</h3></div><div class="list-mini">
       ${apps.map((a) => {
         const x = store.findDoc(a.doc);
@@ -569,6 +581,7 @@ export function show(type, { root, params, query }) {
 
   const doPrint = () => printPaper(docPaper(d, { size }), { size, title: `${no} - ${s.name || ''}` });
   $('[data-print]', root).onclick = doPrint;
+  bindDocFiles(root, d, { locked });
   const dn = $('[data-delivery]', root);
   if (dn) dn.onclick = () => printPaper(deliveryPaper(d), { title: `سند تسليم ${no}` });
   const rp = $('[data-repeat]', root);

@@ -133,12 +133,19 @@ function navItems() {
   return xs.filter((n, i) => !n.sec || (xs[i + 1] && !xs[i + 1].sec));
 }
 
+// تثبيت البرنامج كتطبيق (أندرويد والكمبيوتر): المتصفح يعطينا حدثاً نستخدمه عند الضغط على الزر
+let installEvt = null;
+if (typeof window !== 'undefined') {
+  window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); installEvt = e; if (store.getDb()) renderShell(); });
+  window.addEventListener('appinstalled', () => { installEvt = null; renderShell(); toast('تم تثبيت البرنامج ✓ تلاقيه بين تطبيقاتك'); });
+}
+
 export function renderShell() {
   const db = store.getDb();
   setSettings(db && db.settings);
   const side = document.getElementById('side');
   const brand = html`<a class="side-brand" href="#/"><span class="brand-badge">📒</span><span>احسبها<span class="brand-sub">برنامج المحاسبة</span></span></a>`;
-  const foot = html`<div class="side-foot"><p class="muted small" style="padding:0 12px">🔒 بياناتك محفوظة على هذا الجهاز فقط. نزّل نسخة احتياطية من <a href="#/settings">الإعدادات</a> بشكل دوري.</p></div>`;
+  const foot = html`<div class="side-foot">${installEvt ? html`<button type="button" class="btn btn-primary btn-sm side-install" data-install>📲 ثبّت البرنامج على جهازك</button>` : ''}<p class="muted small" style="padding:0 12px">🔒 بياناتك محفوظة على هذا الجهاز فقط. نزّل نسخة احتياطية من <a href="#/settings">الإعدادات</a> بشكل دوري. <a href="privacy.html">سياسة الخصوصية</a></p></div>`;
   side.innerHTML = String(db
     ? html`${brand}<div class="side-co" title="${db.settings.name}">🏢 ${db.settings.name || 'منشأتي'}</div>
       <nav>${navItems().map((n) => (n.sec ? html`<div class="nav-sec">${n.sec}</div>` : html`<a class="nav-a" data-h="${n.h}" href="#/${n.h}"><span class="ic">${n.ic}</span>${n.t}</a>`))}</nav>${foot}`
@@ -246,12 +253,21 @@ async function boot() {
   });
   renderShell();
   generateRecurring();
+  store.gcFiles().catch(() => {});
   window.addEventListener('hashchange', render);
   window.addEventListener('beforeunload', (e) => { if (guard.dirty) { e.preventDefault(); e.returnValue = ''; } });
   window.addEventListener('acc:shell', () => { auth.init(); renderShell(); });
   window.addEventListener('acc:save-failed', () => toast('تعذّر الحفظ على هذا الجهاز. صدّر نسخة احتياطية من الإعدادات فوراً', 'err'));
   store.onExternalChange(() => { auth.init(); renderShell(); if (!guard.dirty) rerender(); toast('تحدّثت البيانات من نافذة أخرى', 'warn'); });
   document.getElementById('menu-btn').onclick = () => document.getElementById('app').classList.toggle('nav-open');
+  document.getElementById('side').addEventListener('click', async (e) => {
+    if (!e.target.closest('[data-install]') || !installEvt) return;
+    const evt = installEvt;
+    evt.prompt();
+    await evt.userChoice.catch(() => null);
+    installEvt = null;
+    renderShell();
+  });
   document.getElementById('scrim').onclick = closeNav;
   document.addEventListener('click', (e) => {
     const q = document.getElementById('quick');

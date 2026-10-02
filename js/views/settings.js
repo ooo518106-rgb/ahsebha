@@ -4,7 +4,7 @@ import { COUNTRIES, CURRENCIES, validSaudiVat, isDate, num, payrollRates } from 
 import { html, raw, fmtDate, toast, confirmBox, modal, $, showErrors, field, MONTHS, attr } from '../ui.js';
 import { go, guard, setTitle } from '../nav.js';
 import { head, S } from './common.js';
-import { downloadBackup, restoreFile, loadDemo } from './home.js';
+import { downloadBackup, downloadFullBackup, restoreFile, loadDemo } from './home.js';
 import { can } from '../auth.js';
 
 export function view({ root }) {
@@ -99,7 +99,9 @@ export function view({ root }) {
     <div class="card" style="margin-top:14px"><div class="card-h"><h3>💾 النسخ الاحتياطي</h3><span class="muted small">${s.lastBackupAt ? 'آخر نسخة: ' + fmtDate(s.lastBackupAt.slice(0, 10)) : 'لم تنزّل نسخة بعد'}</span></div>
       <p class="muted small" style="margin-bottom:12px">بياناتك محفوظة في هذا المتصفح على هذا الجهاز فقط. نزّل نسخة احتياطية أسبوعياً على الأقل، واحفظها في مكان آمن (بريدك أو Google Drive). يمكنك استعادتها على أي جهاز.</p>
       <div class="actions"><button class="btn btn-primary" data-backup>⬇️ تنزيل نسخة احتياطية</button>
-        ${can('admin') ? html`<label class="btn btn-ghost">📂 استعادة من ملف<input type="file" accept=".json,application/json" data-restore hidden></label>` : ''}</div>
+        ${store.usedFileIds().size ? html`<button class="btn btn-ghost" data-backup-full>🗂️ نسخة كاملة مع المرفقات (${store.usedFileIds().size})</button>` : ''}
+        ${can('admin') ? html`<label class="btn btn-ghost">📂 استعادة من ملف<input type="file" accept=".json,.zip,application/json,application/zip" data-restore hidden></label>` : ''}</div>
+      ${store.usedFileIds().size ? html`<p class="muted small" style="margin-top:8px">النسخة العادية (.json) فيها كل البيانات بدون صور المرفقات وحجمها صغير. النسخة الكاملة (.zip) فيها الصور كمان.</p>` : ''}
       <p class="muted small" style="margin-top:10px" data-storage></p></div>
 
     ${can('admin') ? html`<div class="card" style="margin-top:14px;border-color:var(--neg)"><div class="card-h"><h3>⚠️ منطقة الخطر</h3></div>
@@ -170,6 +172,8 @@ export function view({ root }) {
     go('#/settings');
   };
 
+  const full = $('[data-backup-full]', root);
+  if (full) full.onclick = async () => { full.disabled = true; try { await downloadFullBackup(); } finally { full.disabled = false; } };
   $('[data-backup]', root).onclick = (e) => {
     downloadBackup();
     const h = e.target.closest('.card').querySelector('.card-h .muted');
