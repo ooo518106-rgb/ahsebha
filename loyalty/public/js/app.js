@@ -3,6 +3,7 @@ import { $, $$, ago, api, cardHTML, fmt, fmtDate, html, newKey, qrSVG, render, s
 import { generateKeyAndCsr } from './csr.js';
 import { parseLatLng } from './rules.js';
 import { startCameraScan } from './scan.js';
+import { parseBirthday, readCsv, readXlsx } from './sheet.js';
 
 const state = { me: null, shop: null, google: null, member: null, key: newKey(), stopScan: null, branch: (() => { try { return localStorage.getItem('nq_branch') || ''; } catch { return ''; } })() };
 const branchName = (id) => (state.shop.locations.find((l) => l.id === id) || {}).name || '';
@@ -374,6 +375,87 @@ async function redeem(m) {
 
 // زبون جديد: الزبون بيمسح QR الانضمام وبيكتب اسمه ورقمه بنفسه (الموظف ما بيشوف رقمه)،
 // والمالك بس بيقدر يكتب البيانات بإيده للي ما معه نت
+// 📥 استيراد زبائن من Excel أو CSV: بنقرأ الملف بالجوال، بنطابق الأعمدة، وبنبعت على دفعات
+const FIELD_HINTS = {
+  name: [/اسم|name/i],
+  phone: [/جوال|موبايل|هاتف|رقم|phone|mobile|tel/i],
+  balance: [/رصيد|نقاط|أختام|balance|points|stamps/i],
+  birthday: [/ميلاد|birth/i],
+};
+function importDialog(done) {
+  const body = openDialog('📥 استيراد زبائن', html`<div class="stack">
+    <p class="small">ملف Excel (‎.xlsx) أو CSV، كل زبون بسطر. الأعمدة: <b>الاسم، الجوال</b>، و(اختياري) <b>الرصيد، عيد الميلاد</b>.</p>
+    <button class="btn ghost sm" type="button" id="tpl">⬇️ نزّل نموذج جاهز</button>
+    <label class="btn" style="margin:0">اختار الملف<input type="file" id="sheetFile" accept=".xlsx,.csv,.txt,text/csv" class="hidden"></label>
+    <div id="importBody"></div>
+  </div>`);
+  $('#tpl', body).onclick = () => {
+    const blob = new Blob(['\ufeffالاسم,الجوال,الرصيد,عيد الميلاد\r\nسارة أحمد,0791234567,40,21/5\r\n'], { type: 'text/csv;charset=utf-8' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'nuqatak-customers.csv';
+    a.click();
+  };
+  $('#sheetFile', body).onchange = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    let rows;
+    try {
+      rows = /\.xlsx$/i.test(file.name) ? await readXlsx(await file.arrayBuffer()) : readCsv(await file.text());
+    } catch (err) { toast(err.message || 'ما قدرنا نقرأ الملف', 'bad'); return; }
+    rows = rows.filter((r) => r.some((x) => x));
+    if (!rows.length) { toast('الملف فاضي', 'bad'); return; }
+    // أول سطر عناوين؟ بنطابق الأعمدة منه، وإلا بنفترض الترتيب: الاسم، الجوال، الرصيد، الميلاد
+    const head = rows[0];
+    const map = {};
+    for (const [field, res] of Object.entries(FIELD_HINTS)) map[field] = head.findIndex((h) => res.some((re) => re.test(h)));
+    const hasHeader = map.name >= 0 || map.phone >= 0;
+    if (!hasHeader) Object.assign(map, { name: 0, phone: 1, balance: 2, birthday: 3 });
+    const data = hasHeader ? rows.slice(1) : rows;
+    const cols = Math.max(...rows.map((r) => r.length));
+    const colName = (i) => (hasHeader ? head[i] || `عمود ${i + 1}` : `عمود ${i + 1}`);
+    const sel = (field, label) => html`<div class="field grow"><label>${label}</label><select data-field="${field}">
+      <option value="-1">—</option>${Array.from({ length: cols }, (_, i) => html`<option value="${i}" ${map[field] === i ? 'selected' : ''}>${colName(i)}</option>`)}</select></div>`;
+    const box = $('#importBody', body);
+    render(box, html`<p class="small muted">لقينا <b class="num">${data.length}</b> زبون. تأكد من الأعمدة:</p>
+      <div class="row">${sel('name', 'الاسم')}${sel('phone', 'الجوال')}</div>
+      <div class="row">${sel('balance', 'الرصيد')}${sel('birthday', 'عيد الميلاد')}</div>
+      <div id="preview" class="small"></div>
+      <button class="btn big block" type="button" id="doImport">استورد ${data.length} زبون</button>
+      <div id="importResult"></div>`);
+    const toRow = (r, i) => {
+      const b = map.birthday >= 0 ? parseBirthday(r[map.birthday]) : null;
+      return { line: i + (hasHeader ? 2 : 1), name: r[map.name] || '', phone: r[map.phone] || '', balance: map.balance >= 0 ? r[map.balance] : 0, bdayDay: b?.day, bdayMonth: b?.month };
+    };
+    const preview = () => render($('#preview', box), html`<table class="mini">${data.slice(0, 4).map((r, i) => {
+      const x = toRow(r, i);
+      return html`<tr><td>${x.name}</td><td class="num">${x.phone}</td><td class="num">${x.balance || ''}</td><td>${x.bdayDay ? `${x.bdayDay}/${x.bdayMonth}` : ''}</td></tr>`;
+    })}</table>`);
+    preview();
+    $$('[data-field]', box).forEach((s2) => { s2.onchange = () => { map[s2.dataset.field] = Number(s2.value); preview(); }; });
+    $('#doImport', box).onclick = async () => {
+      if (map.name < 0 || map.phone < 0) { toast('اختار عمود الاسم وعمود الجوال', 'bad'); return; }
+      const btn = $('#doImport', box);
+      btn.disabled = true;
+      const all = data.map(toRow);
+      let added = 0;
+      const skipped = [];
+      try {
+        for (let i = 0; i < all.length; i += 50) {
+          btn.textContent = `جاري الاستيراد… ${i} من ${all.length}`;
+          const r = await api('/api/members/import', { method: 'POST', body: { rows: all.slice(i, i + 50) } });
+          added += r.added;
+          skipped.push(...r.skipped);
+        }
+      } catch (err) { toast(err.message, 'bad'); }
+      btn.textContent = 'خلص ✅';
+      render($('#importResult', box), html`<p class="alert ok small">انضاف <b class="num">${added}</b> زبون${skipped.length ? `، وتخطّينا ${skipped.length}` : ''}.</p>
+        ${skipped.length ? html`<ul class="small muted">${skipped.slice(0, 12).map((x) => html`<li>سطر ${x.line}: ${x.reason}</li>`)}</ul>` : ''}`);
+      done();
+    };
+  };
+}
+
 function newMemberDialog() {
   const s = state.shop;
   const body = openDialog('زبون جديد', html`
@@ -481,7 +563,7 @@ async function memberDialog(id) {
     ch.dataset.loaded = '1';
     try {
       const r = await api(`/api/members/${m.id}/credit`);
-      render(ch.querySelector('div'), r.history.length ? html`<ul class="list">${r.history.map((x) => html`<li><div class="main"><b>${x.kind === 'topup' ? `شحن ${fmt(x.amount)}${x.bonus ? ` + ${fmt(x.bonus)} هدية` : ''}` : `دفع ${fmt(x.amount)}`}</b>
+      render(ch.querySelector('div'), r.history.length ? html`<ul class="list">${r.history.map((x) => html`<li><div class="main"><b>${x.note ? `${x.note} ${x.kind === 'topup' ? '+' : '−'}${fmt(x.amount)}` : x.kind === 'topup' ? `شحن ${fmt(x.amount)}${x.bonus ? ` + ${fmt(x.bonus)} هدية` : ''}` : `دفع ${fmt(x.amount)}`}</b>
         <span class="small muted">${x.by || ''} · ${ago(x.at)}</span></div></li>`)}</ul>` : html`<p>ما في حركات رصيد.</p>`);
     } catch (e) { render(ch.querySelector('div'), html`<p class="alert bad">${e.message}</p>`); }
   };
@@ -517,7 +599,7 @@ async function memberDialog(id) {
 function members() {
   render(view, html`
     <section class="panel stack">
-      <div class="row"><input class="grow" id="q" type="search" placeholder="دوّر بالاسم أو الجوال أو رقم البطاقة"><button class="btn soft" id="addM" type="button">+ زبون</button></div>
+      <div class="row"><input class="grow" id="q" type="search" placeholder="دوّر بالاسم أو الجوال أو رقم البطاقة"><button class="btn soft" id="addM" type="button">+ زبون</button>${isOwner() ? html`<button class="btn ghost" id="importM" type="button">📥 استيراد</button>` : ''}</div>
       <p class="small muted" id="count"></p>
       <ul class="list" id="mlist"></ul>
       <button class="btn ghost block hidden" id="more" type="button">عرض المزيد</button>
@@ -544,6 +626,8 @@ function members() {
   $('#q').oninput = (e) => { clearTimeout(timer); timer = setTimeout(() => { q = e.target.value.trim(); offset = 0; load(); }, 250); };
   $('#more').onclick = () => { offset += 50; load(true); };
   $('#addM').onclick = () => newMemberDialog();
+  const im = $('#importM');
+  if (im) im.onclick = () => importDialog(() => { offset = 0; load(); });
   $('#mlist').onclick = (e) => { const li = e.target.closest('[data-member]'); if (li) memberDialog(li.dataset.member); };
   $('#dlg').onclose = () => { offset = 0; load(); };
   load();

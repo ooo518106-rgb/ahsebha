@@ -426,3 +426,118 @@ test('المنيو: المالك بيضيف ويعدّل ويخفي، والصف
   assert.equal((await st.post('/api/menu', { name: 'x' })).status, 403);
   assert.equal((await p.client().get(`/m/${p.shop.slug}`)).status, 200);
 });
+
+test('استيراد الزبائن: أرقام بدون صفر، رصيد، أعياد ميلاد، وتخطّي المكرر والغلط', async () => {
+  const p = await platform();
+  const { owner } = p;
+  await p.customer('موجود', '0791110013');
+  const r = await owner.post('/api/members/import', { rows: [
+    { line: 2, name: 'سارة أحمد', phone: '791234567', balance: '40', bdayDay: 5, bdayMonth: 3 },
+    { line: 3, name: 'عمر', phone: '+962 79 555 1234', balance: 0 },
+    { line: 4, name: 'مكرر', phone: '0791110013' },
+    { line: 5, name: 'ب', phone: '0790000000' },
+    { line: 6, name: 'رقم غلط', phone: '123' },
+  ] });
+  assert.equal(r.status, 200);
+  assert.equal(r.data.added, 2);
+  assert.deepEqual(r.data.skipped.map((x) => [x.line, x.reason]), [[4, 'الرقم مسجّل من قبل'], [5, 'الاسم ناقص'], [6, 'رقم الجوال مش صحيح']]);
+  const sara = (await owner.get('/api/members?q=0791234567')).data.members[0];
+  assert.equal(sara.balance, 40);
+  assert.equal(sara.birthday, '03-05');
+  assert.equal((await owner.get('/api/members?q=0795551234')).data.total, 1, '+962 صار 07');
+  assert.equal((await owner.post('/api/members/import', { rows: [] })).status, 400);
+  const st = await p.staffClient();
+  assert.equal((await st.post('/api/members/import', { rows: [{ name: 'x', phone: '0790000001' }] })).status, 403);
+});
+
+test('إهداء الرصيد: بينخصم من المهدي، صاحبه بيستلمه مرة وحدة، وإذا ما استلمه بيرجع بعد 30 يوم', async () => {
+  const p = await platform();
+  const { owner, device, to } = p;
+  const sara = await p.customer('سارة علي', '0791110014');
+  const omar = await p.customer('عمر', '0791110015');
+  assert.equal((await sara.guest.post(`/api/cards/${sara.token}/gift`, { amount: 5 })).status, 400, 'الرصيد مش مفعّل');
+  await owner.put('/api/shop/perks', { creditOn: true, creditBonus: 0 });
+  await owner.post(`/api/members/${sara.id}/credit/topup`, { amount: 10 });
+  const dev = await device(sara.guest, `/api/cards/${sara.token}/push`, 'sara-gift');
+  let r = await sara.guest.post(`/api/cards/${sara.token}/gift`, { amount: 20 });
+  assert.equal(r.status, 409, 'أكتر من رصيدها');
+  assert.equal((await sara.guest.post(`/api/cards/${sara.token}/gift`, { amount: 0.2 })).status, 400, 'أقل من نص دينار');
+  r = await sara.guest.post(`/api/cards/${sara.token}/gift`, { amount: 4 });
+  assert.equal(r.status, 201, JSON.stringify(r.data));
+  assert.equal(r.data.credit, 6);
+  assert.match(r.data.url, /\/g\/[a-z2-9]{20}$/);
+  const code = r.data.code;
+  // صفحة الهدية
+  const info = (await p.client().get(`/api/gifts/${code}`)).data;
+  assert.deepEqual([info.amount, info.from, info.open, info.shop.slug], [4, 'سارة', true, p.shop.slug]);
+  assert.equal((await p.client().get(`/g/${code}`)).status, 200);
+  // ما بتستلم هديتها، ولا بطاقة من محل تاني
+  assert.equal((await sara.guest.post(`/api/gifts/${code}/claim`, { token: sara.token })).status, 400);
+  const other = p.client();
+  const { shop: shop2 } = await signup(other, { shopName: 'Other' });
+  const stranger = (await p.client().post(`/api/shops/${shop2.slug}/join`, { name: 'غريب', phone: '0791110016' })).data.token;
+  assert.equal((await p.client().post(`/api/gifts/${code}/claim`, { token: stranger })).status, 400);
+  // عمر بيستلم
+  r = await omar.guest.post(`/api/gifts/${code}/claim`, { token: omar.token });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.equal((await omar.guest.get(`/api/cards/${omar.token}`)).data.member.credit, 4);
+  await p.flushAll(omar.guest);
+  assert.match(to(dev).at(-1).body, /عمر استلم هديتك \(4 JOD\)/);
+  assert.equal((await omar.guest.post(`/api/gifts/${code}/claim`, { token: omar.token })).status, 409, 'مرة وحدة');
+  assert.equal((await p.client().get(`/api/gifts/${code}`)).data.open, false);
+  // الحركات والتقارير: الهدية مش شحن ولا دفع عند المحل
+  const h = (await owner.get(`/api/members/${omar.id}/credit`)).data.history;
+  assert.equal(h[0].note, '🎁 هدية من صاحب');
+  assert.deepEqual((await owner.get('/api/reports')).data.credit, { outstanding: 10, topups: 10, spent: 0 });
+  // هدية تانية ما حدا استلمها ← بترجع بعد 30 يوم
+  const code2 = (await sara.guest.post(`/api/cards/${sara.token}/gift`, { amount: 2.5 })).data.code;
+  assert.equal((await sara.guest.get(`/api/cards/${sara.token}`)).data.member.credit, 3.5);
+  assert.equal((await p.cron(Date.now() + 29 * DAY)).giftsRefunded, 0);
+  assert.equal((await p.cron(Date.now() + 31 * DAY)).giftsRefunded, 1);
+  assert.equal((await p.cron(Date.now() + 32 * DAY)).giftsRefunded, 0, 'مرة وحدة');
+  assert.equal((await sara.guest.get(`/api/cards/${sara.token}`)).data.member.credit, 6);
+  assert.equal((await omar.guest.post(`/api/gifts/${code2}/claim`, { token: omar.token })).status, 409, 'رجعت، ما بتنستلم');
+  // كود مش موجود
+  assert.equal((await p.client().get('/api/gifts/aaaaaaaaaaaaaaaaaaaa')).status, 404);
+});
+
+test('طلبين بنفس الملّي ثانية: الهدية والكوبون ما بينحسبوا مرتين', async () => {
+  const p = await platform();
+  const { owner } = p;
+  const sara = await p.customer('سارة', '0791110017');
+  const omar = await p.customer('عمر', '0791110018');
+  await owner.put('/api/shop/perks', { creditOn: true, creditBonus: 0 });
+  await owner.post(`/api/members/${sara.id}/credit/topup`, { amount: 10 });
+  const code = (await sara.guest.post(`/api/cards/${sara.token}/gift`, { amount: 4 })).data.code;
+  const cp = (await owner.post('/api/coupons', { title: 'قهوة مجانية', segment: 'all', days: 3 })).data;
+  const st = await p.staffClient();
+  const realNow = Date.now;
+  const frozen = realNow();
+  Date.now = () => frozen; // كل الطلبات بنفس الملّي ثانية (متل كبسة مكررة)
+  try {
+    const claims = [];
+    for (let i = 0; i < 3; i++) claims.push((await omar.guest.post(`/api/gifts/${code}/claim`, { token: omar.token })).status);
+    assert.deepEqual(claims, [200, 409, 409]);
+    const uses = [];
+    for (let i = 0; i < 2; i++) uses.push((await st.post(`/api/members/${omar.id}/coupons/${cp.id}/use`, {})).status);
+    assert.deepEqual(uses, [200, 409]);
+  } finally {
+    Date.now = realNow;
+  }
+  assert.equal((await omar.guest.get(`/api/cards/${omar.token}`)).data.member.credit, 4);
+  assert.equal((await owner.get('/api/coupons')).data.coupons[0].used, 1);
+  // هدية الدعوة: زيارتين بنفس الملّي ثانية ← الهدية مرة وحدة للاتنين
+  const ref = new URL((await sara.guest.get(`/api/cards/${sara.token}`)).data.refUrl).searchParams.get('ref');
+  const lina = await p.customer('لينا', '0791110019', { ref });
+  const before = (await owner.get(`/api/members/${sara.id}`)).data.member.balance;
+  Date.now = () => frozen + DAY;
+  try {
+    const earns = await Promise.all([0, 1].map((i) => owner.post(`/api/members/${lina.id}/earn`, { amount: 5, key: `same-ms-earn-${i}` })));
+    assert.deepEqual(earns.map((r) => r.status), [200, 200]);
+  } finally {
+    Date.now = realNow;
+  }
+  const bonus = 10; // عُشر الـ 100 نقطة
+  assert.equal((await owner.get(`/api/members/${lina.id}`)).data.member.balance, 10 + bonus);
+  assert.equal((await owner.get(`/api/members/${sara.id}`)).data.member.balance, before + bonus);
+});

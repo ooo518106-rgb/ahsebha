@@ -5,7 +5,9 @@ import { LANG, applyLang, ruleText, setLang, t } from './i18n.js';
 applyLang();
 
 const slug = location.pathname.split('/')[2];
-const ref = (new URLSearchParams(location.search).get('ref') || '').toLowerCase();
+const query = new URLSearchParams(location.search);
+const ref = (query.get('ref') || '').toLowerCase();
+const giftCode = /^[a-z2-9]{20}$/.test(query.get('gift') || '') ? query.get('gift') : null;
 const unitOf = (shop) => t(shop.programType === 'stamps' ? 'unitStamp' : 'unitPoint');
 const root = $('#root');
 
@@ -42,6 +44,7 @@ async function main() {
       <p class="muted">${ruleText(shop)}</p>
     </div>
     ${referrer ? html`<div class="alert ok center" style="margin-bottom:12px">${t('referred', { name: referrer, n: shop.refBonus, unit })}</div>` : ''}
+    ${giftCode ? html`<div class="alert ok center" style="margin-bottom:12px">${t('giftJoin')} 🎁</div>` : ''}
     ${existing ? html`<div class="panel center"><p>${t('haveCard')}</p><a class="btn block" style="margin-top:8px" href="/c/${existing}">${t('openMine')}</a></div>` : ''}
     <form class="panel stack" id="join" novalidate>
       <h2>${t('joinTitle')}</h2>
@@ -69,7 +72,10 @@ async function main() {
     try {
       const r = await api(`/api/shops/${encodeURIComponent(slug)}/join`, { method: 'POST', body: { ...Object.fromEntries(new FormData(e.target)), ref: referrer ? ref : undefined, lang: LANG } });
       try { localStorage.setItem('loy_cards', JSON.stringify({ ...savedCards(), [slug]: r.token })); } catch { /* اختياري */ }
-      location.href = `/c/${r.token}?new=1`;
+      // جاي من رابط هدية: بنستلمها على البطاقة الجديدة (إذا فشلت، البطاقة انعملت على كل حال)
+      let claimed = false;
+      if (giftCode) claimed = await api(`/api/gifts/${giftCode}/claim`, { method: 'POST', body: { token: r.token } }).then(() => true, () => false);
+      location.href = `/c/${r.token}?new=1${claimed ? '&gift=1' : ''}`;
     } catch (err) {
       $('#err').textContent = err.message;
       btn.disabled = false;

@@ -66,7 +66,7 @@ const AR = {
   myCardsHint: 'ضيف هالصفحة على الشاشة الرئيسية، وبتصير عندك أيقونة وحدة لكل بطاقاتك.', allCards: '💼 كل بطاقاتي',
   giftBtn: '🎁 أهدي رصيد لصاحب', giftAsk: 'كم بدك تهدي؟ ({cur})', giftMade: 'جاهزة الهدية 🎁 ابعت الرابط لصاحبك', giftText: '🎁 أهديتك {amount} {cur} رصيد بـ {shop}! افتح الرابط واستلمها:\n{url}',
   giftTitle: '🎁 {name} أهداك {amount} {cur}', giftAt: 'رصيد بـ {shop}، بتدفع منه عند الكاشير.', giftClaim: 'استلم الهدية على بطاقتي', giftJoin: 'خذ بطاقة واستلم الهدية',
-  giftClaimed: 'استلمت الهدية ✅', giftGone: 'هالهدية انستلمت أو انتهت.',
+  giftClaimed: 'استلمت الهدية ✅', giftSend: 'ابعت الهدية', giftGone: 'هالهدية انستلمت أو انتهت.',
 };
 
 const EN = {
@@ -111,7 +111,7 @@ const EN = {
   myCardsHint: 'Add this page to your home screen to get one icon for all your cards.', allCards: '💼 All my cards',
   giftBtn: '🎁 Gift credit to a friend', giftAsk: 'How much do you want to gift? ({cur})', giftMade: 'Your gift is ready 🎁 Send the link to your friend', giftText: '🎁 I gifted you {amount} {cur} of credit at {shop}! Open the link to claim it:\n{url}',
   giftTitle: '🎁 {name} gifted you {amount} {cur}', giftAt: 'Credit at {shop} you can spend at the counter.', giftClaim: 'Claim it on my card', giftJoin: 'Get a card and claim the gift',
-  giftClaimed: 'Gift claimed ✅', giftGone: 'This gift was already claimed or has expired.',
+  giftClaimed: 'Gift claimed ✅', giftSend: 'Send the gift', giftGone: 'This gift was already claimed or has expired.',
 };
 
 export function t(key, vars = {}) {

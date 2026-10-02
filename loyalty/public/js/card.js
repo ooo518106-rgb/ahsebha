@@ -134,12 +134,24 @@ async function load(first = false, quiet = false) {
   if (sig === lastSig) return;
   lastSig = sig;
   lastData = data;
+  remember(data.shop.slug);
   draw();
+}
+
+// بنحفظ البطاقة على هالجهاز: صفحة «كل بطاقاتي» والمنيو بيلاقوها من هون
+function remember(slug) {
+  try {
+    const cards = JSON.parse(localStorage.getItem('loy_cards') || '{}');
+    if (cards[slug] === token) return;
+    cards[slug] = token;
+    localStorage.setItem('loy_cards', JSON.stringify(cards));
+  } catch { /* اختياري */ }
 }
 
 // ─── العروض على البطاقة: المستوى، نقاط دبل، عيد الميلاد، التقييم، ادعُ صاحبك ───
 let lastSig = null;
 let rate = null; // { stars } لما يختار نجوم أقل من 4 ويكتب ملاحظة، أو { done, googleUrl }
+let gift = null; // آخر هدية عملها: { url, text }
 const fmtDay = (ms) => fmtDate(ms, { weekday: 'long', day: 'numeric', month: 'long' });
 const first = (name) => String(name).trim().split(/\s+/)[0];
 const unitOf = (shop) => t(shop.programType === 'stamps' ? 'unitStamp' : 'unitPoint');
@@ -154,7 +166,10 @@ function perksPanels(shop, member, refUrl, canRate, coupons) {
       : member.boostUntil ? html`<div class="alert ok center">${t('boostUntil', { day: fmtDay(member.boostUntil) })}</div>` : ''}
     ${coupons.map((cp) => html`<div class="panel small coupon-card"><b>${t('coupon', { title: cp.title })}</b>${cp.details ? html`<div>${cp.details}</div>` : ''}
       <div class="muted">${t('couponUntil', { day: fmtDay(cp.expiresAt) })}</div></div>`)}
-    ${shop.creditOn || member.credit > 0 ? html`<div class="panel small row" style="justify-content:space-between"><b>${t('credit', { amount: member.credit, cur: shop.currency })}</b><span class="muted">${t('creditHint')}</span></div>` : ''}
+    ${shop.creditOn || member.credit > 0 ? html`<div class="panel small stack"><div class="row" style="justify-content:space-between"><b>${t('credit', { amount: member.credit, cur: shop.currency })}</b><span class="muted">${t('creditHint')}</span></div>
+      ${shop.creditOn && member.credit >= 0.5 ? html`<button class="btn ghost block" type="button" id="giftBtn">${t('giftBtn')}</button>` : ''}
+      ${gift ? html`<div class="alert ok stack"><b>${t('giftMade')}</b><div class="row"><button class="btn grow" type="button" id="giftShare">${t('giftSend')}</button>
+        <button class="btn ghost" type="button" id="giftCopy">${t('copyLink')}</button></div></div>` : ''}</div>` : ''}
     ${member.expiresAt ? html`<p class="small muted center">${t('expires', { day: fmtDate(member.expiresAt) })}</p>` : ''}
     ${tier ? html`<div class="panel small tier tier-${tier.key}"><b>${t('tier', { icon: tier.icon, name: LANG === 'en' ? { bronze: 'Bronze', silver: 'Silver', gold: 'Gold' }[tier.key] : tier.name })}</b>${tier.mult > 1 ? t('tierMult', { m: tier.mult }) : ''}
       ${tier.next ? html`<div class="muted" style="margin-top:4px">${t('tierNext', { n: tier.next.visitsLeft, visits: t(tier.next.visitsLeft === 1 ? 'visit1' : 'visitN'), icon: tier.next.icon, name: LANG === 'en' ? (tier.key === 'bronze' ? 'Silver' : 'Gold') : tier.next.name })}</div>` : ''}</div>` : ''}
@@ -211,6 +226,7 @@ function draw() {
       </div>
       ${linksRow(shop)}
       <p class="center small muted">${t('visits', { v: member.visits, r: member.redeemed })}</p>
+      <p class="center"><a class="btn ghost sm" href="/cards">${t('allCards')}</a></p>
       <p class="center small muted"><a href="/privacy">${t('privacy')}</a> · <button type="button" class="linkish" id="deleteCard">${t('deleteCard')}</button></p>
       <p class="powered">${t('powered')} <a href="/">نقاطك</a></p>
     </div>`);
@@ -269,6 +285,15 @@ root.addEventListener('click', async (e) => {
     return;
   }
   if (e.target.closest('#rateSend')) { sendRating(rate.stars, $('#rateNote').value); return; }
+  if (e.target.closest('#giftBtn')) { makeGift(); return; }
+  if (e.target.closest('#giftShare')) {
+    if (navigator.share) { navigator.share({ text: gift.text }).catch(() => {}); } else { window.open(`https://wa.me/?text=${encodeURIComponent(gift.text)}`, '_blank', 'noopener'); }
+    return;
+  }
+  if (e.target.closest('#giftCopy')) {
+    try { await navigator.clipboard.writeText(gift.url); toast(t('copied'), 'ok'); } catch { prompt(t('copyLink'), gift.url); }
+    return;
+  }
   if (e.target.closest('#shareRef')) {
     const text = inviteText();
     if (navigator.share) { navigator.share({ text }).catch(() => {}); } else { window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank', 'noopener'); }
@@ -285,6 +310,21 @@ root.addEventListener('click', async (e) => {
     location.reload();
   }
 });
+
+// 🎁 إهداء رصيد: بينخصم من رصيده هلق، وصاحبه بيستلمه من الرابط (وإذا ما استلمه خلال 30 يوم بيرجع)
+async function makeGift() {
+  const { shop } = lastData;
+  const input = prompt(t('giftAsk', { cur: shop.currency }), '');
+  if (input == null) return;
+  const amount = Number(String(input).replace(/[٠-٩]/g, (d) => '٠١٢٣٤٥٦٧٨٩'.indexOf(d)).replace(',', '.').trim());
+  if (!(amount > 0)) return;
+  try {
+    const r = await api(`/api/cards/${token}/gift`, { method: 'POST', body: { amount } });
+    gift = { url: r.url, text: t('giftText', { amount: r.amount, cur: shop.currency, shop: shop.name, url: r.url }) };
+    lastSig = null;
+    await load(false, true);
+  } catch (err) { toast(err.message, 'bad'); }
+}
 
 root.addEventListener('submit', async (e) => {
   if (e.target.id !== 'bdayForm') return;
@@ -312,7 +352,8 @@ root.addEventListener('click', async (e) => {
 
 await detectPush();
 await load(true);
-if (params.has('new') || params.has('gw') || params.has('apple')) history.replaceState(null, '', location.pathname);
+if (params.has('gift')) toast(t('giftClaimed'), 'ok');
+if (params.has('new') || params.has('gw') || params.has('apple') || params.has('gift')) history.replaceState(null, '', location.pathname);
 // تحديث كل 15 ثانية والصفحة مفتوحة، عشان الزبون يشوف نقاطه وهو عالكاونتر
 setInterval(() => { if (!deleted && document.visibilityState === 'visible') load(); }, 15000);
 document.addEventListener('visibilitychange', () => { if (!deleted && document.visibilityState === 'visible') load(); });

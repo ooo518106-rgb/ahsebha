@@ -609,6 +609,7 @@ export async function runScheduled(ctx, now = Date.now()) {
   if (c.budget > 0) out.summaries = await summaryJob(c, now);
   if (c.budget > 0) out.reminders = await reminderJob(c, platformShop, now);
   Object.assign(out, await expiryJob(c, shopOf, now));
+  out.giftsRefunded = await giftRefundJob(c, now);
   // حساب العرض بيرجع لوضعه الأصلي كل يوم الساعة 4 الفجر
   const day = localDayKey('JO', now);
   if (perks.localTime('JO', now).hour >= 4 && (await getSetting(c.db, 'demo_day')) !== day && (await c.db.get('SELECT id FROM shops WHERE demo = 1 LIMIT 1'))) {
@@ -791,6 +792,26 @@ async function reminderJob(c, platformShop, now) {
       : `⏳ اشتراكك بنقاطك بيخلص ${when}. جدّد من ⚙️ الإعدادات عشان ما يوقف الكاشير.`;
     await pushTo(c, owners, () => ({ title: shop.name, body, url: `${c.origin}/app#settings` }), 'user_push_subs');
     n++;
+  }
+  return n;
+}
+
+// 🎁 الهدية اللي ما انستلمت خلال 30 يوم بترجع لصاحبها
+async function giftRefundJob(c, now) {
+  const due = await c.db.all('SELECT * FROM credit_gifts WHERE claimed_at IS NULL AND refunded_at IS NULL AND created_at <= ? LIMIT 50', now - GIFT_DAYS * DAY);
+  let n = 0;
+  for (const g of due) {
+    const tag = `gift-back:${g.id}`; // مفتاح فريد: لو اشتغلت تشغيلتين سوا، التانية بتفشل كلها
+    try {
+      const res = await c.db.batch([
+        ['UPDATE credit_gifts SET refunded_at = ? WHERE id = ? AND claimed_at IS NULL AND refunded_at IS NULL', [now, g.id]],
+        ["INSERT INTO credit_txns (shop_id, member_id, kind, amount, note, idem, created_at) SELECT ?, id, 'topup', ?, '↩️ رجعت هدية ما انستلمت', ?, ? FROM members WHERE id = ? AND EXISTS (SELECT 1 FROM credit_gifts WHERE id = ? AND refunded_at = ?)", [g.shop_id, g.amount, tag, now, g.from_member, g.id, now]],
+        ['UPDATE members SET credit = credit + ? WHERE id = ? AND EXISTS (SELECT 1 FROM credit_txns WHERE shop_id = ? AND idem = ? AND member_id = ? AND created_at = ?)', [g.amount, g.from_member, g.shop_id, tag, g.from_member, now]],
+      ]);
+      if (res[0].changes) n++;
+    } catch (e) {
+      if (!isUniqueError(e)) throw e;
+    }
   }
   return n;
 }
@@ -1026,6 +1047,71 @@ async function cardBirthday(c, token) {
   const r = await c.db.run('UPDATE members SET birthday = ?, bday_set_at = ? WHERE id = ? AND birthday IS NULL', md, Date.now(), m.id);
   if (!r.changes) fail(409, 'تاريخ ميلادك محفوظ من قبل. لتغييره احكي مع المحل.');
   return json({ ok: true, birthday: md });
+}
+
+// ─── 🎁 إهداء رصيد لصاحب ───
+const GIFT_DAYS = 30;
+async function createGift(c, token) {
+  const m = await c.db.get('SELECT * FROM members WHERE token = ?', token);
+  if (!m) fail(404, 'ما لقينا هالبطاقة');
+  const shop = await c.db.get('SELECT * FROM shops WHERE id = ?', m.shop_id);
+  if (!shop.credit_on) fail(400, 'الرصيد مش مفعّل بهالمحل');
+  const amount = readMoney(c.body.amount);
+  if (amount < 500) fail(400, 'أقل هدية نص دينار');
+  await rateLimit(c, `gift:${m.id}`, 5, 24 * 60 * MIN, 'بعثت هدايا كتير اليوم');
+  const code = randomToken();
+  const now = Date.now();
+  // نفس شرط الرصيد على التلات جمل جوّا نفس العملية: يا بيصيروا كلهم يا ولا وحدة
+  const res = await c.db.batch([
+    ['INSERT INTO credit_gifts (shop_id, from_member, amount, code, created_at) SELECT ?, id, ?, ?, ? FROM members WHERE id = ? AND credit >= ?', [shop.id, amount, code, now, m.id, amount]],
+    ["INSERT INTO credit_txns (shop_id, member_id, kind, amount, note, created_at) SELECT ?, id, 'spend', ?, '🎁 هدية لصاحب', ? FROM members WHERE id = ? AND credit >= ?", [shop.id, amount, now, m.id, amount]],
+    ['UPDATE members SET credit = credit - ?, updated_at = ? WHERE id = ? AND credit >= ?', [amount, now, m.id, amount]],
+  ]);
+  if (!res[2].changes) fail(409, `رصيدك ما بيكفي (رصيدك ${money(m.credit)} ${shop.currency})`);
+  return json({ code, url: `${c.origin}/g/${code}`, amount: amount / 1000, credit: (m.credit - amount) / 1000 }, 201);
+}
+
+async function giftInfo(c, code) {
+  const g = await c.db.get('SELECT * FROM credit_gifts WHERE code = ?', code);
+  if (!g) fail(404, 'ما لقينا الهدية');
+  const shop = await c.db.get('SELECT * FROM shops WHERE id = ?', g.shop_id);
+  const from = await c.db.get('SELECT name FROM members WHERE id = ?', g.from_member);
+  const open = !g.claimed_at && !g.refunded_at && g.created_at > Date.now() - GIFT_DAYS * DAY;
+  return json({ shop: publicShopView(shop, c.origin), amount: g.amount / 1000, from: perks.firstName(from?.name || ''), open });
+}
+
+async function claimGift(c, code) {
+  const g = await c.db.get('SELECT * FROM credit_gifts WHERE code = ?', code);
+  if (!g) fail(404, 'ما لقينا الهدية');
+  const m = await c.db.get('SELECT * FROM members WHERE token = ?', String(c.body.token || ''));
+  if (!m || m.shop_id !== g.shop_id) fail(400, 'هالهدية لبطاقة بنفس المحل');
+  if (m.id === g.from_member) fail(400, 'ما بتقدر تستلم هديتك إنت 🙂');
+  const now = Date.now();
+  // الرصيد بينضاف بس إذا انكتبت حركة هالطلب (نفس الوقت). والحركة إلها مفتاح فريد للهدية:
+  // لو وصل طلبين بنفس الملّي ثانية، التاني بيفشل كله وما بينضاف الرصيد مرتين
+  const tag = `gift:${g.id}`;
+  let res;
+  try {
+    res = await c.db.batch([
+      ['UPDATE credit_gifts SET claimed_by = ?, claimed_at = ? WHERE id = ? AND claimed_at IS NULL AND refunded_at IS NULL AND created_at > ?', [m.id, now, g.id, now - GIFT_DAYS * DAY]],
+      ["INSERT INTO credit_txns (shop_id, member_id, kind, amount, note, idem, created_at) SELECT ?, ?, 'topup', ?, '🎁 هدية من صاحب', ?, ? WHERE EXISTS (SELECT 1 FROM credit_gifts WHERE id = ? AND claimed_by = ? AND claimed_at = ?)", [g.shop_id, m.id, g.amount, tag, now, g.id, m.id, now]],
+      ['UPDATE members SET credit = credit + ?, updated_at = ? WHERE id = ? AND EXISTS (SELECT 1 FROM credit_txns WHERE shop_id = ? AND idem = ? AND member_id = ? AND created_at = ?)', [g.amount, now, m.id, g.shop_id, tag, m.id, now]],
+    ]);
+  } catch (e) {
+    if (!isUniqueError(e)) throw e;
+    res = [{ changes: 0 }];
+  }
+  if (!res[0].changes) fail(409, 'هالهدية انستلمت أو انتهت');
+  const shop = await c.db.get('SELECT * FROM shops WHERE id = ?', g.shop_id);
+  const sender = await c.db.get('SELECT * FROM members WHERE id = ?', g.from_member);
+  if (sender) {
+    c.waitUntil(notifyMember({ ...c, shop }, sender, {
+      title: shop.name,
+      body: isEn(sender) ? `🎁 ${perks.firstName(m.name)} claimed your gift (${money(g.amount)} ${shop.currency})` : `🎁 ${perks.firstName(m.name)} استلم هديتك (${money(g.amount)} ${shop.currency})`,
+      icon: logoUrl(shop, c.origin),
+    }).catch(() => {}));
+  }
+  return json({ ok: true, token: m.token, amount: g.amount / 1000 });
 }
 
 async function cardLang(c, token) {
@@ -1419,6 +1505,53 @@ async function listMembers(c) {
   return json({ members: rows.map((m) => viewFor(c, m)), total: total.n });
 }
 
+// 📥 استيراد زبائن من Excel/CSV (الواجهة بتقرأ الملف وبتبعت لحد 50 زبون بكل طلب)
+function localPhone(raw, country) {
+  const d = normPhone(raw);
+  const code = CALLING[country];
+  if (code && d.startsWith(code) && d.length >= code.length + 7) return `0${d.slice(code.length)}`;
+  if (country === 'JO' && /^7\d{8}$/.test(d)) return `0${d}`; // Excel بيشيل الصفر من أول الرقم
+  return d;
+}
+
+async function importMembers(c) {
+  await requireActive(c);
+  noDemo(c, 'الاستيراد');
+  const rows = c.body.rows;
+  if (!Array.isArray(rows) || !rows.length || rows.length > 50) fail(400, 'ابعت من 1 لـ 50 زبون بكل مرة');
+  await rateLimit(c, `import:${c.shop.id}`, 200, 60 * MIN, 'استوردت كتير، استنى شوي');
+  const now = Date.now();
+  let added = 0;
+  const skipped = [];
+  for (const [i, row] of rows.entries()) {
+    const at = Number.isInteger(row && row.line) ? row.line : i + 1;
+    const name = clean(row && row.name, 60);
+    if (name.length < 2) { skipped.push({ line: at, reason: 'الاسم ناقص' }); continue; }
+    const phone = localPhone(row.phone, c.shop.country);
+    if (phone.length < 7 || phone.length > 15) { skipped.push({ line: at, reason: 'رقم الجوال مش صحيح' }); continue; }
+    if (await c.db.get('SELECT id FROM members WHERE shop_id = ? AND phone = ?', c.shop.id, phone)) { skipped.push({ line: at, reason: 'الرقم مسجّل من قبل' }); continue; }
+    const birthday = row.bdayDay && row.bdayMonth ? perks.readBirthday(row.bdayDay, row.bdayMonth) : null;
+    const balance = Math.max(0, Math.min(1000000, Math.floor(Number(row.balance) || 0)));
+    let m;
+    try {
+      m = await createMember(c.db, c.shop, name, phone, { birthday });
+    } catch (e) {
+      if (e instanceof HttpError) { skipped.push({ line: at, reason: e.message }); continue; }
+      throw e;
+    }
+    const writes = [];
+    // التواريخ المستوردة من المالك نفسه، فما بنستنى أسبوعين قبل هدية عيد الميلاد
+    if (birthday) writes.push(['UPDATE members SET bday_set_at = ? WHERE id = ?', [0, m.id]]);
+    if (balance > 0) {
+      writes.push(["INSERT INTO txns (shop_id, member_id, kind, delta, user_id, note, created_at) VALUES (?, ?, 'adjust', ?, ?, '📥 رصيد مستورد', ?)", [c.shop.id, m.id, balance, c.user.id, now]]);
+      writes.push(['UPDATE members SET balance = balance + ? WHERE id = ?', [balance, m.id]]);
+    }
+    if (writes.length) await c.db.batch(writes);
+    added++;
+  }
+  return json({ added, skipped });
+}
+
 async function addMember(c) {
   await requireActive(c);
   const name = readName(c.body.name);
@@ -1565,17 +1698,26 @@ async function rewardReferral(c, m, now) {
   const monthStart = now - 30 * DAY;
   const done = await c.db.get('SELECT COUNT(*) AS n FROM members WHERE referred_by = ? AND ref_rewarded > ?', referrer.id, monthStart);
   const capped = done.n >= perks.REF_MONTHLY_CAP;
-  const marked = 'EXISTS (SELECT 1 FROM members WHERE id = ? AND ref_rewarded = ?)';
-  const res = await c.db.batch([
-    // العلامة أول إشي، وكل الباقي مشروط عليها: لو طلبين وصلوا سوا، واحد بس بياخد
-    ['UPDATE members SET ref_rewarded = ? WHERE id = ? AND ref_rewarded = 0', [now, m.id]],
-    [`INSERT INTO txns (shop_id, member_id, kind, delta, note, created_at) SELECT ?, ?, 'adjust', ?, ?, ? WHERE ${marked}`, [c.shop.id, m.id, bonus, `👥 هدية الانضمام بدعوة من ${perks.firstName(referrer.name)}`, now, m.id, now]],
-    [`UPDATE members SET balance = balance + ? WHERE id = ? AND ${marked}`, [bonus, m.id, m.id, now]],
-    ...(capped ? [] : [
-      [`INSERT INTO txns (shop_id, member_id, kind, delta, note, created_at) SELECT ?, ?, 'adjust', ?, ?, ? WHERE ${marked}`, [c.shop.id, referrer.id, bonus, `👥 دعوة ${perks.firstName(m.name)}`, now, m.id, now]],
-      [`UPDATE members SET balance = balance + ?, updated_at = ? WHERE id = ? AND ${marked}`, [bonus, now, referrer.id, m.id, now]],
-    ]),
-  ]);
+  // العلامة أول إشي، وكل الباقي مشروط عليها. والحركات إلها مفاتيح فريدة (فيها «:» فما بتتلخبط مع مفاتيح الكاشير):
+  // لو طلبين وصلوا بنفس اللحظة، التاني بيفشل كله، فواحد بس بياخد
+  const tag = `ref:${m.id}`;
+  const tagBy = `refby:${m.id}`;
+  const has = 'EXISTS (SELECT 1 FROM txns WHERE shop_id = ? AND idem = ? AND created_at = ?)';
+  let res;
+  try {
+    res = await c.db.batch([
+      ['UPDATE members SET ref_rewarded = ? WHERE id = ? AND ref_rewarded = 0', [now, m.id]],
+      ["INSERT INTO txns (shop_id, member_id, kind, delta, note, idem, created_at) SELECT ?, ?, 'adjust', ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM members WHERE id = ? AND ref_rewarded = ?)", [c.shop.id, m.id, bonus, `👥 هدية الانضمام بدعوة من ${perks.firstName(referrer.name)}`, tag, now, m.id, now]],
+      [`UPDATE members SET balance = balance + ? WHERE id = ? AND ${has}`, [bonus, m.id, c.shop.id, tag, now]],
+      ...(capped ? [] : [
+        [`INSERT INTO txns (shop_id, member_id, kind, delta, note, idem, created_at) SELECT ?, ?, 'adjust', ?, ?, ?, ? WHERE ${has}`, [c.shop.id, referrer.id, bonus, `👥 دعوة ${perks.firstName(m.name)}`, tagBy, now, c.shop.id, tag, now]],
+        [`UPDATE members SET balance = balance + ?, updated_at = ? WHERE id = ? AND ${has}`, [bonus, now, referrer.id, c.shop.id, tagBy, now]],
+      ]),
+    ]);
+  } catch (e) {
+    if (isUniqueError(e)) return null;
+    throw e;
+  }
   if (!res[0].changes) return null;
   if (!capped) {
     const fresh = await c.db.get('SELECT * FROM members WHERE id = ?', referrer.id);
@@ -1690,9 +1832,10 @@ async function reports(c) {
         SUM(CASE WHEN t.kind = 'redeem' THEN 1 ELSE 0 END) AS redeems
       FROM txns t JOIN users u ON u.id = t.user_id WHERE t.shop_id = ? AND t.created_at >= ? GROUP BY u.id ORDER BY points DESC`, s, since),
     c.db.all("SELECT branch_id AS id, COUNT(*) AS n FROM txns WHERE shop_id = ? AND kind = 'earn' AND created_at >= ? GROUP BY branch_id", s, since),
+    // الهدايا بين الزبائن (إلها ملاحظة) بتنقل رصيد من زبون لزبون: مش شحن ولا دفع عند المحل
     c.db.get(`SELECT (SELECT COALESCE(SUM(credit), 0) FROM members WHERE shop_id = ?) AS outstanding,
-        (SELECT COALESCE(SUM(amount), 0) FROM credit_txns WHERE shop_id = ? AND kind = 'topup' AND created_at >= ?) AS topups,
-        (SELECT COALESCE(SUM(amount), 0) FROM credit_txns WHERE shop_id = ? AND kind = 'spend' AND created_at >= ?) AS spent`, s, s, since, s, since),
+        (SELECT COALESCE(SUM(amount), 0) FROM credit_txns WHERE shop_id = ? AND kind = 'topup' AND note IS NULL AND created_at >= ?) AS topups,
+        (SELECT COALESCE(SUM(amount), 0) FROM credit_txns WHERE shop_id = ? AND kind = 'spend' AND note IS NULL AND created_at >= ?) AS spent`, s, s, since, s, since),
   ]);
   const fill = (rows, n) => { const a = Array(n).fill(0); for (const r of rows) if (r.k >= 0 && r.k < n) a[r.k] = r.n; return a; };
   const starCounts = fill(stars.map((r) => ({ k: r.k - 1, n: r.n })), 5);
@@ -1991,7 +2134,8 @@ async function useCoupon(c, id, couponId) {
   const res = await c.db.batch([
     [`UPDATE member_coupons SET used_at = ?, used_by = ? WHERE coupon_id = ? AND member_id = ? AND used_at IS NULL
       AND EXISTS (SELECT 1 FROM coupons WHERE id = ? AND shop_id = ? AND expires_at > ?)`, [now, c.user.id, cid, m.id, cid, c.shop.id, now]],
-    ['UPDATE coupons SET used = used + 1 WHERE id = ? AND EXISTS (SELECT 1 FROM member_coupons WHERE coupon_id = ? AND member_id = ? AND used_at = ?)', [cid, cid, m.id, now]],
+    // العدد بينحسب من جديد بدل +1، عشان طلب مكرر بنفس اللحظة ما يزيده مرتين
+    ['UPDATE coupons SET used = (SELECT COUNT(*) FROM member_coupons WHERE coupon_id = ? AND used_at IS NOT NULL) WHERE id = ? AND shop_id = ?', [cid, cid, c.shop.id]],
   ]);
   if (!res[0].changes) fail(409, 'هالكوبون انصرف قبل أو خلص');
   return json({ ok: true, coupons: await activeCoupons(c.db, m.id) });
@@ -2060,7 +2204,7 @@ async function spend(c, id) {
 async function creditHistory(c, id) {
   const m = await memberOf(c, id);
   const rows = await c.db.all(
-    `SELECT t.kind, t.amount, t.bonus, t.created_at AS at, u.name AS by FROM credit_txns t LEFT JOIN users u ON u.id = t.user_id
+    `SELECT t.kind, t.amount, t.bonus, t.note, t.created_at AS at, u.name AS by FROM credit_txns t LEFT JOIN users u ON u.id = t.user_id
      WHERE t.member_id = ? ORDER BY t.created_at DESC LIMIT 15`, m.id,
   );
   return json({ credit: m.credit / 1000, history: rows.map((r) => ({ ...r, amount: r.amount / 1000, bonus: r.bonus / 1000 })) });
@@ -2312,6 +2456,9 @@ const API = [
   ['POST', /^\/api\/cards\/([a-z2-9]{20})\/birthday$/, cardBirthday],
   ['POST', /^\/api\/cards\/([a-z2-9]{20})\/review$/, cardReview],
   ['POST', /^\/api\/cards\/([a-z2-9]{20})\/lang$/, cardLang],
+  ['POST', /^\/api\/cards\/([a-z2-9]{20})\/gift$/, createGift],
+  ['GET', /^\/api\/gifts\/([a-z2-9]{20})$/, giftInfo],
+  ['POST', /^\/api\/gifts\/([a-z2-9]{20})\/claim$/, claimGift],
   ['GET', /^\/api\/site$/, site],
   ['GET', /^\/api\/push\/key$/, pushKey],
   ['POST', /^\/api\/cards\/([a-z2-9]{20})\/push$/, cardPushSubscribe],
@@ -2347,6 +2494,7 @@ const API = [
   // الموظف ما بيكتب رقم الزبون: الزبون بينضم بنفسه من QR الانضمام
   ['POST', /^\/api\/members$/, addMember, 'owner'],
   ['GET', /^\/api\/members\/lookup$/, lookup, 'staff'],
+  ['POST', /^\/api\/members\/import$/, importMembers, 'owner'],
   ['GET', /^\/api\/members\/(\d+)$/, memberDetail, 'staff'],
   ['POST', /^\/api\/members\/(\d+)\/earn$/, earn, 'staff'],
   ['POST', /^\/api\/members\/(\d+)\/redeem$/, redeem, 'staff'],
@@ -2449,6 +2597,8 @@ export async function handle(req, ctx) {
     if ((m = p.match(/^\/media\/menu\/(\d+)\.jpg$/))) return await menuImage(c, m[1]);
     if (/^\/m\/[a-z0-9-]{3,40}\/?$/.test(p)) return await page(c, '/menu.html');
     if (/^\/print\/[a-z0-9-]{3,40}\/?$/.test(p)) return await page(c, '/print.html');
+    if (/^\/g\/[a-z2-9]{20}\/?$/.test(p)) return await page(c, '/gift.html');
+    if (p === '/cards' || p === '/cards/') return await page(c, '/cards.html');
     if (p === '/' || p === '/index.html') return await page(c, '/index.html');
     if (p === '/privacy' || p === '/privacy/') return await page(c, '/privacy.html');
     if (/^\/partner\/[a-z2-9]{20}\/?$/.test(p)) return await page(c, '/partner.html');
