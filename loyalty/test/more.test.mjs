@@ -329,3 +329,100 @@ test('تجربة الرسالة على جوال صاحب المحل بس، وا�
   for (let i = 0; i < 5; i++) assert.equal((await owner.post('/api/broadcast', { body: `رسالة ${i}` })).status, 200);
   assert.equal(to(custDev).length, 5);
 });
+
+test('حساب العرض: دخول بكبسة، بيانات جاهزة، إجراءات ممنوعة، وبيرجع لحاله كل يوم', async () => {
+  const p = await platform();
+  const v = p.client();
+  assert.equal((await v.post('/api/demo/login', {})).status, 200);
+  const me = (await v.get('/api/me')).data;
+  assert.equal(me.shop.name, 'كوفي العرض');
+  assert.equal(me.subscription.state, 'owner', 'ما بيخلص');
+  assert.ok(me.demo.sampleCard);
+  assert.ok((await v.get('/api/members')).data.total >= 60);
+  const rep = (await v.get('/api/reports')).data;
+  assert.ok(rep.byHour.reduce((a, b) => a + b, 0) > 100);
+  assert.ok(rep.ratings.total >= 10);
+  assert.equal((await v.post('/api/staff', { name: 'x', email: 'real@person.com', password: 'secret-pass-1' })).status, 403);
+  assert.equal((await v.put('/api/me/password', { current: 'x', next: 'secret-pass-2' })).status, 403);
+  assert.equal((await v.put('/api/shop', { slug: 'mocha' })).data.shop.slug, 'demo-cafe', 'رابط العرض ما بيتغيّر');
+  const bc = await v.post('/api/broadcast', { body: 'تجربة' });
+  assert.equal(bc.data.demo, true, 'ما بتنبعت إشعارات حقيقية');
+  // المدير ما بيشوف محل العرض بقائمة المحلات
+  assert.ok(!(await p.admin.get('/api/admin/shops')).data.shops.some((s) => s.name === 'كوفي العرض'));
+  // زائر تاني بيدخل نفس الحساب، والتعديلات بترجع بالليل
+  await v.put('/api/shop', { name: 'اسم غريب' });
+  const now = Date.now();
+  const t = new Date(now + 864e5); // بكرة الساعة 5 الصبح بتوقيت عمّان
+  const tomorrow5am = Date.UTC(t.getUTCFullYear(), t.getUTCMonth(), t.getUTCDate(), 2, 0);
+  const r = await p.cron(tomorrow5am);
+  assert.equal(r.demoReset, true);
+  assert.equal((await p.cron(tomorrow5am + 3600e3)).demoReset, undefined, 'مرة باليوم');
+  const v2 = p.client();
+  await v2.post('/api/demo/login', {});
+  assert.equal((await v2.get('/api/me')).data.shop.name, 'كوفي العرض');
+});
+
+test('خطوات البداية، تذكير نهاية التجربة، وأرقام المنصة للمدير', async () => {
+  const p = await platform();
+  const { owner, admin, device, to } = p;
+  let ob = (await owner.get('/api/me')).data.onboarding;
+  assert.deepEqual(ob.steps.map((x) => [x.key, x.done]), [['logo', false], ['branch', false], ['settings', false], ['poster', false], ['customer', false], ['alerts', false]]);
+  await owner.put('/api/shop', { locations: [{ name: 'الفرع', lat: 31.95, lng: 35.91 }] });
+  await owner.post('/api/shop/onboard', { step: 'poster' });
+  await p.customer('سارة', '0791110012');
+  ob = (await owner.get('/api/me')).data.onboarding;
+  assert.deepEqual(ob.steps.filter((x) => x.done).map((x) => x.key), ['branch', 'settings', 'poster', 'customer']);
+  await owner.post('/api/shop/onboard', { step: 'dismissed' });
+  assert.equal((await owner.get('/api/me')).data.onboarding, null);
+  assert.equal((await owner.post('/api/shop/onboard', { step: 'hack' })).status, 400);
+  // تذكير قبل 3 أيام وقبل يوم من نهاية التجربة (للي مفعّل التنبيهات)
+  const dev = await device(owner, '/api/me/push', 'owner-remind');
+  // التجربة بتخلص بعد 3 أيام إلا ساعة من الظهر (بتوقيت عمّان)
+  await p.db.run('UPDATE shops SET active_until = ? WHERE id = ?', amman(12, 3) - 3600e3, p.shop.id);
+  let now = amman(12);
+  assert.equal((await p.cron(now)).reminders, 1);
+  assert.match(to(dev).at(-1).body, /تجربتك المجانية بنقاطك بتخلص بعد 3 أيام/);
+  assert.equal((await p.cron(now + 3600e3)).reminders, 0, 'مرة وحدة');
+  now = amman(12, 2);
+  assert.equal((await p.cron(now)).reminders, 1);
+  assert.match(to(dev).at(-1).body, /بتخلص بكرة/);
+  // أرقام المنصة
+  await admin.post(`/api/admin/shops/${p.shop.id}/plan`, { action: 'year' });
+  const st = (await admin.get('/api/admin/stats')).data;
+  assert.equal(st.revenueMonth, 150);
+  assert.equal(st.counts.active, 1);
+  assert.equal(st.mrr, 12.5);
+  assert.equal((await owner.get('/api/admin/stats')).status, 403);
+});
+
+test('المنيو: المالك بيضيف ويعدّل ويخفي، والصفحة العامة بالأقسام والصور', async () => {
+  const p = await platform();
+  const { owner } = p;
+  const png = 'data:image/png;base64,' + Buffer.from(await (await import('../src/png.js')).defaultLogoPng('#336699', 64)).toString('base64');
+  assert.equal((await owner.post('/api/menu', { name: '' })).status, 400);
+  assert.equal((await owner.post('/api/menu', { name: 'لاتيه', price: -1 })).status, 400);
+  let r = await owner.post('/api/menu', { category: 'مشروبات ساخنة', name: 'لاتيه', price: '2.75', description: 'حليب طازة', image: png });
+  assert.equal(r.status, 200);
+  await owner.post('/api/menu', { category: 'حلويات', name: 'تشيز كيك', price: 3.5, sort: 1 });
+  r = await owner.post('/api/menu', { category: 'مشروبات ساخنة', name: 'إسبريسو', price: 1.5, sort: 2 });
+  const items = r.data.items;
+  assert.equal(items.length, 3);
+  assert.match(r.data.menuUrl, /\/m\/mocha$/);
+  const latte = items.find((x) => x.name === 'لاتيه');
+  assert.match(latte.image, /\/media\/menu\/\d+\.jpg\?v=\d+$/);
+  const img = await p.client().get(new URL(latte.image).pathname);
+  assert.equal(img.status, 200);
+  assert.equal(img.headers.get('content-type'), 'image/png');
+  // إخفاء صنف خلص
+  const esp = items.find((x) => x.name === 'إسبريسو');
+  await owner.put(`/api/menu/${esp.id}`, { available: false });
+  const pub = (await p.client().get(`/api/shops/${p.shop.slug}/menu`)).data;
+  assert.deepEqual(pub.categories.map((cat) => [cat.name, cat.items.map((x) => x.name)]), [['مشروبات ساخنة', ['لاتيه']], ['حلويات', ['تشيز كيك']]]);
+  assert.equal(pub.shop.name, 'Mocha');
+  await owner.put(`/api/menu/${latte.id}`, { removeImage: true });
+  assert.equal((await owner.get('/api/menu')).data.items.find((x) => x.id === latte.id).image, null);
+  assert.equal((await owner.req('DELETE', `/api/menu/${esp.id}`)).status, 200);
+  const st = await p.staffClient();
+  assert.equal((await st.post('/api/menu', { name: 'x' })).status, 403);
+  assert.equal((await p.client().get(`/m/${p.shop.slug}`)).status, 200);
+});

@@ -231,6 +231,34 @@ export const SCHEMA = [
     amount REAL NOT NULL,
     created_at INTEGER NOT NULL
   )`,
+  // المنيو الإلكتروني (الصورة اختيارية وصغيرة، بتنحفظ بقاعدة البيانات)
+  `CREATE TABLE IF NOT EXISTS menu_items (
+    id INTEGER PRIMARY KEY,
+    shop_id INTEGER NOT NULL REFERENCES shops(id),
+    category TEXT NOT NULL DEFAULT '',
+    name TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    price REAL,
+    image TEXT,
+    available INTEGER NOT NULL DEFAULT 1,
+    sort INTEGER NOT NULL DEFAULT 0,
+    updated_at INTEGER NOT NULL,
+    created_at INTEGER NOT NULL
+  )`,
+  'CREATE INDEX IF NOT EXISTS menu_shop ON menu_items(shop_id, category, sort)',
+  // إهداء رصيد لصاحب: الرصيد بينخصم فوراً، والصاحب بيستلمه برابط (وبيرجع لصاحبه بعد 30 يوم لو ما انستلم)
+  `CREATE TABLE IF NOT EXISTS credit_gifts (
+    id INTEGER PRIMARY KEY,
+    shop_id INTEGER NOT NULL REFERENCES shops(id),
+    from_member INTEGER NOT NULL,
+    amount INTEGER NOT NULL,
+    code TEXT NOT NULL UNIQUE,
+    claimed_by INTEGER,
+    claimed_at INTEGER,
+    refunded_at INTEGER,
+    created_at INTEGER NOT NULL
+  )`,
+  'CREATE INDEX IF NOT EXISTS gifts_open ON credit_gifts(created_at) WHERE claimed_at IS NULL AND refunded_at IS NULL',
   'CREATE INDEX IF NOT EXISTS leads_time ON leads(created_at)',
   'CREATE INDEX IF NOT EXISTS members_shop ON members(shop_id, created_at)',
   'CREATE INDEX IF NOT EXISTS txns_shop_time ON txns(shop_id, created_at)',
@@ -287,6 +315,11 @@ export const MIGRATIONS = [
   'ALTER TABLE users ADD COLUMN branch_id TEXT',
   'ALTER TABLE txns ADD COLUMN branch_id TEXT',
   'ALTER TABLE leads ADD COLUMN reseller_id INTEGER',
+  // حساب العرض، خطوات البداية، تذكير نهاية التجربة، ملاحظات الرصيد
+  'ALTER TABLE shops ADD COLUMN demo INTEGER NOT NULL DEFAULT 0',
+  "ALTER TABLE shops ADD COLUMN onboard TEXT NOT NULL DEFAULT '{}'",
+  'ALTER TABLE shops ADD COLUMN reminder_key TEXT',
+  'ALTER TABLE credit_txns ADD COLUMN note TEXT',
   // فهارس على الأعمدة الجديدة (لازم تيجي بعد ما ينضاف العمود)
   'CREATE INDEX IF NOT EXISTS shops_reseller ON shops(reseller_id)',
   'CREATE UNIQUE INDEX IF NOT EXISTS members_ref ON members(shop_id, ref_code)',

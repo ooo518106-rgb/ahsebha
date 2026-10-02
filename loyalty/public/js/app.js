@@ -33,7 +33,12 @@ function renderSubBanner() {
   const link = (text) => (isOwner() ? '#settings' : wa ? `https://wa.me/${wa}?text=${encodeURIComponent(text)}` : null);
   const ask = `مرحبا، بدي أشترك بنقاطك لمحل ${state.shop.name}`;
   let tpl = null;
-  if (sub.state === 'expired') {
+  if (state.me.demo) {
+    // حساب العرض: بنوضّح إنه تجريبي، ومنعطي رابط بطاقة زبون وزر التجربة الحقيقية
+    tpl = html`<div class="alert ok sub-banner"><div>🎬 <b>هاد محل تجريبي</b> فيه زبائن وحركات جاهزة. جرّب كل إشي براحتك، والبيانات بترجع لحالها كل يوم.</div>
+      <div class="row">${state.me.demo.sampleCard ? html`<a class="btn sm ghost" href="/c/${state.me.demo.sampleCard}" target="_blank" rel="noopener">شوف بطاقة زبون</a>` : ''}
+      <button class="btn sm" type="button" id="demoStart">ابدأ تجربتك المجانية</button></div></div>`;
+  } else if (sub.state === 'expired') {
     tpl = html`<div class="alert bad sub-banner"><div><b>خلصت فترة ${sub.paid ? 'الاشتراك' : 'التجربة'} ⏳</b> الكاشير متوقف لحد ما تفعّل الاشتراك. زبائنك ونقاطهم محفوظين.</div>
       ${link(ask) ? html`<a class="btn sm wa" href="${link(ask)}" target="_blank" rel="noopener">فعّل الاشتراك</a>` : ''}</div>`;
   } else if (sub.state === 'trial' && isOwner()) {
@@ -45,6 +50,8 @@ function renderSubBanner() {
   }
   box.classList.toggle('hidden', !tpl);
   if (tpl) render(box, tpl);
+  const ds = $('#demoStart', box);
+  if (ds) ds.onclick = async () => { await api('/api/auth/logout', { method: 'POST' }).catch(() => {}); location.href = '/#start'; };
   // رابط قسم الاشتراك بيفتح بنفس الصفحة (مش تبويب جديد)
   $$('a[href^="#"]', box).forEach((a) => { a.removeAttribute('target'); a.onclick = () => setTimeout(() => $('#billing')?.scrollIntoView({ behavior: 'smooth' }), 300); });
 }
@@ -100,8 +107,30 @@ function stopCamera() {
   if (state.stopScan) { state.stopScan(); state.stopScan = null; }
 }
 
+// ✅ خطوات البداية للمحل الجديد
+const STEPS = {
+  logo: ['ارفع شعار المحل', '#settings'],
+  branch: ['حط موقع المحل (عشان تطلع البطاقة لما يقرّب الزبون)', '#settings'],
+  settings: ['اختار المكافأة ولون البطاقة', '#settings'],
+  poster: ['اطبع ملصق الـ QR وحطه عالكاونتر', '#join'],
+  customer: ['ضيف أول زبون (جرّب على حالك)', '#join'],
+  alerts: ['فعّل تنبيهاتك على جوالك', '#settings'],
+};
+function onboardingCard() {
+  const ob = state.me.onboarding;
+  if (!ob) return '';
+  const done = ob.steps.filter((x) => x.done).length;
+  return html`<section class="panel stack onboard" style="margin-bottom:14px">
+    <div class="row" style="justify-content:space-between"><h2 style="margin:0">🚀 جهّز محلك</h2><span class="small muted">${done} من ${ob.steps.length}</span></div>
+    <div class="bar"><i style="width:${Math.round((done / ob.steps.length) * 100)}%"></i></div>
+    <ul class="checklist">${ob.steps.map((x) => html`<li class="${x.done ? 'done' : ''}">${x.done ? '✅' : '⬜'} ${x.done ? STEPS[x.key][0] : html`<a href="${STEPS[x.key][1]}">${STEPS[x.key][0]}</a>`}</li>`)}</ul>
+    <button class="linkish small" type="button" id="obHide">إخفاء</button>
+  </section>`;
+}
+
 function cashier() {
   render(view, html`
+    ${onboardingCard()}
     <div class="grid2" style="align-items:start">
       <section class="panel stack">
         <h2>امسح بطاقة الزبون</h2>
@@ -136,6 +165,8 @@ function cashier() {
   };
   $('#findForm').onsubmit = (e) => { e.preventDefault(); const v = $('#code').value.trim(); if (v) findMember(v); };
   $('#newBtn').onclick = () => newMemberDialog();
+  const ob = $('#obHide');
+  if (ob) ob.onclick = async () => { await api('/api/shop/onboard', { method: 'POST', body: { step: 'dismissed' } }).catch(() => {}); state.me.onboarding = null; cashier(); };
   const bs = $('#branchSel');
   if (bs) bs.onchange = () => { state.branch = bs.value; try { localStorage.setItem('nq_branch', bs.value); } catch { /* اختياري */ } };
 }
@@ -613,9 +644,18 @@ async function loadReports() {
   }
 }
 
+// خطوة «اطبع الملصق» بتنحسب لما يفتح صفحة الملصق أو يطبعه
+function markPoster() {
+  api('/api/shop/onboard', { method: 'POST', body: { step: 'poster' } }).catch(() => {});
+  const st = state.me.onboarding && state.me.onboarding.steps.find((x) => x.key === 'poster');
+  if (st) st.done = true;
+}
+
 // ─── رابط الانضمام والملصق ───
 function joinView() {
   const s = state.shop;
+  const printUrl = (what, layout) => `/print/${s.slug}?for=${what}&layout=${layout}`;
+  const menuUrl = `${location.origin}/m/${s.slug}`;
   render(view, html`
     <div class="grid2" style="align-items:start">
       <div class="poster" id="poster">
@@ -636,15 +676,130 @@ function joinView() {
         </ol>
         <div class="field"><label>رابط الانضمام</label><input readonly dir="ltr" value="${s.joinUrl}"></div>
         <div class="row">
-          <button class="btn grow" id="print" type="button">🖨️ اطبع الملصق</button>
           <button class="btn ghost grow" type="button" data-copy="${s.joinUrl}">نسخ الرابط</button>
           <a class="btn ghost grow" href="${s.joinUrl}" target="_blank" rel="noopener">جرّب الصفحة</a>
         </div>
+        <h3>🖨️ اطبع (أو احفظ PDF)</h3>
+        <div class="row">
+          <a class="btn grow" data-print href="${printUrl('join', 'poster')}" target="_blank" rel="noopener">ملصق كاونتر A4</a>
+          <a class="btn soft grow" data-print href="${printUrl('join', 'table')}" target="_blank" rel="noopener">كروت طاولات</a>
+          <a class="btn soft grow" data-print href="${printUrl('join', 'sticker')}" target="_blank" rel="noopener">ستيكر شباك</a>
+        </div>
         <p class="hint">حط الرابط كمان بالانستغرام والواتساب بزنس.</p>
       </section>
-    </div>`);
+    </div>
+    <section class="panel stack" style="margin-top:14px" id="menuPanel">
+      <h2>📋 المنيو الإلكتروني</h2>
+      <p class="hint">الزبون بيمسح QR على الطاولة وبيشوف المنيو بجواله، وتحته زر «خذ بطاقة الولاء». ما في داعي تطبع منيو كل ما يتغيّر سعر.</p>
+      <div class="row">
+        <a class="btn ghost grow" href="${menuUrl}" target="_blank" rel="noopener">شوف المنيو</a>
+        <button class="btn ghost grow" type="button" data-copy="${menuUrl}">نسخ الرابط</button>
+        <a class="btn soft grow" data-print href="${printUrl('menu', 'table')}" target="_blank" rel="noopener">🖨️ كروت QR للطاولات</a>
+      </div>
+      <form class="stack menu-form" id="menuForm">
+        <div class="row">
+          <input class="grow" name="category" placeholder="القسم: مشروبات ساخنة" maxlength="40" list="menuCats">
+          <input class="grow" name="name" placeholder="اسم الصنف" maxlength="60" required>
+        </div>
+        <div class="row">
+          <input class="grow num" name="price" type="number" inputmode="decimal" min="0" step="0.001" placeholder="السعر (${s.currency})">
+          <input class="grow" name="description" placeholder="وصف قصير (اختياري)" maxlength="200">
+        </div>
+        <label class="btn ghost" style="margin:0">📷 صورة (اختياري)<input type="file" name="imageFile" accept="image/*" class="hidden"></label>
+        <button class="btn" type="submit">+ أضف الصنف</button>
+      </form>
+      <datalist id="menuCats"></datalist>
+      <div id="menuList"><p class="muted small">جاري التحميل…</p></div>
+    </section>`);
   bindCopy(view);
-  $('#print').onclick = () => window.print();
+  $$('[data-print]').forEach((a) => { a.addEventListener('click', markPoster); });
+  loadMenu();
+}
+
+// صورة الصنف: بنصغّرها لـ 480 بكسل JPG قبل ما نرفعها
+async function resizeMenuImage(file) {
+  const img = await createImageBitmap(file);
+  const scale = Math.min(1, 480 / Math.max(img.width, img.height));
+  const cv = document.createElement('canvas');
+  cv.width = Math.round(img.width * scale);
+  cv.height = Math.round(img.height * scale);
+  cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height);
+  for (const q of [0.82, 0.7, 0.55]) {
+    const url = cv.toDataURL('image/jpeg', q);
+    if (url.length * 0.75 < 190 * 1024) return url;
+  }
+  throw new Error('الصورة كبيرة، جرّب وحدة تانية');
+}
+
+async function loadMenu(data) {
+  const box = $('#menuList');
+  if (!box) return;
+  let r;
+  try { r = data || await api('/api/menu'); } catch (e) { render(box, html`<p class="alert bad">${e.message}</p>`); return; }
+  const cats = [...new Set(r.items.map((x) => x.category))];
+  render($('#menuCats'), html`${cats.filter(Boolean).map((cat) => html`<option value="${cat}"></option>`)}`);
+  render(box, r.items.length ? html`${cats.map((cat) => html`<h3 style="margin-top:10px">${cat || 'بدون قسم'}</h3>
+      <ul class="list">${r.items.filter((x) => x.category === cat).map((it) => html`<li class="${it.available ? '' : 'off'}">
+        ${it.image ? html`<img class="thumb" src="${it.image}" alt="">` : ''}
+        <div class="main"><b>${it.name}</b><span class="small muted">${it.price != null ? `${fmt(it.price)} ${state.shop.currency}` : ''}${it.description ? ` · ${it.description}` : ''}</span></div>
+        <label class="small check"><input type="checkbox" data-avail="${it.id}" ${it.available ? 'checked' : ''}> متوفّر</label>
+        <button class="btn ghost sm" type="button" data-edit="${it.id}" aria-label="تعديل">✏️</button>
+        <button class="btn ghost sm" type="button" data-del="${it.id}" aria-label="حذف">✕</button></li>`)}</ul>`)}`
+    : html`<p class="muted small">المنيو فاضي. ضيف أول صنف من فوق 👆</p>`);
+  const items = new Map(r.items.map((x) => [String(x.id), x]));
+  $$('[data-avail]', box).forEach((cb) => {
+    cb.onchange = async () => { try { loadMenu(await api(`/api/menu/${cb.dataset.avail}`, { method: 'PUT', body: { available: cb.checked } })); } catch (e) { toast(e.message, 'bad'); } };
+  });
+  $$('[data-del]', box).forEach((b) => {
+    b.onclick = async () => {
+      if (!confirm(`تحذف «${items.get(b.dataset.del).name}» من المنيو؟`)) return;
+      try { loadMenu(await api(`/api/menu/${b.dataset.del}`, { method: 'DELETE' })); } catch (e) { toast(e.message, 'bad'); }
+    };
+  });
+  $$('[data-edit]', box).forEach((b) => { b.onclick = () => editMenuItem(items.get(b.dataset.edit)); });
+  const form = $('#menuForm');
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    const f = new FormData(form);
+    const btn = form.querySelector('button[type=submit]');
+    btn.disabled = true;
+    try {
+      const file = f.get('imageFile');
+      const body = { category: f.get('category'), name: f.get('name'), price: f.get('price'), description: f.get('description') };
+      if (file && file.size) body.image = await resizeMenuImage(file);
+      loadMenu(await api('/api/menu', { method: 'POST', body }));
+      form.reset();
+      form.category.value = body.category;
+      form.name.focus();
+      toast('انضاف ✅', 'ok');
+    } catch (err) { toast(err.message, 'bad'); }
+    btn.disabled = false;
+  };
+}
+
+function editMenuItem(it) {
+  const body = openDialog('تعديل الصنف', html`<form class="stack" id="menuEdit">
+      <input name="category" value="${it.category}" placeholder="القسم" maxlength="40" list="menuCats">
+      <input name="name" value="${it.name}" placeholder="الاسم" maxlength="60" required>
+      <input name="price" class="num" type="number" inputmode="decimal" min="0" step="0.001" value="${it.price ?? ''}" placeholder="السعر">
+      <input name="description" value="${it.description}" placeholder="وصف قصير" maxlength="200">
+      ${it.image ? html`<div class="row"><img class="thumb" src="${it.image}" alt=""><label class="check small"><input type="checkbox" name="removeImage"> شيل الصورة</label></div>` : ''}
+      <label class="btn ghost" style="margin:0">📷 ${it.image ? 'غيّر الصورة' : 'ضيف صورة'}<input type="file" name="imageFile" accept="image/*" class="hidden"></label>
+      <button class="btn" type="submit">حفظ</button>
+    </form>`);
+  $('#menuEdit', body).onsubmit = async (e) => {
+    e.preventDefault();
+    const f = new FormData(e.target);
+    try {
+      const file = f.get('imageFile');
+      const payload = { category: f.get('category'), name: f.get('name'), price: f.get('price'), description: f.get('description'), removeImage: f.get('removeImage') === 'on' };
+      if (file && file.size) payload.image = await resizeMenuImage(file);
+      const r = await api(`/api/menu/${it.id}`, { method: 'PUT', body: payload });
+      $('#dlg').close();
+      loadMenu(r);
+      toast('انحفظ ✅', 'ok');
+    } catch (err) { toast(err.message, 'bad'); }
+  };
 }
 
 // ─── الإعدادات ───
@@ -1317,14 +1472,26 @@ async function admin() {
   let appleSt;
   let pay;
   let resellers;
+  let stats;
   try {
-    [{ leads }, { shops, signupOpen }, appleSt, pay, { resellers }] = await Promise.all([api('/api/admin/leads'), api('/api/admin/shops'), api('/api/admin/apple'), api('/api/admin/payments'), api('/api/admin/resellers')]);
+    [{ leads }, { shops, signupOpen }, appleSt, pay, { resellers }, stats] = await Promise.all([api('/api/admin/leads'), api('/api/admin/shops'), api('/api/admin/apple'), api('/api/admin/payments'), api('/api/admin/resellers'), api('/api/admin/stats')]);
   } catch (e) { render(view, html`<p class="alert bad">${e.message}</p>`); return; }
   const fresh = leads.filter((l) => l.status === 'new').length;
   render(view, html`
     ${signupOpen
       ? html`<p class="alert ok">أي محل بيقدر يسجّل ويجرّب ${14} يوم مجاناً، وبعدها بيتوقف لحاله لحد ما تفعّله من هون بـ «+ شهر» أو «+ سنة».</p>`
       : html`<p class="alert ok">التسجيل مسكّر برمز. ابعت للمحل الجديد: <span dir="ltr" class="num">${location.origin}/?code=رمزك</span></p>`}
+    <div class="stats" style="margin-top:12px">
+      <div class="stat"><b class="num">${fmt(stats.revenueMonth)}</b><span class="small muted">دخل هالشهر (دينار)</span></div>
+      <div class="stat"><b class="num">${fmt(stats.mrr)}</b><span class="small muted">دخل شهري متكرر</span></div>
+      <div class="stat"><b class="num">${fmt(stats.counts.active || 0)}</b><span class="small muted">محلات مشتركة</span></div>
+      <div class="stat"><b class="num">${fmt(stats.counts.trial || 0)}</b><span class="small muted">بالتجربة</span></div>
+      <div class="stat"><b class="num">${fmt(stats.counts.expired || 0)}</b><span class="small muted">متوقفة</span></div>
+      <div class="stat"><b class="num">${fmt(stats.counts.newMonth)}</b><span class="small muted">سجّلوا هالشهر</span></div>
+    </div>
+    ${stats.ending.length ? html`<section class="panel" style="margin-top:14px"><h2>⏳ بتخلص خلال 7 أيام</h2>
+      <ul class="list">${stats.ending.map((e) => html`<li><div class="main"><b>${e.name}</b><span class="small muted">${e.state === 'trial' ? 'تجربة' : 'اشتراك'} · باقي ${e.daysLeft} ${e.daysLeft === 1 ? 'يوم' : 'أيام'} · <span dir="ltr">${e.ownerEmail || ''}</span></span></div></li>`)}</ul>
+      <p class="hint">صاحب المحل بيوصله تذكير لحاله قبل 3 أيام وقبل يوم (إذا مفعّل التنبيهات). أحسن وقت تحكي معه.</p></section>` : ''}
     <div class="stats" style="margin-top:12px">
       <div class="stat"><b class="num">${fresh}</b><span class="small muted">طلبات جديدة</span></div>
       <div class="stat"><b class="num">${leads.length}</b><span class="small muted">كل الطلبات</span></div>

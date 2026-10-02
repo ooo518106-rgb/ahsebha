@@ -6,6 +6,7 @@ import { pemToDer } from '../public/js/asn1.js';
 import * as gw from './gwallet.js';
 import * as webpush from './webpush.js';
 import * as perks from './perks.js';
+import { DEMO_EMAIL, seedDemo } from './demo.js';
 import { defaultLogoPng } from './png.js';
 import { earnFor, progress, rewardCost, rewardRule, stampsLine, unitLabel } from '../public/js/rules.js';
 import { b64ToBytes, bytesToB64, clean, fail, HttpError, isUniqueError, json, normPhone, randomDigits, randomToken } from './util.js';
@@ -476,7 +477,13 @@ function readSubscription(body) {
   return { endpoint, p256dh, auth: authKey };
 }
 
+// بحساب العرض في ناس كتير بنفس الحساب، فبعض الإجراءات ممنوعة فيه
+function noDemo(c, what = 'هاد الإجراء') {
+  if (c.shop && c.shop.demo) fail(403, `${what} مش متاح بحساب العرض. افتح تجربتك المجانية لتجرّبه 🎁`);
+}
+
 async function userPushSubscribe(c) {
+  noDemo(c, 'تفعيل التنبيهات');
   const sub = readSubscription(c.body);
   await c.db.batch([
     [`INSERT INTO user_push_subs (user_id, endpoint, p256dh, auth, created_at) VALUES (?, ?, ?, ?, ?)
@@ -600,7 +607,15 @@ export async function runScheduled(ctx, now = Date.now()) {
   if (c.budget > 0) out.reviews = await reviewAskJob(c, shopOf, now);
   if (c.budget > 0) out.winback = await winbackJob(c, shopOf, now);
   if (c.budget > 0) out.summaries = await summaryJob(c, now);
+  if (c.budget > 0) out.reminders = await reminderJob(c, platformShop, now);
   Object.assign(out, await expiryJob(c, shopOf, now));
+  // حساب العرض بيرجع لوضعه الأصلي كل يوم الساعة 4 الفجر
+  const day = localDayKey('JO', now);
+  if (perks.localTime('JO', now).hour >= 4 && (await getSetting(c.db, 'demo_day')) !== day && (await c.db.get('SELECT id FROM shops WHERE demo = 1 LIMIT 1'))) {
+    await setSetting(c.db, 'demo_day', day);
+    await seedDemo(c.db, now);
+    out.demoReset = true;
+  }
   await c.db.run('DELETE FROM rate_hits WHERE expires_at < ?', now);
   return out;
 }
@@ -751,6 +766,35 @@ async function expiryJob(c, shopOf, now) {
   return { expiryWarned: warned, expired };
 }
 
+// ⏳ تذكير صاحب المحل قبل ما تخلص التجربة أو الاشتراك (قبل 3 أيام وقبل يوم)، للي مفعّل التنبيهات
+async function reminderJob(c, platformShop, now) {
+  const shops = await c.db.all(
+    `SELECT s.* FROM shops s WHERE s.demo = 0 AND s.id <> ? AND COALESCE(s.active_until, s.created_at + ${TRIAL_DAYS * DAY}) BETWEEN ? AND ?
+       AND EXISTS (SELECT 1 FROM users u JOIN user_push_subs p ON p.user_id = u.id WHERE u.shop_id = s.id AND u.role = 'owner')`,
+    platformShop ?? 0, now, now + 3 * DAY + HOUR,
+  );
+  let n = 0;
+  for (const shop of shops) {
+    const sub = subscriptionOf(shop, platformShop);
+    const left = Math.ceil((sub.until - now) / DAY);
+    if (![1, 3].includes(left) || c.budget <= 0) continue;
+    const t = perks.localTime(shop.country, now);
+    if (t.hour < 10 || t.hour > 20) continue;
+    const key = `${sub.until}:${left}`;
+    if (shop.reminder_key === key) continue;
+    await c.db.run('UPDATE shops SET reminder_key = ? WHERE id = ?', key, shop.id);
+    const owners = await c.db.all("SELECT p.* FROM user_push_subs p JOIN users u ON u.id = p.user_id WHERE u.shop_id = ? AND u.role = 'owner'", shop.id);
+    c.budget -= owners.length;
+    const when = left === 1 ? 'بكرة' : 'بعد 3 أيام';
+    const body = sub.state === 'trial'
+      ? `⏳ تجربتك المجانية بنقاطك بتخلص ${when}. اشترك من ⚙️ الإعدادات عشان ما يوقف الكاشير، وزبائنك ونقاطهم محفوظين.`
+      : `⏳ اشتراكك بنقاطك بيخلص ${when}. جدّد من ⚙️ الإعدادات عشان ما يوقف الكاشير.`;
+    await pushTo(c, owners, () => ({ title: shop.name, body, url: `${c.origin}/app#settings` }), 'user_push_subs');
+    n++;
+  }
+  return n;
+}
+
 // 📊 ملخص اليوم لصاحب المحل الساعة 10 بالليل (بتوقيته)، للي مفعّل الإشعارات على اللوحة
 async function summaryJob(c, now) {
   const shops = await c.db.all(
@@ -863,7 +907,7 @@ async function platformShopId(db) {
 }
 
 function subscriptionOf(shop, platformShop) {
-  if (shop.id === platformShop) return { state: 'owner', until: null, daysLeft: null };
+  if (shop.id === platformShop || shop.demo) return { state: 'owner', until: null, daysLeft: null };
   const until = shop.active_until ?? shop.created_at + TRIAL_DAYS * DAY;
   const left = until - Date.now();
   if (left <= 0) return { state: 'expired', until, daysLeft: 0, paid: !!shop.paid };
@@ -1084,11 +1128,42 @@ async function adminShops(c) {
        (SELECT MAX(t.created_at) FROM txns t WHERE t.shop_id = s.id) AS lastActivity,
        (SELECT u.email FROM users u WHERE u.shop_id = s.id AND u.role = 'owner' ORDER BY u.id LIMIT 1) AS ownerEmail,
        (SELECT r.name FROM resellers r WHERE r.id = s.reseller_id) AS reseller
-     FROM shops s ORDER BY s.created_at DESC LIMIT 500`,
+     FROM shops s WHERE s.demo = 0 ORDER BY s.created_at DESC LIMIT 500`,
   );
   const platformShop = await platformShopId(c.db);
   const out = shops.map(({ active_until, paid, created_at, ...s }) => ({ ...s, subscription: subscriptionOf({ id: s.id, active_until, paid, created_at }, platformShop) }));
   return json({ shops: out, signupOpen: !c.env.SIGNUP_CODE });
+}
+
+// 💰 أرقام المنصة لمديرها: الدخل، الاشتراكات، التجارب اللي رح تخلص
+async function adminStats(c) {
+  await requireAdmin(c);
+  const now = Date.now();
+  const platformShop = await platformShopId(c.db);
+  const t = perks.localTime('JO', now);
+  const monthStart = Date.UTC(t.year, t.month - 1, 1) - 3 * 36e5;
+  const shops = await c.db.all(
+    `SELECT s.*, (SELECT u.email FROM users u WHERE u.shop_id = s.id AND u.role = 'owner' ORDER BY u.id LIMIT 1) AS ownerEmail,
+       (SELECT p.plan FROM payments p WHERE p.shop_id = s.id AND p.status = 'approved' ORDER BY p.decided_at DESC LIMIT 1) AS lastPlan
+     FROM shops s WHERE s.demo = 0 AND s.id <> ?`, platformShop ?? 0,
+  );
+  const [month, total] = await Promise.all([
+    c.db.get("SELECT COALESCE(SUM(amount), 0) AS n FROM payments WHERE status = 'approved' AND decided_at >= ?", monthStart),
+    c.db.get("SELECT COALESCE(SUM(amount), 0) AS n FROM payments WHERE status = 'approved'"),
+  ]);
+  const counts = { active: 0, trial: 0, expired: 0, newMonth: 0 };
+  let mrr = 0;
+  const ending = [];
+  for (const s of shops) {
+    const sub = subscriptionOf(s, platformShop);
+    counts[sub.state] = (counts[sub.state] || 0) + 1;
+    if (s.created_at >= monthStart) counts.newMonth++;
+    // الدخل الشهري المتكرر: الشهري 15، والسنوي 150 ÷ 12
+    if (sub.state === 'active') mrr += s.lastPlan === 'year' ? PRICES.year / 12 : PRICES.month;
+    if ((sub.state === 'trial' || sub.state === 'active') && sub.daysLeft <= 7) ending.push({ id: s.id, name: s.name, state: sub.state, daysLeft: sub.daysLeft, ownerEmail: s.ownerEmail });
+  }
+  ending.sort((a, b) => a.daysLeft - b.daysLeft);
+  return json({ revenueMonth: month.n, revenueTotal: total.n, mrr: Math.round(mrr * 100) / 100, counts, ending });
 }
 
 // مدير المنصة بيفعّل اشتراك محل (+ شهر / + سنة) أو بيوقفه
@@ -1139,6 +1214,7 @@ async function billing(c) {
 }
 
 async function billingClaim(c) {
+  noDemo(c, 'الدفع');
   if (!(await cliqInfo(c.db))) fail(400, 'الدفع بـ CliQ مش مفعّل لسا، تواصل معنا عالواتساب');
   const plan = c.body.plan;
   if (!PRICES[plan]) fail(400, 'اختار شهر أو سنة');
@@ -1240,6 +1316,21 @@ async function signup(c) {
   return json({ ok: true }, 201, { 'set-cookie': auth.sessionCookie(token, c.req) });
 }
 
+// 🎬 دخول حساب العرض بكبسة (بدون كلمة سر)
+async function demoLogin(c) {
+  await rateLimit(c, `demo:${c.ip}`, 20, 60 * MIN, 'جرّبت كتير، استنى شوي');
+  let owner = await c.db.get('SELECT * FROM users WHERE email = ?', DEMO_EMAIL);
+  if (!owner) {
+    await seedDemo(c.db);
+    await setSetting(c.db, 'demo_day', localDayKey('JO'));
+    owner = await c.db.get('SELECT * FROM users WHERE email = ?', DEMO_EMAIL);
+  }
+  const token = await auth.createSession(c.db, owner.id);
+  return json({ ok: true }, 200, { 'set-cookie': auth.sessionCookie(token, c.req) });
+}
+
+const localDayKey = (country, now = Date.now()) => { const t = perks.localTime(country, now); return String(t.year * 10000 + t.month * 100 + t.day); };
+
 async function loginRoute(c) {
   await rateLimit(c, `login:${c.ip}`, 30, 10 * MIN, 'محاولات دخول كتير، جرّب بعد كم دقيقة');
   const user = await auth.login(c.db, c.body.email, c.body.password);
@@ -1264,10 +1355,42 @@ async function me(c) {
     userPush: (await c.db.get('SELECT COUNT(*) AS n FROM user_push_subs WHERE user_id = ?', c.user.id)).n,
     whatsapp: /^\d{8,15}$/.test(String(c.env.WHATSAPP_NUMBER || '')) ? String(c.env.WHATSAPP_NUMBER) : null,
     currencies: CURRENCIES,
+    onboarding: c.user.role === 'owner' && !c.shop.demo ? await onboardingOf(c) : null,
+    demo: c.shop.demo ? { sampleCard: (await c.db.get('SELECT token FROM members WHERE shop_id = ? ORDER BY visits DESC LIMIT 1', c.shop.id))?.token || null } : null,
   });
 }
 
+// ✅ خطوات البداية للمحل الجديد (بتختفي لما تخلص أو لما يخفيها)
+async function onboardingOf(c) {
+  const s = c.shop;
+  const flags = JSON.parse(s.onboard || '{}');
+  if (flags.dismissed) return null;
+  const [members, alerts] = await Promise.all([
+    c.db.get('SELECT COUNT(*) AS n FROM members WHERE shop_id = ?', s.id),
+    c.db.get("SELECT COUNT(*) AS n FROM user_push_subs p JOIN users u ON u.id = p.user_id WHERE u.shop_id = ? AND u.role = 'owner'", s.id),
+  ]);
+  const steps = [
+    { key: 'logo', done: !!s.custom_logo },
+    { key: 'branch', done: JSON.parse(s.locations || '[]').length > 0 },
+    { key: 'settings', done: !!s.updated_at },
+    { key: 'poster', done: !!flags.poster },
+    { key: 'customer', done: members.n > 0 },
+    { key: 'alerts', done: alerts.n > 0 },
+  ];
+  return steps.every((x) => x.done) ? null : { steps };
+}
+
+async function onboardStep(c) {
+  const step = c.body.step;
+  if (!['poster', 'dismissed'].includes(step)) fail(400, 'خطوة غير معروفة');
+  const flags = JSON.parse(c.shop.onboard || '{}');
+  flags[step] = true;
+  await c.db.run('UPDATE shops SET onboard = ? WHERE id = ?', JSON.stringify(flags), c.shop.id);
+  return json({ ok: true });
+}
+
 async function changePassword(c) {
+  noDemo(c, 'تغيير كلمة السر');
   const row = await c.db.get('SELECT pw_hash FROM users WHERE id = ?', c.user.id);
   if (!(await auth.verifyPassword(String(c.body.current || ''), row.pw_hash))) fail(400, 'كلمة السر الحالية غلط');
   auth.checkPasswordStrength(c.body.next);
@@ -1613,7 +1736,7 @@ async function updateShop(c) {
   const next = {};
   next.name = clean(b.name ?? s.name, 60);
   if (next.name.length < 2) fail(400, 'اكتب اسم المحل');
-  next.slug = String(b.slug ?? s.slug).trim().toLowerCase();
+  next.slug = s.demo ? s.slug : String(b.slug ?? s.slug).trim().toLowerCase();
   if (!SLUG_RE.test(next.slug)) fail(400, 'رابط المحل: حروف إنجليزية صغيرة وأرقام وشرطة (3 حروف على الأقل)');
   next.color = String(b.color ?? s.color);
   if (!COLOR_RE.test(next.color)) fail(400, 'اللون مش صحيح');
@@ -1748,7 +1871,7 @@ async function broadcast(c) {
   if (body.length < 2) fail(400, 'اكتب نص الرسالة');
   const r = await c.db.run('INSERT INTO broadcasts (shop_id, header, body, created_at) VALUES (?, ?, ?, ?)', c.shop.id, header, body, Date.now());
   let google = null;
-  const cfg = gw.googleConfig(c.env);
+  const cfg = c.shop.demo ? null : gw.googleConfig(c.env);
   if (cfg) {
     try {
       if (!c.shop.gw_synced_at) {
@@ -1761,6 +1884,7 @@ async function broadcast(c) {
       google = e.message;
     }
   }
+  if (c.shop.demo) return json({ id: r.lastId, google: null, push: { sent: 0, failed: 0, next: null }, demo: true });
   return json({ id: r.lastId, google, push: await broadcastBatch(c, r.lastId, 0) });
 }
 
@@ -1812,6 +1936,7 @@ async function createCoupon(c) {
   const ins = await c.db.run(`INSERT INTO member_coupons (coupon_id, member_id, shop_id) SELECT ?, id, shop_id FROM members WHERE shop_id = ? AND ${seg.where}`,
     r.lastId, c.shop.id, ...seg.args(c.shop, now));
   await c.db.run('UPDATE coupons SET issued = ? WHERE id = ?', ins.changes, r.lastId);
+  if (c.shop.demo) return json({ id: r.lastId, issued: ins.changes, push: { sent: 0, failed: 0, next: null }, demo: true }, 201);
   return json({ id: r.lastId, issued: ins.changes, push: await couponBatch(c, r.lastId, 0) }, 201);
 }
 
@@ -1992,6 +2117,96 @@ async function setStaffBranch(c, id) {
   return listStaff(c);
 }
 
+// ─── المنيو الإلكتروني: أصناف بأسعار وصورة صغيرة اختيارية، وصفحة عامة /m/المحل ───
+const MAX_MENU = 300;
+const MAX_MENU_IMAGE = 200 * 1024;
+const menuImageUrl = (it, origin) => (it.has_image ? `${origin}/media/menu/${it.id}.jpg?v=${it.updated_at}` : null);
+const menuView = (it, origin) => ({ id: it.id, category: it.category, name: it.name, description: it.description, price: it.price, available: !!it.available, sort: it.sort, image: menuImageUrl(it, origin) });
+const MENU_COLS = 'id, shop_id, category, name, description, price, available, sort, updated_at, image IS NOT NULL AS has_image';
+
+function readMenuItem(b, prev = {}) {
+  const name = clean(b.name ?? prev.name, 60);
+  if (name.length < 1) fail(400, 'اكتب اسم الصنف');
+  const priceRaw = b.price ?? prev.price;
+  let price = null;
+  if (priceRaw !== null && priceRaw !== undefined && priceRaw !== '') {
+    price = Number(priceRaw);
+    if (!Number.isFinite(price) || price < 0 || price > 100000) fail(400, 'السعر مش صحيح');
+    price = Math.round(price * 1000) / 1000;
+  }
+  return {
+    category: clean(b.category ?? prev.category ?? '', 40),
+    name,
+    description: clean(b.description ?? prev.description ?? '', 200),
+    price,
+    available: (b.available ?? prev.available ?? true) ? 1 : 0,
+    sort: Number.isInteger(Number(b.sort)) ? Number(b.sort) : (prev.sort ?? 0),
+  };
+}
+
+function readMenuImage(dataUrl) {
+  const m = /^data:(image\/(?:png|jpeg));base64,([A-Za-z0-9+/]+=*)$/.exec(String(dataUrl || ''));
+  if (!m) fail(400, 'الصورة لازم تكون PNG أو JPG');
+  const bytes = b64ToBytes(m[2]);
+  if (bytes.length > MAX_MENU_IMAGE) fail(400, 'الصورة كبيرة، صغّرها');
+  const png = bytes[0] === 0x89 && bytes[1] === 0x50;
+  const jpg = bytes[0] === 0xff && bytes[1] === 0xd8;
+  if (!png && !jpg) fail(400, 'ملف الصورة تالف');
+  return `${png ? 'image/png' : 'image/jpeg'};${m[2]}`;
+}
+
+async function listMenu(c) {
+  const items = await c.db.all(`SELECT ${MENU_COLS} FROM menu_items WHERE shop_id = ? ORDER BY category, sort, id`, c.shop.id);
+  return json({ items: items.map((it) => menuView(it, c.origin)), menuUrl: `${c.origin}/m/${c.shop.slug}` });
+}
+
+async function addMenuItem(c) {
+  const count = await c.db.get('SELECT COUNT(*) AS n FROM menu_items WHERE shop_id = ?', c.shop.id);
+  if (count.n >= MAX_MENU) fail(400, `لحد ${MAX_MENU} صنف`);
+  const it = readMenuItem(c.body);
+  const image = c.body.image ? readMenuImage(c.body.image) : null;
+  const now = Date.now();
+  await c.db.run('INSERT INTO menu_items (shop_id, category, name, description, price, image, available, sort, updated_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    c.shop.id, it.category, it.name, it.description, it.price, image, it.available, it.sort, now, now);
+  return listMenu(c);
+}
+
+async function updateMenuItem(c, id) {
+  const prev = await c.db.get('SELECT * FROM menu_items WHERE id = ? AND shop_id = ?', Number(id), c.shop.id);
+  if (!prev) fail(404, 'ما لقينا الصنف');
+  const it = readMenuItem(c.body, prev);
+  const image = c.body.removeImage ? null : c.body.image ? readMenuImage(c.body.image) : prev.image;
+  await c.db.run('UPDATE menu_items SET category = ?, name = ?, description = ?, price = ?, image = ?, available = ?, sort = ?, updated_at = ? WHERE id = ?',
+    it.category, it.name, it.description, it.price, image, it.available, it.sort, Date.now(), prev.id);
+  return listMenu(c);
+}
+
+async function deleteMenuItem(c, id) {
+  const r = await c.db.run('DELETE FROM menu_items WHERE id = ? AND shop_id = ?', Number(id), c.shop.id);
+  if (!r.changes) fail(404, 'ما لقينا الصنف');
+  return listMenu(c);
+}
+
+async function publicMenu(c, slug) {
+  const shop = await shopBySlug(c.db, slug);
+  const items = await c.db.all(`SELECT ${MENU_COLS} FROM menu_items WHERE shop_id = ? AND available = 1 ORDER BY sort, id`, shop.id);
+  // الأقسام بترتيب أول صنف فيها
+  const cats = [];
+  for (const it of items) {
+    let cat = cats.find((x) => x.name === it.category);
+    if (!cat) { cat = { name: it.category, items: [] }; cats.push(cat); }
+    cat.items.push(menuView(it, c.origin));
+  }
+  return json({ shop: publicShopView(shop, c.origin), categories: cats });
+}
+
+async function menuImage(c, id) {
+  const row = await c.db.get('SELECT image FROM menu_items WHERE id = ?', Number(id));
+  if (!row || !row.image) return notFound(c);
+  const [mime, data] = row.image.split(';');
+  return new Response(b64ToBytes(data), { headers: { 'content-type': mime, 'cache-control': 'public, max-age=604800', 'x-content-type-options': 'nosniff' } });
+}
+
 // ─── المندوبين: كل مندوب إله رابط، والمحلات اللي بتسجّل منه بتنحسبله عمولة من اشتراكاتها ───
 const PARTNER_RE = /^[a-z2-9]{6}$/;
 async function resellerByCode(db, code) {
@@ -2063,6 +2278,7 @@ async function listStaff(c) {
 }
 
 async function addStaff(c) {
+  noDemo(c, 'إضافة موظفين');
   const name = readName(c.body.name);
   const email = String(c.body.email || '').trim().toLowerCase();
   if (!EMAIL_RE.test(email)) fail(400, 'الإيميل مش صحيح');
@@ -2085,6 +2301,11 @@ async function removeStaff(c, id) {
 // ─── التوجيه ───
 const API = [
   ['GET', /^\/api\/shops\/([a-z0-9-]{3,40})\/public$/, publicShop],
+  ['GET', /^\/api\/shops\/([a-z0-9-]{3,40})\/menu$/, publicMenu],
+  ['GET', /^\/api\/menu$/, listMenu, 'owner'],
+  ['POST', /^\/api\/menu$/, addMenuItem, 'owner'],
+  ['PUT', /^\/api\/menu\/(\d+)$/, updateMenuItem, 'owner'],
+  ['DELETE', /^\/api\/menu\/(\d+)$/, deleteMenuItem, 'owner'],
   ['POST', /^\/api\/shops\/([a-z0-9-]{3,40})\/join$/, join],
   ['GET', /^\/api\/cards\/([a-z2-9]{20})$/, cardInfo],
   ['POST', /^\/api\/cards\/([a-z2-9]{20})\/delete$/, deleteCard],
@@ -2116,6 +2337,7 @@ const API = [
   ['POST', /^\/api\/billing\/claim$/, billingClaim, 'owner'],
   ['POST', /^\/api\/auth\/signup$/, signup],
   ['POST', /^\/api\/auth\/login$/, loginRoute],
+  ['POST', /^\/api\/demo\/login$/, demoLogin],
   ['POST', /^\/api\/auth\/logout$/, logout],
   ['GET', /^\/api\/me$/, me, 'staff'],
   ['PUT', /^\/api\/me\/password$/, changePassword, 'staff'],
@@ -2136,6 +2358,8 @@ const API = [
   ['PUT', /^\/api\/shop$/, updateShop, 'owner'],
   ['PUT', /^\/api\/shop\/logo$/, updateLogo, 'owner'],
   ['PUT', /^\/api\/shop\/perks$/, updatePerks, 'owner'],
+  ['POST', /^\/api\/shop\/onboard$/, onboardStep, 'owner'],
+  ['GET', /^\/api\/admin\/stats$/, adminStats, 'staff'],
   ['POST', /^\/api\/shop\/sync$/, syncNow, 'owner'],
   ['POST', /^\/api\/broadcast$/, broadcast, 'owner'],
   ['POST', /^\/api\/broadcast\/(\d+)\/continue$/, broadcastContinue, 'owner'],
@@ -2222,6 +2446,9 @@ export async function handle(req, ctx) {
     if (req.method !== 'GET' && req.method !== 'HEAD') return notFound(c);
     let m;
     if ((m = p.match(/^\/media\/logo\/(\d+)\.png$/))) return await logo(c, m[1]);
+    if ((m = p.match(/^\/media\/menu\/(\d+)\.jpg$/))) return await menuImage(c, m[1]);
+    if (/^\/m\/[a-z0-9-]{3,40}\/?$/.test(p)) return await page(c, '/menu.html');
+    if (/^\/print\/[a-z0-9-]{3,40}\/?$/.test(p)) return await page(c, '/print.html');
     if (p === '/' || p === '/index.html') return await page(c, '/index.html');
     if (p === '/privacy' || p === '/privacy/') return await page(c, '/privacy.html');
     if (/^\/partner\/[a-z2-9]{20}\/?$/.test(p)) return await page(c, '/partner.html');

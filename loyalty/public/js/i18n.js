@@ -59,6 +59,14 @@ const AR = {
   getCard: 'أعطيني بطاقتي', walletNote: 'بتنحفظ بمحفظة الجوال، وبتطلعلك لحالها لما تكون قريب من {shop}.',
   consent: 'لما تنضم بتوافق على <a href="/privacy" target="_blank" rel="noopener">سياسة الخصوصية</a>. منحفظ اسمك ورقمك ونقاطك (وتاريخ ميلادك لو كتبته) بس، وبتقدر تحذفهم بأي وقت.',
   loading: 'جاري التحميل…',
+  // المنيو
+  menu: 'المنيو', menuEmpty: 'المنيو لسا فاضي.', menuJoin: '🎁 اجمع نقاط مع كل طلب واحصل على {reward}', menuJoinBtn: 'خذ بطاقة الولاء', menuOpenCard: 'افتح بطاقتي',
+  // كل بطاقاتي والهدايا
+  myCards: '💼 بطاقاتي', myCardsEmpty: 'ما في بطاقات محفوظة على هالجهاز لسا. افتح رابط بطاقتك مرة وبتنحفظ هون.', addCardLink: 'الصق رابط بطاقة', addCard: 'ضيف', removeCard: 'شيلها من هون',
+  myCardsHint: 'ضيف هالصفحة على الشاشة الرئيسية، وبتصير عندك أيقونة وحدة لكل بطاقاتك.', allCards: '💼 كل بطاقاتي',
+  giftBtn: '🎁 أهدي رصيد لصاحب', giftAsk: 'كم بدك تهدي؟ ({cur})', giftMade: 'جاهزة الهدية 🎁 ابعت الرابط لصاحبك', giftText: '🎁 أهديتك {amount} {cur} رصيد بـ {shop}! افتح الرابط واستلمها:\n{url}',
+  giftTitle: '🎁 {name} أهداك {amount} {cur}', giftAt: 'رصيد بـ {shop}، بتدفع منه عند الكاشير.', giftClaim: 'استلم الهدية على بطاقتي', giftJoin: 'خذ بطاقة واستلم الهدية',
+  giftClaimed: 'استلمت الهدية ✅', giftGone: 'هالهدية انستلمت أو انتهت.',
 };
 
 const EN = {
@@ -98,6 +106,12 @@ const EN = {
   getCard: 'Get my card', walletNote: 'It saves to your phone wallet and pops up when you’re near {shop}.',
   consent: 'By joining you agree to the <a href="/privacy" target="_blank" rel="noopener">privacy policy</a>. We only keep your name, number, points (and birthday if you add it), and you can delete them anytime.',
   loading: 'Loading…',
+  menu: 'Menu', menuEmpty: 'The menu is empty for now.', menuJoin: '🎁 Earn points with every order and get {reward}', menuJoinBtn: 'Get the loyalty card', menuOpenCard: 'Open my card',
+  myCards: '💼 My cards', myCardsEmpty: 'No cards saved on this device yet. Open your card link once and it will show up here.', addCardLink: 'Paste a card link', addCard: 'Add', removeCard: 'Remove from here',
+  myCardsHint: 'Add this page to your home screen to get one icon for all your cards.', allCards: '💼 All my cards',
+  giftBtn: '🎁 Gift credit to a friend', giftAsk: 'How much do you want to gift? ({cur})', giftMade: 'Your gift is ready 🎁 Send the link to your friend', giftText: '🎁 I gifted you {amount} {cur} of credit at {shop}! Open the link to claim it:\n{url}',
+  giftTitle: '🎁 {name} gifted you {amount} {cur}', giftAt: 'Credit at {shop} you can spend at the counter.', giftClaim: 'Claim it on my card', giftJoin: 'Get a card and claim the gift',
+  giftClaimed: 'Gift claimed ✅', giftGone: 'This gift was already claimed or has expired.',
 };
 
 export function t(key, vars = {}) {

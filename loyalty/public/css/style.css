@@ -249,12 +249,6 @@ dialog .dlg-body { padding: 16px; }
 .poster img.logo { width: 90px; height: 90px; border-radius: 50%; object-fit: cover; }
 .poster .qr { width: min(280px, 80%); margin: 14px auto; }
 .poster .qr svg { width: 100%; height: auto; display: block; }
-@media print {
-  body * { visibility: hidden; }
-  .poster, .poster * { visibility: visible; }
-  .poster { position: fixed; inset: 0; border: 0; display: grid; place-content: center; font-size: 1.4rem; }
-  .poster .qr { width: 9cm; }
-}
 
 /* العروض على بطاقة الزبون */
 .stars { display: flex; justify-content: center; gap: 4px; }
@@ -303,3 +297,60 @@ code.alias { font-size: 1.15rem; font-weight: 800; background: var(--bg, #f6f4f1
 
 /* صفحات الزبون بالإنجليزي (من اليسار لليمين) */
 html[dir="ltr"] body, html[dir="ltr"] .stamps { direction: ltr; }
+.hero-demo { margin-top: 10px; } .hero-demo .linkish { color: inherit; font-weight: 700; text-decoration: underline; }
+
+/* خطوات البداية */
+.checklist { list-style: none; padding: 0; margin: 0; display: grid; gap: 6px; }
+.checklist li.done { color: var(--muted); text-decoration: line-through; }
+.onboard .bar { background: color-mix(in srgb, var(--brand) 15%, transparent); }
+.onboard .bar i { background: var(--brand); }
+
+/* المنيو بلوحة التحكم */
+.thumb { width: 44px; height: 44px; border-radius: 8px; object-fit: cover; flex: none; }
+.list li.off { opacity: .55; }
+
+/* المنيو الإلكتروني */
+.menu-cats { display: flex; gap: 6px; overflow-x: auto; padding: 6px 0 10px; position: sticky; top: 0; background: var(--bg); z-index: 5; }
+.menu-cats .chip { text-decoration: none; white-space: nowrap; }
+.menu-sec h2 { margin-bottom: 8px; }
+.menu-items { list-style: none; padding: 0; margin: 0; display: grid; gap: 12px; }
+.menu-items li { display: flex; gap: 10px; align-items: center; }
+.menu-items img { width: 64px; height: 64px; border-radius: 10px; object-fit: cover; flex: none; }
+.menu-items .price { font-weight: 800; white-space: nowrap; }
+.menu-join { margin-top: 14px; }
+
+/* صفحة الطباعة */
+.print-bar { max-width: 820px; margin: 14px auto; padding: 0 16px; display: grid; gap: 10px; }
+.sheet { width: 210mm; min-height: 297mm; margin: 0 auto 20px; background: #fff; display: grid; box-shadow: 0 2px 12px rgba(0,0,0,.12); }
+.sheet-poster { grid-template-columns: 1fr; }
+.sheet-table { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; }
+.sheet-sticker { grid-template-columns: 1fr 1fr; grid-template-rows: repeat(3, 1fr); padding: 8mm; gap: 6mm; }
+.pt { display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; color: #1f1a17; padding: 10mm; border-top: 8px solid var(--c); }
+.sheet-table .pt { border: 1px dashed #bbb; border-top: 6px solid var(--c); padding: 6mm; }
+.sheet-sticker .pt { border: 2px solid var(--c); border-radius: 6mm; padding: 4mm; }
+.pt-logo { width: 26mm; height: 26mm; border-radius: 50%; object-fit: cover; }
+.pt-name { font-weight: 900; font-size: 22pt; margin-top: 4mm; }
+.pt-head { font-weight: 800; font-size: 20pt; margin-top: 4mm; color: var(--c); }
+.pt-qr { width: 120mm; margin-top: 6mm; }
+.pt-sub { font-size: 13pt; margin-top: 5mm; }
+.pt-rule { font-size: 12pt; margin-top: 3mm; opacity: .8; }
+.pt-foot { font-size: 9pt; opacity: .55; margin-top: 6mm; }
+.sheet-table .pt-logo { width: 16mm; height: 16mm; }
+.sheet-table .pt-name { font-size: 14pt; margin-top: 2mm; }
+.sheet-table .pt-head { font-size: 13pt; margin-top: 2mm; }
+.sheet-table .pt-qr { width: 55mm; margin-top: 3mm; }
+.sheet-table .pt-sub { font-size: 9pt; margin-top: 2mm; }
+.sheet-sticker .pt-logo { width: 12mm; height: 12mm; }
+.sheet-sticker .pt-name { font-size: 11pt; margin-top: 1mm; }
+.sheet-sticker .pt-head { font-size: 10pt; margin-top: 1mm; }
+.sheet-sticker .pt-qr { width: 42mm; margin-top: 2mm; }
+.sheet-sticker .pt-sub, .sheet-sticker .pt-foot { display: none; }
+@media print {
+  @page { size: A4; margin: 0; }
+  body { background: #fff !important; }
+  .no-print { display: none !important; }
+  .sheet { box-shadow: none; margin: 0; page-break-after: always; }
+}
+
+.menu-items li .grow { flex: 1; min-width: 0; }
+.lang-switch button { background: var(--card); padding: 2px 10px; border-radius: 99px; position: relative; z-index: 2; }

@@ -19,6 +19,20 @@ let mode = 'login';
 let signupOpen = false;
 let whatsapp = null;
 
+// 🎬 حساب العرض: بيفتح لوحة محل تجريبي مليان بيانات (بدون تسجيل)
+document.addEventListener('click', async (e) => {
+  const b = e.target.closest('[data-demo]');
+  if (!b) return;
+  b.disabled = true;
+  try {
+    await api('/api/demo/login', { method: 'POST' });
+    location.href = '/app';
+  } catch (err) {
+    alert(err.message);
+    b.disabled = false;
+  }
+});
+
 // بطاقة تجريبية بالواجهة
 render($('#demoCard'), cardHTML(
   { name: 'موكا كوفي هاوس', color: '#6b3e26', logo: '/img/demo-logo.svg', programType: 'stamps', rewardName: 'قهوة مجانية' },
