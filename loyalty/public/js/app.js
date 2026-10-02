@@ -71,6 +71,7 @@ function route() {
   let [tab, sub] = (location.hash.slice(1) || 'cashier').split('/');
   if (!VIEWS[tab] || ((tab === 'settings' || tab === 'offers') && !isOwner()) || (tab === 'admin' && !state.me.user.isAdmin)) tab = 'cashier';
   state.sub = sub || null;
+  state.nav = (state.nav || 0) + 1;
   $$('#tabs a').forEach((a) => a.classList.toggle('on', a.dataset.tab === tab));
   // انتقال ناعم بين التبويبات بالمتصفحات اللي بتدعمه
   const show = () => { VIEWS[tab](); };
@@ -674,7 +675,9 @@ async function activity() {
   const week = new Date(day); week.setDate(day.getDate() - 6);
   const month = new Date(now.getFullYear(), now.getMonth(), 1);
   let r;
-  try { r = await api(`/api/activity?dayStart=${+day}&weekStart=${+week}&monthStart=${+month}`); } catch (e) { render(view, html`<p class="alert bad">${e.message}</p>`); return; }
+  const nav = state.nav;
+  try { r = await api(`/api/activity?dayStart=${+day}&weekStart=${+week}&monthStart=${+month}`); } catch (e) { if (nav === state.nav) render(view, html`<p class="alert bad">${e.message}</p>`); return; }
+  if (nav !== state.nav) return; // انتقل لتبويب تاني قبل ما توصل الأرقام
   const s = r.stats;
   render(view, html`
     <div class="stats">
@@ -853,6 +856,7 @@ async function loadMenu(data) {
   if (!box) return;
   let r;
   try { r = data || await api('/api/menu'); } catch (e) { render(box, html`<p class="alert bad">${e.message}</p>`); return; }
+  if (!box.isConnected) return; // تركوا التبويب قبل ما يوصل المنيو
   const cats = [...new Set(r.items.map((x) => x.category))];
   render($('#menuCats'), html`${cats.filter(Boolean).map((cat) => html`<option value="${cat}"></option>`)}`);
   render(box, r.items.length ? html`${cats.map((cat) => html`<h3 style="margin-top:10px">${cat || 'بدون قسم'}</h3>
@@ -1601,9 +1605,11 @@ async function admin() {
   let pay;
   let resellers;
   let stats;
+  const nav = state.nav;
   try {
     [{ leads }, { shops, signupOpen }, appleSt, pay, { resellers }, stats] = await Promise.all([api('/api/admin/leads'), api('/api/admin/shops'), api('/api/admin/apple'), api('/api/admin/payments'), api('/api/admin/resellers'), api('/api/admin/stats')]);
-  } catch (e) { render(view, html`<p class="alert bad">${e.message}</p>`); return; }
+  } catch (e) { if (nav === state.nav) render(view, html`<p class="alert bad">${e.message}</p>`); return; }
+  if (nav !== state.nav) return;
   const fresh = leads.filter((l) => l.status === 'new').length;
   render(view, html`
     ${subnav('admin', [['overview', '📊 الأرقام'], ['pay', `💳 الحوالات${pay.payments.some((p) => p.status === 'pending') ? ' •' : ''}`], ['shops', `🏪 المحلات والطلبات${fresh ? ` (${fresh})` : ''}`], ['partners', '🤝 المندوبين'], ['apple', '🍎 Apple Wallet']])}
