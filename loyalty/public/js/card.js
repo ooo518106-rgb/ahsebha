@@ -1,6 +1,7 @@
 // صفحة بطاقة الزبون: QR للكاشير + زر الحفظ بمحفظة Google، وبتتحدّث لحالها لما تنضاف نقاط
 import { $, api, cardHTML, html, isIOS, raw, render, setBrand, toast } from './common.js';
 import { LANG, applyLang, fmtDate, ruleText, setLang, t } from './i18n.js';
+import { confetti } from './confetti.js';
 
 applyLang();
 
@@ -8,6 +9,7 @@ const token = location.pathname.split('/')[2];
 const params = new URLSearchParams(location.search);
 const root = $('#root');
 let lastBalance = null;
+let lastAvail = null;
 let deleted = false;
 let lastData = null;
 
@@ -127,8 +129,14 @@ async function load(first = false, quiet = false) {
     if (first) render(root, html`<div class="panel center" style="margin-top:60px"><h1>😕</h1><p>${e.message}</p></div>`);
     return;
   }
-  if (!quiet && lastBalance !== null && data.member.balance > lastBalance) toast(`+${data.member.balance - lastBalance} ${t(data.shop.programType === 'stamps' ? 'unitStamp' : 'unitPoint')} 🎉`, 'ok');
+  const gained = lastBalance !== null && data.member.balance > lastBalance;
+  if (!quiet && gained) toast(`+${data.member.balance - lastBalance} ${t(data.shop.programType === 'stamps' ? 'unitStamp' : 'unitPoint')} 🎉`, 'ok');
+  // احتفال: نقاط جديدة، وأكبر لما تجهز مكافأة
+  const ready = lastAvail !== null && data.member.progress.available > lastAvail;
+  if (ready) confetti({ count: 220 });
+  else if (gained) confetti();
   lastBalance = data.member.balance;
+  lastAvail = data.member.progress.available;
   // ما بنعيد الرسم إذا ما تغيّر إشي (عشان ما يضيع اللي الزبون عم يكتبه)
   const sig = JSON.stringify(data);
   if (sig === lastSig) return;
@@ -204,7 +212,7 @@ function inviteText() {
 function draw() {
   if (!lastData || deleted) return;
   const { shop, member, google, apple, refUrl, canRate, coupons = [] } = lastData;
-  setBrand(shop.color);
+  setBrand(shop.color, { theme: false });
   document.title = t('cardTitle', { shop: shop.name });
   homeScreen(shop.logo, shop.name);
   const ios = isIOS();
@@ -321,6 +329,7 @@ async function makeGift() {
   try {
     const r = await api(`/api/cards/${token}/gift`, { method: 'POST', body: { amount } });
     gift = { url: r.url, text: t('giftText', { amount: r.amount, cur: shop.currency, shop: shop.name, url: r.url }) };
+    confetti({ count: 90, origin: { x: 0.5, y: 0.6 } });
     lastSig = null;
     await load(false, true);
   } catch (err) { toast(err.message, 'bad'); }
@@ -353,6 +362,7 @@ root.addEventListener('click', async (e) => {
 await detectPush();
 await load(true);
 if (params.has('gift')) toast(t('giftClaimed'), 'ok');
+if (params.has('new') || params.has('gift')) setTimeout(() => confetti({ count: 180 }), 350);
 if (params.has('new') || params.has('gw') || params.has('apple') || params.has('gift')) history.replaceState(null, '', location.pathname);
 // تحديث كل 15 ثانية والصفحة مفتوحة، عشان الزبون يشوف نقاطه وهو عالكاونتر
 setInterval(() => { if (!deleted && document.visibilityState === 'visible') load(); }, 15000);

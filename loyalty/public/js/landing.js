@@ -33,6 +33,26 @@ document.addEventListener('click', async (e) => {
   }
 });
 
+// الأقسام بتظهر بنعومة مع التمرير
+(() => {
+  const items = $$('[data-reveal]');
+  if (!('IntersectionObserver' in window)) return;
+  document.documentElement.classList.add('reveal-on');
+  const io = new IntersectionObserver((entries) => {
+    for (const e of entries) if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); }
+  }, { threshold: 0.12, rootMargin: '0px 0px -6% 0px' });
+  items.forEach((el) => io.observe(el));
+})();
+
+// الشريط فوق بيغمق شوي لما تنزل
+const nav = $('#nav');
+const onScroll = () => nav.classList.toggle('scrolled', scrollY > 12);
+addEventListener('scroll', onScroll, { passive: true });
+onScroll();
+
+// تاريخ اليوم على شاشة الجوال التجريبي
+$('.phone-date').textContent = new Intl.DateTimeFormat('ar-u-nu-latn', { weekday: 'long', day: 'numeric', month: 'long' }).format(new Date());
+
 // بطاقة تجريبية بالواجهة
 render($('#demoCard'), cardHTML(
   { name: 'موكا كوفي هاوس', color: '#6b3e26', logo: '/img/demo-logo.svg', programType: 'stamps', rewardName: 'قهوة مجانية' },

@@ -58,7 +58,7 @@ function renderSubBanner() {
 }
 
 function applyShop() {
-  setBrand(state.shop.color);
+  setBrand(state.shop.color, { theme: false });
   $('#shopLogo').src = state.shop.logo;
   $('#shopName').textContent = state.shop.name;
   document.title = `${state.shop.name} — نقاطك`;
@@ -71,7 +71,11 @@ function route() {
   let tab = location.hash.slice(1) || 'cashier';
   if (!VIEWS[tab] || ((tab === 'settings' || tab === 'offers') && !isOwner()) || (tab === 'admin' && !state.me.user.isAdmin)) tab = 'cashier';
   $$('#tabs a').forEach((a) => a.classList.toggle('on', a.dataset.tab === tab));
-  VIEWS[tab]();
+  // انتقال ناعم بين التبويبات بالمتصفحات اللي بتدعمه
+  const show = () => { VIEWS[tab](); };
+  if (document.startViewTransition && state.tab && state.tab !== tab && !matchMedia('(prefers-reduced-motion: reduce)').matches) document.startViewTransition(show);
+  else show();
+  state.tab = tab;
 }
 
 async function boot() {
