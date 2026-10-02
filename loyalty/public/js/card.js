@@ -223,10 +223,10 @@ function draw() {
     ${params.get('apple') === 'off' ? html`<div class="alert warn" style="margin-bottom:12px">${t('appleOff')}</div>` : ''}
     ${cardHTML(shop, member, { tr: t })}
     <div class="stack" style="margin-top:16px">
-      ${perksPanels(shop, member, refUrl, canRate, coupons)}
       ${google && !ios ? html`<a class="gw-button" href="/c/${token}/google">${LANG === 'en' ? html`<img src="/img/google-wallet-button-en.svg" alt="${t('gwAlt')}" width="283" height="50">` : html`<img src="/img/google-wallet-button-ar.svg" alt="${t('gwAlt')}" width="309" height="50">`}</a>` : ''}
       ${ios && apple ? html`<a class="gw-button" href="/c/${token}/apple"><img class="apple-badge" src="/img/add-to-apple-wallet.svg" alt="Add to Apple Wallet" width="160" height="50"></a>` : ''}
       ${ios && !standalone ? html`<div class="panel small">${raw(t('iosTip'))}</div>` : ''}
+      ${perksPanels(shop, member, refUrl, canRate, coupons)}
       ${pushPanel()}
       <div class="panel small">
         <b>${ruleText(shop)}</b>

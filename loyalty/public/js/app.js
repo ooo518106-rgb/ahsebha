@@ -31,7 +31,7 @@ function renderSubBanner() {
   const sub = state.me.subscription;
   const wa = state.me.whatsapp;
   // الزر بيفتح قسم الاشتراك بالإعدادات (الدفع بـ CliQ أو الواتساب)
-  const link = (text) => (isOwner() ? '#settings' : wa ? `https://wa.me/${wa}?text=${encodeURIComponent(text)}` : null);
+  const link = (text) => (isOwner() ? '#settings/billing' : wa ? `https://wa.me/${wa}?text=${encodeURIComponent(text)}` : null);
   const ask = `مرحبا، بدي أشترك بنقاطك لمحل ${state.shop.name}`;
   let tpl = null;
   if (state.me.demo) {
@@ -54,7 +54,7 @@ function renderSubBanner() {
   const ds = $('#demoStart', box);
   if (ds) ds.onclick = async () => { await api('/api/auth/logout', { method: 'POST' }).catch(() => {}); location.href = '/#start'; };
   // رابط قسم الاشتراك بيفتح بنفس الصفحة (مش تبويب جديد)
-  $$('a[href^="#"]', box).forEach((a) => { a.removeAttribute('target'); a.onclick = () => setTimeout(() => $('#billing')?.scrollIntoView({ behavior: 'smooth' }), 300); });
+  $$('a[href^="#"]', box).forEach((a) => a.removeAttribute('target'));
 }
 
 function applyShop() {
@@ -68,8 +68,9 @@ const VIEWS = { cashier, members, activity, join: joinView, offers, settings, ad
 function route() {
   stopCamera();
   $('#dlg').onclose = null;
-  let tab = location.hash.slice(1) || 'cashier';
+  let [tab, sub] = (location.hash.slice(1) || 'cashier').split('/');
   if (!VIEWS[tab] || ((tab === 'settings' || tab === 'offers') && !isOwner()) || (tab === 'admin' && !state.me.user.isAdmin)) tab = 'cashier';
+  state.sub = sub || null;
   $$('#tabs a').forEach((a) => a.classList.toggle('on', a.dataset.tab === tab));
   // انتقال ناعم بين التبويبات بالمتصفحات اللي بتدعمه
   const show = () => { VIEWS[tab](); };
@@ -91,6 +92,34 @@ async function boot() {
   $('#logout').onclick = async () => { await api('/api/auth/logout', { method: 'POST' }).catch(() => {}); location.replace('/#login'); };
   $('#dlgClose').onclick = () => $('#dlg').close();
   route();
+}
+
+// ─── تبويبات فرعية: الصفحات الطويلة بتنعرض قسم قسم بدل ما تكون كلها ورا بعض ───
+function subnav(key, groups) {
+  return html`<nav class="subnav" data-subnav="${key}" role="tablist" aria-label="الأقسام">${groups.filter(Boolean).map((g) => html`<button type="button" role="tab" data-g="${g[0]}">${g[1]}</button>`)}</nav>`;
+}
+function bindSubnav(key, first) {
+  const nav = $(`[data-subnav="${key}"]`);
+  const ids = $$('[data-g]', nav).map((b) => b.dataset.g);
+  const show = (id) => {
+    $$('[data-group]', view).forEach((el) => el.classList.toggle('hidden', el.dataset.group !== id));
+    $$('[data-g]', nav).forEach((b) => { const on = b.dataset.g === id; b.classList.toggle('on', on); b.setAttribute('aria-selected', String(on)); });
+    try { localStorage.setItem(`nq_sub_${key}`, id); } catch { /* اختياري */ }
+  };
+  nav.onclick = (e) => {
+    const b = e.target.closest('[data-g]');
+    if (!b) return;
+    show(b.dataset.g);
+    history.replaceState(null, '', `#${key}/${b.dataset.g}`);
+    b.scrollIntoView({ inline: 'center', block: 'nearest', behavior: 'smooth' });
+  };
+  let saved = null;
+  try { saved = localStorage.getItem(`nq_sub_${key}`); } catch { /* اختياري */ }
+  const start = [state.sub, saved, first].find((id) => id && ids.includes(id)) || ids[0];
+  show(start);
+  const on = $('.on', nav);
+  if (on && nav.scrollWidth > nav.clientWidth) on.scrollIntoView({ inline: 'center', block: 'nearest' });
+  return show;
 }
 
 function openDialog(title, tpl) {
@@ -119,7 +148,7 @@ const STEPS = {
   settings: ['اختار المكافأة ولون البطاقة', '#settings'],
   poster: ['اطبع ملصق الـ QR وحطه عالكاونتر', '#join'],
   customer: ['ضيف أول زبون (جرّب على حالك)', '#join'],
-  alerts: ['فعّل تنبيهاتك على جوالك', '#settings'],
+  alerts: ['فعّل تنبيهاتك على جوالك', '#settings/alerts'],
 };
 function onboardingCard() {
   const ob = state.me.onboarding;
@@ -953,91 +982,98 @@ async function settings() {
   const s = state.shop;
   let locs = s.locations.map((l) => ({ ...l }));
   render(view, html`
-    <div class="grid2" style="align-items:start">
-      <div>
-        <form class="panel stack" id="shopForm" novalidate>
-          <h2>المحل</h2>
-          <div class="field"><label for="f-name">اسم المحل</label><input id="f-name" name="name" value="${s.name}" maxlength="60"></div>
-          <div class="field"><label for="f-slug">رابط المحل</label><input id="f-slug" name="slug" value="${s.slug}" dir="ltr" maxlength="40">
-            <div class="hint num" id="slugHint"></div></div>
-          <div class="row">
-            <div class="field grow"><label for="f-country">الدولة</label><select id="f-country" name="country">${Object.entries(COUNTRIES).map(([k, v]) => html`<option value="${k}" ${k === s.country ? 'selected' : ''}>${v} (${state.me.currencies[k]})</option>`)}</select></div>
-            <div class="field"><label for="f-color">لون البطاقة</label><input id="f-color" name="color" type="color" value="${s.color}"></div>
-          </div>
-
-          <h2 style="margin-top:18px">برنامج الولاء</h2>
-          <div class="seg" id="ptype">
-            <button type="button" data-v="points" class="${s.programType === 'points' ? 'on' : ''}">نقاط</button>
-            <button type="button" data-v="stamps" class="${s.programType === 'stamps' ? 'on' : ''}">أختام</button>
-          </div>
-          <div class="row points-only">
-            <div class="field grow"><label for="f-ppu">نقاط لكل 1 <span class="cur">${s.currency}</span></label><input id="f-ppu" name="pointsPerUnit" type="number" min="0.001" step="any" value="${s.pointsPerUnit}" class="num"></div>
-            <div class="field grow"><label for="f-thr">نقاط المكافأة</label><input id="f-thr" name="rewardThreshold" type="number" min="1" step="1" value="${s.rewardThreshold}" class="num"></div>
-          </div>
-          <div class="field stamps-only"><label for="f-stamps">عدد الأختام للمكافأة</label><input id="f-stamps" name="stampsRequired" type="number" min="2" max="30" step="1" value="${s.stampsRequired}" class="num">
-            <div class="hint">«اشتري 9 والعاشر مجاني» = 9 أختام.</div></div>
-          <div class="field"><label for="f-reward">المكافأة</label><input id="f-reward" name="rewardName" value="${s.rewardName}" maxlength="40"></div>
-          <p class="alert ok small" id="rulePreview"></p>
-
-          <h2 style="margin-top:18px">الفروع والموقع 📍</h2>
-          <p class="hint">لما يقرّب الزبون من أي فرع، الجوال بيطلّعله بطاقتك على شاشة القفل. لحد 10 فروع.</p>
-          <div id="locs"></div>
-          <div class="row">
-            <button class="btn soft grow" id="here" type="button">📍 موقعي الحالي (وأنا بالمحل)</button>
-          </div>
-          <div class="row">
-            <input class="grow" id="maplink" placeholder="أو الصق رابط خرائط Google / إحداثيات 31.95, 35.91" dir="ltr">
-            <button class="btn ghost" id="addLink" type="button">أضف</button>
-          </div>
-          <p class="hint">الروابط المختصرة (maps.app.goo.gl) ما فيها إحداثيات: افتح الرابط، اضغط مطوّل على المحل، وانسخ الأرقام اللي بتطلع.</p>
-          <div class="field"><label for="f-welcome">رسالة الترحيب</label><input id="f-welcome" name="welcomeText" value="${s.welcomeText}" maxlength="100" placeholder="${s.name} ترحب بكم ☕">
-            <div class="hint">بتطلع على شاشة القفل بالآيفون لما يقرّب الزبون (مع بطاقة Apple Wallet). على الأندرويد، Google بتطلّع البطاقة باسم المحل وشعاره وهي اللي بتختار الكلام.</div></div>
-          <p class="error" id="shopErr"></p>
-          <button class="btn big block" type="submit">حفظ</button>
-        </form>
+    ${subnav('settings', [['shop', '🏪 المحل والبطاقة'], ['wallet', '📲 المحفظة والروابط'], ['team', '👥 الموظفين والحماية'], ['alerts', '🔔 تنبيهاتك'], state.me.subscription.state !== 'owner' && ['billing', '💳 الاشتراك']])}
+    <div class="grid2 group" data-group="shop">
+      <form class="panel stack" id="shopForm" novalidate>
+      <h2>المحل</h2>
+      <div class="field"><label for="f-name">اسم المحل</label><input id="f-name" name="name" value="${s.name}" maxlength="60"></div>
+      <div class="field"><label for="f-slug">رابط المحل</label><input id="f-slug" name="slug" value="${s.slug}" dir="ltr" maxlength="40">
+      <div class="hint num" id="slugHint"></div></div>
+      <div class="row">
+      <div class="field grow"><label for="f-country">الدولة</label><select id="f-country" name="country">${Object.entries(COUNTRIES).map(([k, v]) => html`<option value="${k}" ${k === s.country ? 'selected' : ''}>${v} (${state.me.currencies[k]})</option>`)}</select></div>
+      <div class="field"><label for="f-color">لون البطاقة</label><input id="f-color" name="color" type="color" value="${s.color}"></div>
       </div>
-      <div>
-        ${state.me.subscription.state === 'owner' ? '' : html`<section class="panel stack" id="billing"><h2>💳 الاشتراك</h2><p class="muted small">جاري التحميل…</p></section>`}
-        <section class="panel stack">
-          <h2>شكل البطاقة</h2>
-          <div id="preview"></div>
-          <div class="row">
-            <label class="btn ghost grow" style="margin:0">رفع الشعار<input type="file" id="logoFile" accept="image/png,image/jpeg" class="hidden"></label>
-            ${s.customLogo ? html`<button class="btn ghost" id="logoRemove" type="button">الشعار الافتراضي</button>` : ''}
-          </div>
-          <p class="hint">صورة مربعة PNG أو JPG، والأفضل 660×660.</p>
-        </section>
-        <section class="panel stack"><h2>محفظة Google</h2><div id="gpanel">${googlePanel()}</div></section>
-        <form class="panel stack" id="linksForm">
-          <h2>🔗 روابط المحل على البطاقة</h2>
-          <input name="instagram" placeholder="إنستغرام: @mocha.jo" dir="ltr" value="${(s.links.instagram || '').replace('https://instagram.com/', '@')}">
-          <input name="tiktok" placeholder="تيك توك: @mocha.jo" dir="ltr" value="${(s.links.tiktok || '').replace('https://www.tiktok.com/', '')}">
-          <input name="facebook" placeholder="فيسبوك: mochajo" dir="ltr" value="${(s.links.facebook || '').replace('https://facebook.com/', '')}">
-          <input name="whatsapp" placeholder="واتساب المحل: 079xxxxxxx" dir="ltr" inputmode="tel" value="${(s.links.whatsapp || '').replace('https://wa.me/', '+')}">
-          <input name="website" placeholder="الموقع: https://..." dir="ltr" value="${s.links.website || ''}">
-          <p class="hint">بتطلع أزرار على بطاقة الزبون. فاضي = ما بيطلع.</p>
-          <button class="btn" type="submit">حفظ</button>
-        </form>
-        <section class="panel stack" id="alertsPanel"></section>
-        <form class="panel stack" id="guardForm">
-          <h2>🛡️ الحماية من تلاعب الكاشير</h2>
-          <div class="row">
-            <div class="field grow"><label for="g-cool">نفس الزبون مرتين ورا بعض: استنى (دقيقة)</label><input id="g-cool" name="guardCooldown" type="number" min="0" max="240" value="${s.perks.guardCooldown}" class="num"></div>
-            <div class="field grow"><label for="g-day">أكتر إشي باليوم لنفس الزبون</label><input id="g-day" name="guardDaily" type="number" min="0" max="50" value="${s.perks.guardDaily}" class="num"></div>
-          </div>
-          <div class="field"><label for="g-big">نبّهني إذا كاشير ضاف بمرة وحدة أكتر من (${s.unit})</label><input id="g-big" name="guardBig" type="number" min="1" value="${s.perks.guardBig}" class="num"></div>
-          <p class="hint">بتنطبق على الكاشيرية بس، إنت مستثنى. 0 = بدون حد. لما حدا يحاول يتجاوز الحد بيوصلك تنبيه (فعّل «🔔 تنبيهات إلك»)، وبتلاقي شغل كل موظف بـ 📊 النشاط.</p>
-          <button class="btn" type="submit">حفظ</button>
-        </form>
-        <section class="panel stack" id="staffPanel"><h2>الموظفين</h2><p class="muted small">جاري التحميل…</p></section>
-        <form class="panel stack" id="pwForm">
-          <h2>كلمة السر</h2>
-          <input name="current" type="password" placeholder="كلمة السر الحالية" autocomplete="current-password" dir="ltr" required>
-          <input name="next" type="password" placeholder="كلمة السر الجديدة (8 حروف أو أكتر)" autocomplete="new-password" dir="ltr" minlength="8" required>
-          <button class="btn ghost" type="submit">غيّر كلمة السر</button>
-        </form>
+
+      <h2 style="margin-top:18px">برنامج الولاء</h2>
+      <div class="seg" id="ptype">
+      <button type="button" data-v="points" class="${s.programType === 'points' ? 'on' : ''}">نقاط</button>
+      <button type="button" data-v="stamps" class="${s.programType === 'stamps' ? 'on' : ''}">أختام</button>
       </div>
-    </div>`);
+      <div class="row points-only">
+      <div class="field grow"><label for="f-ppu">نقاط لكل 1 <span class="cur">${s.currency}</span></label><input id="f-ppu" name="pointsPerUnit" type="number" min="0.001" step="any" value="${s.pointsPerUnit}" class="num"></div>
+      <div class="field grow"><label for="f-thr">نقاط المكافأة</label><input id="f-thr" name="rewardThreshold" type="number" min="1" step="1" value="${s.rewardThreshold}" class="num"></div>
+      </div>
+      <div class="field stamps-only"><label for="f-stamps">عدد الأختام للمكافأة</label><input id="f-stamps" name="stampsRequired" type="number" min="2" max="30" step="1" value="${s.stampsRequired}" class="num">
+      <div class="hint">«اشتري 9 والعاشر مجاني» = 9 أختام.</div></div>
+      <div class="field"><label for="f-reward">المكافأة</label><input id="f-reward" name="rewardName" value="${s.rewardName}" maxlength="40"></div>
+      <p class="alert ok small" id="rulePreview"></p>
+
+      <h2 style="margin-top:18px">الفروع والموقع 📍</h2>
+      <p class="hint">لما يقرّب الزبون من أي فرع، الجوال بيطلّعله بطاقتك على شاشة القفل. لحد 10 فروع.</p>
+      <div id="locs"></div>
+      <div class="row">
+      <button class="btn soft grow" id="here" type="button">📍 موقعي الحالي (وأنا بالمحل)</button>
+      </div>
+      <div class="row">
+      <input class="grow" id="maplink" placeholder="أو الصق رابط خرائط Google / إحداثيات 31.95, 35.91" dir="ltr">
+      <button class="btn ghost" id="addLink" type="button">أضف</button>
+      </div>
+      <p class="hint">الروابط المختصرة (maps.app.goo.gl) ما فيها إحداثيات: افتح الرابط، اضغط مطوّل على المحل، وانسخ الأرقام اللي بتطلع.</p>
+      <div class="field"><label for="f-welcome">رسالة الترحيب</label><input id="f-welcome" name="welcomeText" value="${s.welcomeText}" maxlength="100" placeholder="${s.name} ترحب بكم ☕">
+      <div class="hint">بتطلع على شاشة القفل بالآيفون لما يقرّب الزبون (مع بطاقة Apple Wallet). على الأندرويد، Google بتطلّع البطاقة باسم المحل وشعاره وهي اللي بتختار الكلام.</div></div>
+      <p class="error" id="shopErr"></p>
+      <button class="btn big block" type="submit">حفظ</button>
+      </form>
+      <section class="panel stack">
+      <h2>شكل البطاقة</h2>
+      <div id="preview"></div>
+      <div class="row">
+      <label class="btn ghost grow" style="margin:0">رفع الشعار<input type="file" id="logoFile" accept="image/png,image/jpeg" class="hidden"></label>
+      ${s.customLogo ? html`<button class="btn ghost" id="logoRemove" type="button">الشعار الافتراضي</button>` : ''}
+      </div>
+      <p class="hint">صورة مربعة PNG أو JPG، والأفضل 660×660.</p>
+      </section>
+    </div>
+    <div class="grid2 group" data-group="wallet">
+      <section class="panel stack"><h2>محفظة Google</h2><div id="gpanel">${googlePanel()}</div></section>
+      <form class="panel stack" id="linksForm">
+      <h2>🔗 روابط المحل على البطاقة</h2>
+      <input name="instagram" placeholder="إنستغرام: @mocha.jo" dir="ltr" value="${(s.links.instagram || '').replace('https://instagram.com/', '@')}">
+      <input name="tiktok" placeholder="تيك توك: @mocha.jo" dir="ltr" value="${(s.links.tiktok || '').replace('https://www.tiktok.com/', '')}">
+      <input name="facebook" placeholder="فيسبوك: mochajo" dir="ltr" value="${(s.links.facebook || '').replace('https://facebook.com/', '')}">
+      <input name="whatsapp" placeholder="واتساب المحل: 079xxxxxxx" dir="ltr" inputmode="tel" value="${(s.links.whatsapp || '').replace('https://wa.me/', '+')}">
+      <input name="website" placeholder="الموقع: https://..." dir="ltr" value="${s.links.website || ''}">
+      <p class="hint">بتطلع أزرار على بطاقة الزبون. فاضي = ما بيطلع.</p>
+      <button class="btn" type="submit">حفظ</button>
+      </form>
+    </div>
+    <div class="grid2 group" data-group="team">
+      <section class="panel stack" id="staffPanel"><h2>الموظفين</h2><p class="muted small">جاري التحميل…</p></section>
+      <form class="panel stack" id="guardForm">
+      <h2>🛡️ الحماية من تلاعب الكاشير</h2>
+      <div class="row">
+      <div class="field grow"><label for="g-cool">نفس الزبون مرتين ورا بعض: استنى (دقيقة)</label><input id="g-cool" name="guardCooldown" type="number" min="0" max="240" value="${s.perks.guardCooldown}" class="num"></div>
+      <div class="field grow"><label for="g-day">أكتر إشي باليوم لنفس الزبون</label><input id="g-day" name="guardDaily" type="number" min="0" max="50" value="${s.perks.guardDaily}" class="num"></div>
+      </div>
+      <div class="field"><label for="g-big">نبّهني إذا كاشير ضاف بمرة وحدة أكتر من (${s.unit})</label><input id="g-big" name="guardBig" type="number" min="1" value="${s.perks.guardBig}" class="num"></div>
+      <p class="hint">بتنطبق على الكاشيرية بس، إنت مستثنى. 0 = بدون حد. لما حدا يحاول يتجاوز الحد بيوصلك تنبيه (فعّل «🔔 تنبيهات إلك»)، وبتلاقي شغل كل موظف بـ 📊 النشاط.</p>
+      <button class="btn" type="submit">حفظ</button>
+      </form>
+      <form class="panel stack" id="pwForm">
+      <h2>كلمة السر</h2>
+      <input name="current" type="password" placeholder="كلمة السر الحالية" autocomplete="current-password" dir="ltr" required>
+      <input name="next" type="password" placeholder="كلمة السر الجديدة (8 حروف أو أكتر)" autocomplete="new-password" dir="ltr" minlength="8" required>
+      <button class="btn ghost" type="submit">غيّر كلمة السر</button>
+      </form>
+    </div>
+    <div class="grid2 group" data-group="alerts">
+      <section class="panel stack" id="alertsPanel"></section>
+    </div>
+    ${state.me.subscription.state !== 'owner' ? html`
+    <div class="grid2 group" data-group="billing">
+      <section class="panel stack" id="billing"><h2>💳 الاشتراك</h2><p class="muted small">جاري التحميل…</p></section>
+    </div>` : ''}`);
+  bindSubnav('settings', 'shop');
 
   const form = $('#shopForm');
   let ptype = s.programType;
@@ -1209,80 +1245,84 @@ function offers() {
   const unit = s.unit;
   let boosts = p.boosts.map((b) => ({ ...b, days: [...b.days] }));
   render(view, html`
-    <div class="grid2" style="align-items:start">
-      <div>
-        <section class="panel stack">${broadcastPanel()}</section>
-        <section class="panel stack" id="couponsPanel"><h2>🎟️ كوبونات</h2><p class="muted small">جاري التحميل…</p></section>
-        <form class="panel stack" data-perks="boosts">
-          <h2>⏰ نقاط دبل بأوقات معيّنة</h2>
-          <p class="hint">مثلاً كل يوم أحد، أو من 2 لـ 5 العصر لما المحل فاضي. الزبون بيشوف العرض على بطاقته، والكاشير بيشوفه وهو بيضيف النقاط.</p>
-          ${p.boostNow > 1 ? html`<p class="alert ok small">شغّال هلق: النقاط ×${p.boostNow}</p>` : ''}
-          <div id="boosts"></div>
-          <button class="btn ghost" type="button" id="addBoost">+ أضف وقت</button>
-          <button class="btn" type="submit">حفظ</button>
-        </form>
-        <form class="panel stack" data-perks="bday">
-          <h2>🎂 هدية عيد الميلاد</h2>
-          <label class="check"><input type="checkbox" name="bdayOn" ${p.bdayOn ? 'checked' : ''}> مفعّلة</label>
-          <div class="field"><label for="p-bday">الهدية (${unit})</label><input id="p-bday" name="bdayGift" type="number" min="0" step="1" value="${p.bdayGift}" class="num">
-            <div class="hint">${s.cost} ${unit} = ${s.rewardName} كامل. حط 0 إذا بدك معايدة بس بدون هدية.</div></div>
-          <p class="hint">الزبون بيكتب تاريخ ميلاده لما ينضم أو من بطاقته. يوم عيده (من 9 الصبح) بتنضاف الهدية لرصيده وبيوصله إشعار. التاريخ لازم يكون محفوظ من أسبوعين على الأقل.</p>
-          <button class="btn" type="submit">حفظ</button>
-        </form>
-        <form class="panel stack" data-perks="winback">
-          <h2>💤 تذكير الزبائن اللي غابوا</h2>
-          <div class="field"><label for="p-wb">بعد كم يوم غياب؟</label>
-            <select id="p-wb" name="winbackDays">${[0, 14, 21, 30, 45, 60, 90].map((d) => html`<option value="${d}" ${d === p.winbackDays ? 'selected' : ''}>${d ? `${d} يوم` : 'موقّف'}</option>`)}</select></div>
-          <div class="field"><label for="p-wbt">الرسالة</label><input id="p-wbt" name="winbackText" maxlength="120" value="${p.winbackText}" placeholder="اشتقنالك يا {الاسم} ☕ مرّ علينا قريب">
-            <div class="hint">{الاسم} بيتبدّل باسم الزبون.</div></div>
-          <label class="check"><input type="checkbox" name="winbackDouble" ${p.winbackDouble ? 'checked' : ''}> نقاطه دبل لـ 3 أيام لما يرجع</label>
-          <p class="hint">بيوصل مرة وحدة لكل غيبة، للي مفعّلين الإشعارات، بين 11 الصبح و 8 المسا.</p>
-          <button class="btn" type="submit">حفظ</button>
-        </form>
+    ${subnav('offers', [['msgs', '📣 رسائل وكوبونات'], ['points', '⭐ النقاط والمستويات'], ['auto', '🤖 تلقائي'], ['credit', '💳 رصيد ودعوات']])}
+    <div class="grid2 group" data-group="msgs">
+      <section class="panel stack">${broadcastPanel()}</section>
+      <section class="panel stack" id="couponsPanel"><h2>🎟️ كوبونات</h2><p class="muted small">جاري التحميل…</p></section>
+    </div>
+    <div class="grid2 group" data-group="points">
+      <form class="panel stack" data-perks="boosts">
+      <h2>⏰ نقاط دبل بأوقات معيّنة</h2>
+      <p class="hint">مثلاً كل يوم أحد، أو من 2 لـ 5 العصر لما المحل فاضي. الزبون بيشوف العرض على بطاقته، والكاشير بيشوفه وهو بيضيف النقاط.</p>
+      ${p.boostNow > 1 ? html`<p class="alert ok small">شغّال هلق: النقاط ×${p.boostNow}</p>` : ''}
+      <div id="boosts"></div>
+      <button class="btn ghost" type="button" id="addBoost">+ أضف وقت</button>
+      <button class="btn" type="submit">حفظ</button>
+      </form>
+      <form class="panel stack" data-perks="tiers">
+      <h2>🥇 مستويات الزبائن</h2>
+      <label class="check"><input type="checkbox" name="tiersOn" ${p.tiersOn ? 'checked' : ''}> مفعّلة</label>
+      <div class="row">
+      <div class="field grow"><label for="p-ts">🥈 فضي بعد (زيارة)</label><input id="p-ts" name="tierSilver" type="number" min="2" step="1" value="${p.tierSilver}" class="num"></div>
+      <div class="field grow"><label for="p-tg">🥇 ذهبي بعد (زيارة)</label><input id="p-tg" name="tierGold" type="number" min="3" step="1" value="${p.tierGold}" class="num"></div>
       </div>
-      <div>
-        <form class="panel stack" data-perks="review">
-          <h2>⭐ التقييم بعد الزيارة</h2>
-          <label class="check"><input type="checkbox" name="reviewOn" ${p.reviewOn ? 'checked' : ''}> مفعّل</label>
-          <div class="field"><label for="p-rv">رابط تقييم محلك على Google</label><input id="p-rv" name="reviewUrl" dir="ltr" value="${p.reviewUrl}" placeholder="https://g.page/r/...">
-            <div class="hint">من <b>Google Business Profile</b> ← «اطلب تقييمات» (Ask for reviews) ← انسخ الرابط.</div></div>
-          <p class="hint">بعد الزيارة بساعة بيوصل الزبون «كيف كانت زيارتك؟». اللي بيعطي 4 أو 5 نجوم بنطلب منه يقيّم على Google، واللي أقل بيوصلك كلامه إنت بس (بتشوفه بـ 📊 النشاط).</p>
-          <button class="btn" type="submit">حفظ</button>
-        </form>
-        <form class="panel stack" data-perks="ref">
-          <h2>👥 ادعُ صاحبك</h2>
-          <div class="field"><label for="p-ref">هدية الدعوة لكل واحد (${unit})</label><input id="p-ref" name="refBonus" type="number" min="0" step="1" value="${p.refBonus}" class="num">
-            <div class="hint">حط 0 لتوقيفها.</div></div>
-          <p class="hint">كل زبون عنده رابط دعوة على بطاقته. لما صاحبه ينضم منه ويزوركم أول مرة، الاتنين بياخدوا الهدية (لحد 10 دعوات بالشهر لكل زبون).</p>
-          <button class="btn" type="submit">حفظ</button>
-        </form>
-        <form class="panel stack" data-perks="credit">
-          <h2>💳 رصيد مدفوع مسبقاً</h2>
-          <label class="check"><input type="checkbox" name="creditOn" ${p.creditOn ? 'checked' : ''}> مفعّل</label>
-          <div class="field"><label for="p-cb">هدية الشحن (%)</label><input id="p-cb" name="creditBonus" type="number" min="0" max="100" step="1" value="${p.creditBonus}" class="num">
-            <div class="hint">مثلاً 10%: بيدفع 20 وبياخد رصيد 22.</div></div>
-          <p class="hint">الزبون بيدفع مسبقاً عند الكاشير، والرصيد بيطلع على بطاقته، وبيدفع منه بالزيارات الجاية. مع كل شحن أو دفع بيوصله إشعار، فما حدا بيقدر يصرف من رصيده بدون ما يعرف.</p>
-          <button class="btn" type="submit">حفظ</button>
-        </form>
-        <form class="panel stack" data-perks="expiry">
-          <h2>⏳ صلاحية النقاط</h2>
-          <div class="field"><label for="p-ex">النقاط بتنتهي إذا الزبون ما زار لمدة</label>
-            <select id="p-ex" name="expiryMonths">${[[0, 'ما بتنتهي'], [6, '6 أشهر'], [12, 'سنة'], [24, 'سنتين']].map(([v, l]) => html`<option value="${v}" ${v === p.expiryMonths ? 'selected' : ''}>${l}</option>`)}</select></div>
-          <p class="hint">قبل أسبوع من انتهاء النقاط بيوصله تذكير «مرّ علينا واستعملها». لما تفعّلها، العدّ بيبلّش من اليوم، فنقاط الزبائن القدام ما بتنمسح فجأة.</p>
-          <button class="btn" type="submit">حفظ</button>
-        </form>
-        <form class="panel stack" data-perks="tiers">
-          <h2>🥇 مستويات الزبائن</h2>
-          <label class="check"><input type="checkbox" name="tiersOn" ${p.tiersOn ? 'checked' : ''}> مفعّلة</label>
-          <div class="row">
-            <div class="field grow"><label for="p-ts">🥈 فضي بعد (زيارة)</label><input id="p-ts" name="tierSilver" type="number" min="2" step="1" value="${p.tierSilver}" class="num"></div>
-            <div class="field grow"><label for="p-tg">🥇 ذهبي بعد (زيارة)</label><input id="p-tg" name="tierGold" type="number" min="3" step="1" value="${p.tierGold}" class="num"></div>
-          </div>
-          <p class="hint">${s.programType === 'stamps' ? 'ببرنامج الأختام المستوى شارة على البطاقة بس.' : 'الفضي بياخد نقاط ×1.25 والذهبي ×1.5 على كل طلب.'} الزبون بيشوف مستواه وكم باقيله على بطاقته.</p>
-          <button class="btn" type="submit">حفظ</button>
-        </form>
-      </div>
+      <p class="hint">${s.programType === 'stamps' ? 'ببرنامج الأختام المستوى شارة على البطاقة بس.' : 'الفضي بياخد نقاط ×1.25 والذهبي ×1.5 على كل طلب.'} الزبون بيشوف مستواه وكم باقيله على بطاقته.</p>
+      <button class="btn" type="submit">حفظ</button>
+      </form>
+      <form class="panel stack" data-perks="expiry">
+      <h2>⏳ صلاحية النقاط</h2>
+      <div class="field"><label for="p-ex">النقاط بتنتهي إذا الزبون ما زار لمدة</label>
+      <select id="p-ex" name="expiryMonths">${[[0, 'ما بتنتهي'], [6, '6 أشهر'], [12, 'سنة'], [24, 'سنتين']].map(([v, l]) => html`<option value="${v}" ${v === p.expiryMonths ? 'selected' : ''}>${l}</option>`)}</select></div>
+      <p class="hint">قبل أسبوع من انتهاء النقاط بيوصله تذكير «مرّ علينا واستعملها». لما تفعّلها، العدّ بيبلّش من اليوم، فنقاط الزبائن القدام ما بتنمسح فجأة.</p>
+      <button class="btn" type="submit">حفظ</button>
+      </form>
+    </div>
+    <div class="grid2 group" data-group="auto">
+      <form class="panel stack" data-perks="bday">
+      <h2>🎂 هدية عيد الميلاد</h2>
+      <label class="check"><input type="checkbox" name="bdayOn" ${p.bdayOn ? 'checked' : ''}> مفعّلة</label>
+      <div class="field"><label for="p-bday">الهدية (${unit})</label><input id="p-bday" name="bdayGift" type="number" min="0" step="1" value="${p.bdayGift}" class="num">
+      <div class="hint">${s.cost} ${unit} = ${s.rewardName} كامل. حط 0 إذا بدك معايدة بس بدون هدية.</div></div>
+      <p class="hint">الزبون بيكتب تاريخ ميلاده لما ينضم أو من بطاقته. يوم عيده (من 9 الصبح) بتنضاف الهدية لرصيده وبيوصله إشعار. التاريخ لازم يكون محفوظ من أسبوعين على الأقل.</p>
+      <button class="btn" type="submit">حفظ</button>
+      </form>
+      <form class="panel stack" data-perks="winback">
+      <h2>💤 تذكير الزبائن اللي غابوا</h2>
+      <div class="field"><label for="p-wb">بعد كم يوم غياب؟</label>
+      <select id="p-wb" name="winbackDays">${[0, 14, 21, 30, 45, 60, 90].map((d) => html`<option value="${d}" ${d === p.winbackDays ? 'selected' : ''}>${d ? `${d} يوم` : 'موقّف'}</option>`)}</select></div>
+      <div class="field"><label for="p-wbt">الرسالة</label><input id="p-wbt" name="winbackText" maxlength="120" value="${p.winbackText}" placeholder="اشتقنالك يا {الاسم} ☕ مرّ علينا قريب">
+      <div class="hint">{الاسم} بيتبدّل باسم الزبون.</div></div>
+      <label class="check"><input type="checkbox" name="winbackDouble" ${p.winbackDouble ? 'checked' : ''}> نقاطه دبل لـ 3 أيام لما يرجع</label>
+      <p class="hint">بيوصل مرة وحدة لكل غيبة، للي مفعّلين الإشعارات، بين 11 الصبح و 8 المسا.</p>
+      <button class="btn" type="submit">حفظ</button>
+      </form>
+      <form class="panel stack" data-perks="review">
+      <h2>⭐ التقييم بعد الزيارة</h2>
+      <label class="check"><input type="checkbox" name="reviewOn" ${p.reviewOn ? 'checked' : ''}> مفعّل</label>
+      <div class="field"><label for="p-rv">رابط تقييم محلك على Google</label><input id="p-rv" name="reviewUrl" dir="ltr" value="${p.reviewUrl}" placeholder="https://g.page/r/...">
+      <div class="hint">من <b>Google Business Profile</b> ← «اطلب تقييمات» (Ask for reviews) ← انسخ الرابط.</div></div>
+      <p class="hint">بعد الزيارة بساعة بيوصل الزبون «كيف كانت زيارتك؟». اللي بيعطي 4 أو 5 نجوم بنطلب منه يقيّم على Google، واللي أقل بيوصلك كلامه إنت بس (بتشوفه بـ 📊 النشاط).</p>
+      <button class="btn" type="submit">حفظ</button>
+      </form>
+    </div>
+    <div class="grid2 group" data-group="credit">
+      <form class="panel stack" data-perks="credit">
+      <h2>💳 رصيد مدفوع مسبقاً</h2>
+      <label class="check"><input type="checkbox" name="creditOn" ${p.creditOn ? 'checked' : ''}> مفعّل</label>
+      <div class="field"><label for="p-cb">هدية الشحن (%)</label><input id="p-cb" name="creditBonus" type="number" min="0" max="100" step="1" value="${p.creditBonus}" class="num">
+      <div class="hint">مثلاً 10%: بيدفع 20 وبياخد رصيد 22.</div></div>
+      <p class="hint">الزبون بيدفع مسبقاً عند الكاشير، والرصيد بيطلع على بطاقته، وبيدفع منه بالزيارات الجاية. مع كل شحن أو دفع بيوصله إشعار، فما حدا بيقدر يصرف من رصيده بدون ما يعرف.</p>
+      <button class="btn" type="submit">حفظ</button>
+      </form>
+      <form class="panel stack" data-perks="ref">
+      <h2>👥 ادعُ صاحبك</h2>
+      <div class="field"><label for="p-ref">هدية الدعوة لكل واحد (${unit})</label><input id="p-ref" name="refBonus" type="number" min="0" step="1" value="${p.refBonus}" class="num">
+      <div class="hint">حط 0 لتوقيفها.</div></div>
+      <p class="hint">كل زبون عنده رابط دعوة على بطاقته. لما صاحبه ينضم منه ويزوركم أول مرة، الاتنين بياخدوا الهدية (لحد 10 دعوات بالشهر لكل زبون).</p>
+      <button class="btn" type="submit">حفظ</button>
+      </form>
     </div>`);
+  bindSubnav('offers', 'msgs');
   bindBroadcast();
   loadCoupons();
 
@@ -1512,8 +1552,8 @@ async function loadStaff(data) {
   try { ({ users } = data || (await api('/api/staff'))); } catch (e) { render(panel, html`<h2>الموظفين</h2><p class="alert bad">${e.message}</p>`); return; }
   render(panel, html`
     <h2>الموظفين</h2>
-    <ul class="list">${users.map((u) => html`<li><div class="main"><b>${u.name}</b><span class="small muted" dir="ltr">${u.email}</span></div>
-      ${u.role === 'staff' && state.shop.locations.length ? html`<select class="staff-branch" data-id="${u.id}" aria-label="الفرع" style="width:auto;min-height:34px;padding:4px 8px">
+    <ul class="list">${users.map((u) => html`<li class="wrap-row"><div class="main"><b>${u.name}</b><span class="small muted" dir="ltr">${u.email}</span></div>
+      ${u.role === 'staff' && state.shop.locations.length ? html`<select class="staff-branch" data-id="${u.id}" aria-label="الفرع">
         <option value="">كل الفروع</option>${state.shop.locations.map((l) => html`<option value="${l.id}" ${l.id === u.branchId ? 'selected' : ''}>${l.name}</option>`)}</select>` : ''}
       <span class="badge ${u.role === 'owner' ? 'ok' : ''}">${u.role === 'owner' ? 'المالك' : 'كاشير'}</span>
       ${u.role === 'staff' ? html`<button class="btn ghost sm" type="button" data-rm="${u.id}" aria-label="حذف">✕</button>` : ''}</li>`)}</ul>
@@ -1566,6 +1606,8 @@ async function admin() {
   } catch (e) { render(view, html`<p class="alert bad">${e.message}</p>`); return; }
   const fresh = leads.filter((l) => l.status === 'new').length;
   render(view, html`
+    ${subnav('admin', [['overview', '📊 الأرقام'], ['pay', `💳 الحوالات${pay.payments.some((p) => p.status === 'pending') ? ' •' : ''}`], ['shops', `🏪 المحلات والطلبات${fresh ? ` (${fresh})` : ''}`], ['partners', '🤝 المندوبين'], ['apple', '🍎 Apple Wallet']])}
+    <div class="group" data-group="overview">
     ${signupOpen
       ? html`<p class="alert ok">أي محل بيقدر يسجّل ويجرّب ${14} يوم مجاناً، وبعدها بيتوقف لحاله لحد ما تفعّله من هون بـ «+ شهر» أو «+ سنة».</p>`
       : html`<p class="alert ok">التسجيل مسكّر برمز. ابعت للمحل الجديد: <span dir="ltr" class="num">${location.origin}/?code=رمزك</span></p>`}
@@ -1586,8 +1628,12 @@ async function admin() {
       <div class="stat"><b class="num">${shops.length}</b><span class="small muted">محلات مسجّلة</span></div>
       <div class="stat"><b class="num">${pay.payments.filter((p) => p.status === 'pending').length}</b><span class="small muted">حوالات بتستنى</span></div>
     </div>
+    </div>
+    <div class="group" data-group="pay">
     ${paymentsPanel(pay)}
-    <section class="panel" style="margin-top:14px">
+    </div>
+    <div class="group stack-panels" data-group="shops">
+    <section class="panel">
       <h2>طلبات الاشتراك</h2>
       ${leads.length ? html`<ul class="list" id="leadList">${leads.map((l) => html`<li style="align-items:flex-start">
         <div class="main"><b>${l.shopName} <span class="badge ${LEAD_STATUS[l.status][1]}">${LEAD_STATUS[l.status][0]}</span></b>
@@ -1613,8 +1659,14 @@ async function admin() {
           </div>`}</div></li>`;
       })}</ul>` : html`<p class="muted">ما في محلات لسا.</p>`}
     </section>
+    </div>
+    <div class="group" data-group="partners">
     ${resellersPanel(resellers)}
-    <section class="panel stack" id="applePanel">${applePanel(appleSt)}</section>`);
+    </div>
+    <div class="group" data-group="apple">
+    <section class="panel stack" id="applePanel">${applePanel(appleSt)}</section>
+    </div>`);
+  bindSubnav('admin', 'overview');
   bindApple();
   bindPayments();
   bindResellers();
