@@ -8,7 +8,7 @@ import { html, raw, money, fmtDate, toast, confirmBox, combo, showErrors, empty,
 import { go, guard, setTitle, docHref, refresh } from '../nav.js';
 import {
   head, bindRows, today, S, dec, partyName, accName, periodOf, periodBar, bindPeriod, periodLabel, inPeriod,
-  accountItems, partyItems, entryTable, printReport, printPaper, csvName, docOf, docLocked, lockedNote, lockedPage,
+  accountItems, partyItems, entryTable, printReport, printPaper, csvName, docOf, docLocked, lockedNote, lockedPage, ccField,
 } from './common.js';
 import { repeatDialog } from './recurring.js';
 
@@ -190,6 +190,7 @@ export function form(type, { root, params }) {
       <div class="card"><div class="form-grid">
         ${field('التاريخ', html`<input class="inp" type="date" data-f="date" data-k="date" value="${d.date}">`)}
         <div class="span2">${field('البيان', html`<input class="inp" data-k="notes" value="${d.notes || ''}" placeholder="مثال: إثبات إهلاك الأجهزة لشهر سبتمبر">`)}</div>
+        ${ccField(d)}
       </div></div>
       <div class="card" style="margin-top:14px"><div data-lines></div><small class="fld-e" data-err="lines" hidden></small>
         <div class="lines-foot" style="padding:10px 0 0"><button type="button" class="btn btn-ghost btn-sm" data-add>➕ سطر</button><div data-sum></div></div></div>
@@ -244,7 +245,7 @@ export function form(type, { root, params }) {
     guard.dirty = true;
     sum();
   });
-  root.addEventListener('input', (e) => { const k = e.target.dataset.k; if ((k === 'date' || k === 'notes') && !e.target.closest('.jl-line')) { d[k] = e.target.value; guard.dirty = true; } });
+  root.addEventListener('input', (e) => { const k = e.target.dataset.k; if ((k === 'date' || k === 'notes' || k === 'cc') && !e.target.closest('.jl-line')) { d[k] = e.target.value; guard.dirty = true; } });
   root.addEventListener('click', (e) => {
     if (e.target.closest('[data-add]')) { d.lines.push(emptyLine()); draw(); }
     const del = e.target.closest('[data-del]');

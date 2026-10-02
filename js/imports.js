@@ -176,3 +176,62 @@ export function templateRows(type) {
     : { name: type === 'customers' ? 'مؤسسة الريادة التجارية' : 'شركة التوريدات المتحدة', nameEn: '', phone: '0500000001', email: '', vatNo: '', crNo: '', address: 'الرياض', opening: 0, notes: '' };
   return [head, T.fields.map((f) => ex[f.k] ?? '')];
 }
+
+// ═══ كشف حساب البنك: قراءة الأعمدة والمطابقة التلقائية مع الحركات ═══
+const DATE_KEYS = ['تاريخ', 'التاريخ', 'تاريخ العمليه', 'تاريخ القيد', 'تاريخ الحركه', 'date', 'value date', 'posting date', 'transaction date'];
+const DEBIT_KEYS = ['مدين', 'سحب', 'مسحوبات', 'المبلغ المدين', 'خصم', 'debit', 'withdrawal', 'withdrawals', 'dr'];
+const CREDIT_KEYS = ['دائن', 'ايداع', 'ايداعات', 'المبلغ الدائن', 'اضافه', 'credit', 'deposit', 'deposits', 'cr'];
+const AMOUNT_KEYS = ['المبلغ', 'مبلغ', 'القيمه', 'amount', 'value'];
+const DESC_KEYS = ['البيان', 'الوصف', 'التفاصيل', 'بيان', 'description', 'details', 'narration', 'memo', 'reference'];
+const findCol = (keys, heads) => heads.findIndex((h) => h && keys.map(normKey).some((k) => h === k || (k.length > 2 && h.includes(k))));
+
+// التاريخ من Excel (رقم تسلسلي) أو نص بصيغ شائعة → YYYY-MM-DD
+export function parseDate(v) {
+  if (typeof v === 'number' && v > 20000 && v < 80000) return new Date(Math.round((v - 25569) * 864e5)).toISOString().slice(0, 10);
+  const s = String(v ?? '').trim().replace(/[٠-٩]/g, (d) => String(d.charCodeAt(0) - 1632));
+  let m = s.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/);
+  if (m) return `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`;
+  m = s.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})/);
+  if (m) return `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`;
+  return '';
+}
+
+// rows: صفوف الملف كما قُرئت؛ النتيجة: [{ date, amount, desc }] حيث الموجب إيداع والسالب سحب
+export function parseStatement(rows) {
+  let hi = -1, cols = null;
+  for (let i = 0; i < Math.min(rows.length, 15); i++) {
+    const heads = rows[i].map(normKey);
+    const date = findCol(DATE_KEYS, heads);
+    const debit = findCol(DEBIT_KEYS, heads), credit = findCol(CREDIT_KEYS, heads), amount = findCol(AMOUNT_KEYS, heads);
+    if (date >= 0 && (amount >= 0 || (debit >= 0 && credit >= 0))) { hi = i; cols = { date, debit, credit, amount, desc: findCol(DESC_KEYS, heads) }; break; }
+  }
+  if (!cols) return { rows: [], error: 'لم أجد أعمدة التاريخ والمبلغ (أو مدين ودائن) في الملف' };
+  const out = [];
+  for (const r of rows.slice(hi + 1)) {
+    const date = parseDate(r[cols.date]);
+    if (!date) continue;
+    const n = (x) => { const v = numOrBlank(cell([x], 0)); return v === '' ? 0 : v; };
+    const amount = cols.debit >= 0 && cols.credit >= 0 ? round(n(r[cols.credit]) - n(r[cols.debit]), 2) : round(n(r[cols.amount]), 2);
+    if (!amount) continue;
+    out.push({ date, amount, desc: cols.desc >= 0 ? String(r[cols.desc] ?? '').trim() : '' });
+  }
+  return { rows: out, error: out.length ? '' : 'لا توجد حركات بتاريخ ومبلغ في الملف' };
+}
+
+// مطابقة كل سطر في الكشف مع حركة غير مطابقة بنفس المبلغ وأقرب تاريخ (±days)
+export function matchStatement(stmt, items, { days = 5 } = {}) {
+  const used = new Set();
+  const matches = new Map();
+  const unmatched = [];
+  const dayNo = (d) => Date.UTC(+d.slice(0, 4), +d.slice(5, 7) - 1, +d.slice(8, 10)) / 864e5;
+  stmt.forEach((r, i) => {
+    let best = null, gap = Infinity;
+    for (const it of items) {
+      if (used.has(it.pk) || Math.abs(it.amount - r.amount) > 0.005) continue;
+      const g = Math.abs(dayNo(it.date) - dayNo(r.date));
+      if (g <= days && g < gap) { best = it; gap = g; }
+    }
+    if (best) { used.add(best.pk); matches.set(i, best.pk); } else unmatched.push(i);
+  });
+  return { matches, unmatched };
+}

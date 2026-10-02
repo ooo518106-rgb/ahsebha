@@ -19,6 +19,9 @@ import * as assets from './views/assets.js';
 import * as cheques from './views/cheques.js';
 import * as recurring from './views/recurring.js';
 import * as auditView from './views/audit.js';
+import * as payroll from './views/payroll.js';
+import * as stockViews from './views/stock.js';
+import * as reconcile from './views/reconcile.js';
 
 // ─── المسارات ───
 const routes = [];
@@ -26,7 +29,7 @@ const on = (pattern, fn) => routes.push({ parts: pattern.split('/').filter(Boole
 
 on('', home.dashboard);
 on('welcome', home.welcome);
-const MODULE = { sale: docs, quote: docs, sreturn: docs, purchase: docs, preturn: docs, sorder: docs, porder: docs, expense: money, receipt: money, payment: money, transfer: money, journal: ledger, adjust: products };
+const MODULE = { sale: docs, quote: docs, sreturn: docs, purchase: docs, preturn: docs, sorder: docs, porder: docs, expense: money, receipt: money, payment: money, transfer: money, journal: ledger, adjust: products, payroll, stransfer: stockViews };
 for (const [type, seg] of Object.entries(SEG)) {
   const m = MODULE[type];
   on(seg, (c) => m.list(type, c));
@@ -63,6 +66,11 @@ on('assets/:id', assets.show);
 on('cheques', cheques.view);
 on('recurring', recurring.view);
 on('audit', auditView.view);
+on('employees', payroll.employees);
+on('employees/new', payroll.employeeForm);
+on('employees/:id/edit', payroll.employeeForm);
+on('employees/:id', payroll.employeeShow);
+on('reconcile', reconcile.view);
 
 function match(path) {
   const parts = path.split('/').filter(Boolean);
@@ -96,10 +104,15 @@ const NAV = [
   { ic: '📤', t: 'سندات الصرف', h: 'payments' },
   { ic: '🔁', t: 'التحويلات', h: 'transfers' },
   { ic: '🧾', t: 'الشيكات', h: 'cheques' },
+  { ic: '🏦', t: 'مطابقة البنك', h: 'reconcile' },
   { sec: 'المخزون' },
   { ic: '📦', t: 'المنتجات والخدمات', h: 'products' },
   { ic: '🏷️', t: 'ملصقات الباركود', h: 'labels' },
   { ic: '⚖️', t: 'تسويات المخزون', h: 'adjustments' },
+  { ic: '🚚', t: 'التحويلات المخزنية', h: 'stock-transfers', need: 'wh' },
+  { sec: 'الموظفون والرواتب' },
+  { ic: '👷', t: 'الموظفون', h: 'employees' },
+  { ic: '💼', t: 'مسيرات الرواتب', h: 'payroll' },
   { sec: 'المحاسبة والتقارير' },
   { ic: '📒', t: 'قيود اليومية', h: 'journal' },
   { ic: '🗂️', t: 'دليل الحسابات', h: 'accounts' },
@@ -115,7 +128,8 @@ const NAV = [
 
 // عناصر القائمة المسموحة للمستخدم الحالي، بدون عناوين أقسام فارغة
 function navItems() {
-  const xs = NAV.filter((n) => n.sec || auth.can(auth.routePerm(n.h)));
+  const db = store.getDb();
+  const xs = NAV.filter((n) => n.sec || (auth.can(auth.routePerm(n.h)) && (n.need !== 'wh' || (db && db.warehouses.length))));
   return xs.filter((n, i) => !n.sec || (xs[i + 1] && !xs[i + 1].sec));
 }
 

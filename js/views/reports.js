@@ -48,12 +48,12 @@ export function report(ctx) {
 }
 
 // إطار موحد: عنوان، فترة، طباعة، Excel
-function frame({ root, path, query }, r, { per, asOf, fixed, body, note }) {
+function frame({ root, path, query }, r, { per, asOf, fixed, body, note, pre }) {
   const sub = asOf != null ? `حتى تاريخ ${fmtDate(asOf)}` : periodLabel(per);
   root.innerHTML = String(html`${head(r.t, { sub, actions: html`<a class="btn btn-ghost" href="#/reports">📊 كل التقارير</a>` })}
     <div class="toolbar">${fixed ? '' : asOf != null ? html`<label class="inline small"><span>حتى تاريخ</span><input class="inp" type="date" data-asof value="${asOf}"></label>` : periodBar(per)}
       <span class="grow"></span><button class="btn btn-ghost btn-sm" data-print>🖨️ طباعة / PDF</button><button class="btn btn-ghost btn-sm" data-csv>⬇️ Excel</button></div>
-    ${body}${note ? html`<p class="tbl-note">${note}</p>` : ''}`);
+    ${pre || ''}${body}${note ? html`<p class="tbl-note">${note}</p>` : ''}`);
   if (asOf != null) { const a = $('[data-asof]', root); if (a) a.onchange = (e) => go(withQuery(path, { ...query, to: e.target.value })); }
   else bindPeriod(root, path, query);
   bindRows(root);
@@ -90,10 +90,18 @@ function zakat(ctx, r) {
 
 const pct = (v, base) => (base ? html`<span class="muted small" dir="ltr">${(Math.round((v / base) * 1000) / 10).toLocaleString('en-US')}%</span>` : '');
 
+// اختيار الفرع (مركز التكلفة) فوق التقرير عند تعريف الفروع
+function ccPicker(ctx) {
+  const cs = store.getDb().centers;
+  if (!cs.length) return '';
+  return html`<div class="toolbar" style="margin-top:-4px"><label class="inline small"><span>الفرع</span><select class="inp" data-cc>${[['', 'كل الفروع'], ...cs.map((c) => [c.id, c.name])].map(([k, l]) => html`<option value="${k}" ${k === (ctx.query.cc || '') ? raw('selected') : ''}>${l}</option>`)}</select></label></div>`;
+}
+function bindCc(ctx) { const sel = $('[data-cc]', ctx.root); if (sel) sel.onchange = () => go(withQuery(ctx.path, { ...ctx.query, cc: sel.value })); }
+
 // ── قائمة الدخل ──
 function income(ctx, r) {
   const db = store.getDb();
-  const per = periodOf(ctx.query, 'year');
+  const per = { ...periodOf(ctx.query, 'year'), cc: ctx.query.cc || '' };
   const I = incomeStatement(db, store.getBooks(), per);
   const rev = I.totalRevenue;
   const row = (x, cls = '') => html`<tr class="${cls}" data-href="${withQuery('accounts/' + x.account.id, { from: per.from, to: per.to })}"><td class="ind-1">${x.account.name}</td><td class="num">${money(x.amount, { paren: true })}</td><td class="num hide-sm">${pct(x.amount, rev)}</td></tr>`;
@@ -107,7 +115,8 @@ function income(ctx, r) {
     ${groups.map((g) => html`<tr class="grp"><td colspan="3">${g || 'المصروفات'}</td></tr>${I.expenses.filter((x) => x.group === g).map((x) => row(x))}`)}
     <tr class="strong"><td>إجمالي المصروفات</td><td class="num">${money(I.totalExpenses, { paren: true })}</td><td class="num hide-sm">${pct(I.totalExpenses, rev)}</td></tr>
   </tbody><tfoot><tr><td>${I.net >= 0 ? 'صافي الربح' : 'صافي الخسارة'}</td><td class="num"><span class="${I.net < 0 ? 'neg' : 'pos'}">${money(I.net, { paren: true })}</span></td><td class="num hide-sm">${pct(I.net, rev)}</td></tr></tfoot></table></div>`;
-  frame(ctx, r, { per, body, note: 'الأرقام بين قوسين سالبة. اضغط على أي بند لعرض تفاصيله في دفتر الأستاذ.' });
+  frame(ctx, r, { pre: ccPicker(ctx), per, body, note: 'الأرقام بين قوسين سالبة. اضغط على أي بند لعرض تفاصيله في دفتر الأستاذ.' });
+  bindCc(ctx);
 }
 
 // ── الميزانية العمومية ──
@@ -201,7 +210,7 @@ function vat(ctx, r) {
 // ── تحليل المبيعات ──
 function sales(ctx, r) {
   const db = store.getDb();
-  const per = periodOf(ctx.query, 'month');
+  const per = { ...periodOf(ctx.query, 'month'), cc: ctx.query.cc || '' };
   const A = salesAnalysis(db, store.getBooks(), per);
   const margin = A.net ? Math.round((A.profit / A.net) * 1000) / 10 : 0;
   const body = html`<div class="grid g4" style="margin-bottom:14px">
@@ -217,7 +226,8 @@ function sales(ctx, r) {
     ${A.customers.length ? html`<div class="tbl-wrap"><table class="tbl"><thead><tr><th>العميل</th><th class="num">الفواتير</th><th class="num">الصافي</th><th class="num hide-sm">${taxLabel()}</th><th class="num">الإجمالي</th></tr></thead><tbody>
       ${A.customers.map((x) => html`<tr ${x.key !== '_cash' ? attr('data-href', `#/customers/${x.key}`) : ''}><td>${x.name}</td><td class="num">${x.count}</td><td class="num">${money(x.net)}</td><td class="num hide-sm">${money(x.vat)}</td><td class="num">${money(x.total)}</td></tr>`)}
     </tbody></table></div>` : html`<p class="muted">لا توجد مبيعات في هذه الفترة.</p>`}</div>`;
-  frame(ctx, r, { per, body, note: 'الربح هنا = صافي المبيعات − تكلفة البضاعة المباعة بالتكلفة المتوسطة (قبل المصروفات).' });
+  frame(ctx, r, { pre: ccPicker(ctx), per, body, note: 'الربح هنا = صافي المبيعات − تكلفة البضاعة المباعة بالتكلفة المتوسطة (قبل المصروفات).' });
+  bindCc(ctx);
 }
 
 // ── أعمار الديون ──
@@ -246,13 +256,20 @@ function cash(ctx, r) {
 // ── المخزون ──
 function stock(ctx, r) {
   const db = store.getDb();
-  const R = stockReport(db, store.getBooks());
+  const B = store.getBooks();
+  const R0 = stockReport(db, B);
+  // عند اختيار مستودع: كميته فقط بنفس متوسط التكلفة
+  const wh = db.warehouses.some((w) => w.id === ctx.query.wh) ? ctx.query.wh : '';
+  const R = wh ? (() => { const rows = R0.rows.map((x) => { const q = B.whQty.get(x.product.id)?.get(wh) || 0; return { ...x, qty: q, value: round(q * x.unit, dec()) }; }).filter((x) => x.qty); return { rows, value: round(rows.reduce((t, x) => t + x.value, 0), dec()) }; })() : R0;
   const body = R.rows.length ? html`<div class="sum-bar"><span>عدد الأصناف: <b>${R.rows.length}</b></span><span>قيمة المخزون: <b>${money(R.value, { sym: true })}</b></span></div>
     <div class="tbl-wrap"><table class="tbl" data-table><thead><tr><th>الصنف</th><th class="num">الكمية</th><th class="num">متوسط التكلفة</th><th class="num">القيمة</th><th class="num hide-sm">سعر البيع</th><th class="num hide-sm">الهامش المتوقع</th></tr></thead><tbody>
     ${R.rows.map((x) => { const pr = num(x.product.price); return html`<tr data-href="#/products/${x.product.id}"><td>${x.product.name}${x.low ? html` <span class="badge badge-bad">نفاد</span>` : ''}</td><td class="num"><span class="${x.qty < 0 ? 'neg' : ''}">${qty(x.qty)}</span></td><td class="num">${money(x.unit)}</td><td class="num">${money(x.value)}</td><td class="num hide-sm">${money(pr)}</td><td class="num hide-sm">${pr ? Math.round(((pr - x.unit) / pr) * 100) + '%' : '—'}</td></tr>`; })}
     </tbody><tfoot><tr><td>الإجمالي</td><td></td><td></td><td class="num">${money(R.value)}</td><td class="hide-sm"></td><td class="hide-sm"></td></tr></tfoot></table></div>`
     : empty('📦', 'لا توجد منتجات مخزنية');
-  frame(ctx, r, { asOf: today(), fixed: true, body, note: 'تقييم المخزون الحالي بطريقة المتوسط المرجح. قيمة المخزون تساوي رصيد حساب المخزون في الميزانية.' });
+  const pre = db.warehouses.length ? html`<div class="toolbar" style="margin-top:-4px"><label class="inline small"><span>المستودع</span><select class="inp" data-wh>${[['', 'كل المستودعات'], ...db.warehouses.map((w) => [w.id, w.name])].map(([k, l]) => html`<option value="${k}" ${k === wh ? raw('selected') : ''}>${l}</option>`)}</select></label></div>` : '';
+  frame(ctx, r, { asOf: today(), fixed: true, body, pre, note: 'تقييم المخزون الحالي بطريقة المتوسط المرجح. قيمة المخزون تساوي رصيد حساب المخزون في الميزانية.' });
+  const ws = $('[data-wh]', ctx.root);
+  if (ws) ws.onchange = () => go(withQuery(ctx.path, { wh: ws.value }));
 }
 
 // ── المصروفات حسب البند ──

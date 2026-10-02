@@ -1,7 +1,7 @@
 // ═══ الإعدادات: المنشأة، الضريبة والعملة، الفواتير، السنة المالية، النسخ الاحتياطي ═══
 import * as store from '../store.js';
-import { COUNTRIES, CURRENCIES, validSaudiVat, isDate, num } from '../core.js';
-import { html, raw, fmtDate, toast, confirmBox, $, showErrors, field, MONTHS, attr } from '../ui.js';
+import { COUNTRIES, CURRENCIES, validSaudiVat, isDate, num, payrollRates } from '../core.js';
+import { html, raw, fmtDate, toast, confirmBox, modal, $, showErrors, field, MONTHS, attr } from '../ui.js';
 import { go, guard, setTitle } from '../nav.js';
 import { head, S } from './common.js';
 import { downloadBackup, restoreFile, loadDemo } from './home.js';
@@ -69,6 +69,27 @@ export function view({ root }) {
       <a class="tile" href="#/users"><span class="ic">👤</span><span>المستخدمون ورموز الدخول<small class="muted" style="display:block;font-weight:600">مالك، محاسب، كاشير، وقفل تلقائي</small></span></a>
       <a class="tile" href="#/import"><span class="ic">📥</span><span>الاستيراد من Excel<small class="muted" style="display:block;font-weight:600">المنتجات والعملاء والموردون دفعة واحدة</small></span></a>
     </div>
+
+    <div class="card" style="margin-top:14px"><div class="card-h"><h3>🏬 المستودعات والفروع</h3></div>
+      <div class="grid g2">
+        <div><h4 style="margin-bottom:6px">المستودعات</h4>${db.warehouses.length ? html`<div class="list-mini">${db.warehouses.map((w) => html`<div class="it"><span>${w.name}${w.id === s.defaultWh || (!s.defaultWh && w === db.warehouses[0]) ? html` <span class="badge badge-info">الافتراضي</span>` : ''}</span><span class="inline"><button type="button" class="btn btn-ghost btn-sm" data-rename="warehouses:${w.id}">✏️</button><button type="button" class="btn btn-ghost btn-sm" data-default="${w.id}">افتراضي</button><button type="button" class="icon-btn" data-remove="warehouses:${w.id}" aria-label="حذف">🗑️</button></span></div>`)}</div>` : html`<p class="muted small">مستودع واحد (لا حاجة لتعريفه).</p>`}
+          <button type="button" class="btn btn-ghost btn-sm" data-add="warehouses" style="margin-top:8px">➕ مستودع</button></div>
+        <div><h4 style="margin-bottom:6px">الفروع / مراكز التكلفة</h4>${db.centers.length ? html`<div class="list-mini">${db.centers.map((c) => html`<div class="it"><span>${c.name}</span><span class="inline"><button type="button" class="btn btn-ghost btn-sm" data-rename="centers:${c.id}">✏️</button><button type="button" class="icon-btn" data-remove="centers:${c.id}" aria-label="حذف">🗑️</button></span></div>`)}</div>` : html`<p class="muted small">لا توجد فروع.</p>`}
+          <button type="button" class="btn btn-ghost btn-sm" data-add="centers" style="margin-top:8px">➕ فرع</button></div>
+      </div>
+      <p class="muted small" style="margin-top:10px">المستودعات تتابع كمية كل صنف في كل مكان مع تحويلات بينها. الفروع (مراكز التكلفة) تُختار في الفواتير والمصروفات والرواتب، وتظهر قائمة الدخل لكل فرع.</p></div>
+
+    <div class="card" style="margin-top:14px"><div class="card-h"><h3>💼 الرواتب والتأمينات الاجتماعية</h3><span class="muted small">${s.payroll ? 'نسب معدّلة' : 'النسب الافتراضية للدولة'}</span></div>
+      <form class="form-grid" data-payroll novalidate>
+        ${field('حصة الموظف المواطن %', html`<input class="inp" name="citizenEmp" type="text" inputmode="decimal" data-num value="${payrollRates(s).citizenEmp}">`)}
+        ${field('حصة المنشأة عن المواطن %', html`<input class="inp" name="citizenCo" type="text" inputmode="decimal" data-num value="${payrollRates(s).citizenCo}">`)}
+        ${field('حصة الموظف الوافد %', html`<input class="inp" name="expatEmp" type="text" inputmode="decimal" data-num value="${payrollRates(s).expatEmp}">`)}
+        ${field('حصة المنشأة عن الوافد %', html`<input class="inp" name="expatCo" type="text" inputmode="decimal" data-num value="${payrollRates(s).expatCo}">`)}
+        ${field('الحد الأعلى للأجر الخاضع', html`<input class="inp" name="cap" type="text" inputmode="decimal" data-num value="${payrollRates(s).cap || ''}" placeholder="بدون حد">`)}
+        ${field('الأجر الخاضع', html`<select class="inp" name="base">${[['bh', 'الأساسي + السكن'], ['basic', 'الأساسي فقط'], ['gross', 'كل الأجر الثابت']].map(([k, l]) => html`<option value="${k}" ${k === payrollRates(s).base ? raw('selected') : ''}>${l}</option>`)}</select>`)}
+        <p class="muted small span-all">تتغير النسب من وقت لآخر؛ تأكد منها من موقع التأمينات الاجتماعية في دولتك قبل إصدار المسير.</p>
+        <div class="dlg-actions span-all"><button class="btn btn-primary btn-sm">حفظ النسب</button>${s.payroll ? html`<button type="button" class="btn btn-ghost btn-sm" data-payroll-reset>نسب الدولة الافتراضية</button>` : ''}</div>
+      </form></div>
 
     <div class="card" style="margin-top:14px"><div class="card-h"><h3>🔒 قفل الفترات المحاسبية</h3><span class="muted small">${s.lockDate ? 'مقفلة حتى ' + fmtDate(s.lockDate) : 'لا توجد فترة مقفلة'}</span></div>
       <p class="muted small" style="margin-bottom:10px">بعد إقفال شهر أو سنة (أو تقديم الإقرار الضريبي) اقفلها، فلا يمكن إضافة أو تعديل أو حذف أي مستند بتاريخ داخلها. كل التعديلات تُسجَّل في <a href="#/audit">سجل التعديلات</a>.</p>
@@ -183,6 +204,47 @@ export function view({ root }) {
       go('#/welcome');
     };
   }
+
+  // المستودعات والفروع
+  const nameDialog = (title, value = '') => modal({
+    title,
+    body: html`<form novalidate>${field('الاسم', html`<input class="inp" name="n" value="${value}" autofocus>`)}<div class="dlg-actions"><button class="btn btn-primary">حفظ</button></div></form>`,
+    onMount: (dlg, done) => { const f = $('form', dlg); f.onsubmit = (e) => { e.preventDefault(); if (f.n.value.trim()) done(f.n.value.trim()); }; },
+  });
+  root.addEventListener('click', async (e) => {
+    const add = e.target.closest('[data-add]');
+    const ren = e.target.closest('[data-rename]');
+    const rm = e.target.closest('[data-remove]');
+    const def = e.target.closest('[data-default]');
+    if (add) {
+      const kind = add.dataset.add;
+      const name = await nameDialog(kind === 'warehouses' ? 'مستودع جديد' : 'فرع جديد');
+      if (!name) return;
+      // أول مستودع: الكميات الحالية تبقى في «المستودع الرئيسي»
+      if (kind === 'warehouses' && !store.getDb().warehouses.length) store.saveListItem('warehouses', { id: 'main', name: 'المستودع الرئيسي' });
+      store.saveListItem(kind, { name });
+      toast('تمت الإضافة ✓'); window.dispatchEvent(new Event('acc:shell')); go('#/settings');
+    } else if (ren) {
+      const [kind, id] = ren.dataset.rename.split(':');
+      const item = store.getDb()[kind].find((x) => x.id === id);
+      const name = await nameDialog('إعادة تسمية', item.name);
+      if (name) { store.saveListItem(kind, { id, name }); go('#/settings'); }
+    } else if (rm) {
+      const [kind, id] = rm.dataset.remove.split(':');
+      if (!(await confirmBox('حذف هذا العنصر؟', { ok: 'حذف', danger: true }))) return;
+      try { store.deleteListItem(kind, id); window.dispatchEvent(new Event('acc:shell')); go('#/settings'); } catch (err) { toast(err.message, 'err'); }
+    } else if (def) { store.saveSettings({ defaultWh: def.dataset.default }); go('#/settings'); }
+    else if (e.target.closest('[data-payroll-reset]')) { store.saveSettings({ payroll: null }); toast('تمت الاستعادة'); go('#/settings'); }
+  });
+  $('[data-payroll]', root).onsubmit = (e) => {
+    e.preventDefault();
+    const f = e.target;
+    const v = { citizenEmp: num(f.citizenEmp.value), citizenCo: num(f.citizenCo.value), expatEmp: num(f.expatEmp.value), expatCo: num(f.expatCo.value), cap: num(f.cap.value), base: f.base.value };
+    if (Object.values(v).some((x) => typeof x === 'number' && (x < 0 || x > 100000))) { toast('نسب غير صحيحة', 'err'); return; }
+    store.saveSettings({ payroll: v });
+    toast('تم حفظ النسب ✓');
+    go('#/settings');
+  };
 
   if (navigator.storage && navigator.storage.estimate) {
     navigator.storage.estimate().then((e) => {
