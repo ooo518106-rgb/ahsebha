@@ -1,8 +1,9 @@
 // ═══ قراءة الإيصالات: رمز QR الضريبي (TLV) أو نص الصورة، وتحويلهما لبيانات مصروف أو فاتورة مشتريات ═══
 // دوال بلا DOM تعمل في المتصفح وفي Node؛ الواجهة (الكاميرا وقراءة النص) في views/scan.js
 
-const r2 = (v) => Math.round((Number(v) + Number.EPSILON) * 100) / 100;
-const BIDI = /[‎‏‪-‮⁦-⁩؜]/g;
+// ثلاث خانات تكفي للدينار والريال معاً
+const r2 = (v) => Math.round((Number(v) + Number.EPSILON) * 1000) / 1000;
+const BIDI = /[\u200e\u200f\u202a-\u202e\u2066-\u2069\u061c]/g;
 
 // الأرقام الهندية والفارسية إلى لاتينية، والفاصلة العشرية العربية إلى نقطة، بلا علامات الاتجاه
 export function normDigits(s) {
@@ -182,7 +183,8 @@ export function extractReceipt(text, { today } = {}) {
   for (let i = 0; i < K.length && !vat; i++) {
     if (!VATNO_LINE.test(K[i])) continue;
     for (const l of [lines[i], onlyNumber(i + 1) ? lines[i + 1] : '']) {
-      const m = (l.match(/\d[\d -]{7,22}\d/g) || []).map((x) => x.replace(/\D/g, '')).find((x) => x.length >= 9 && x.length <= 15);
+      // الأردن 8 أرقام تقريباً، والخليج 15
+      const m = (l.match(/\d[\d -]{5,22}\d/g) || []).map((x) => x.replace(/\D/g, '')).find((x) => x.length >= 7 && x.length <= 15);
       if (m) { vat = m; break; }
     }
   }

@@ -3,7 +3,7 @@ import * as store from '../store.js';
 import { COUNTRIES, dashboard as summarize, docNo, stockReport, ymd, monthStart, validSaudiVat, isDate, isPdc, addDays } from '../core.js';
 import { html, money, fmtDate, hijri, toast, confirmBox, empty, $, showErrors, field, monthName, badge } from '../ui.js';
 import { go, setTitle, docHref } from '../nav.js';
-import { today, S, partyName, docStatus } from './common.js';
+import { today, S, partyName, docStatus, taxAuth } from './common.js';
 import { monthlyChart } from './chart.js';
 import { demoData } from '../demo.js';
 import { zipBytes, unzipEntries, entryBytes, entryText } from '../xlsx.js';
@@ -77,7 +77,7 @@ export async function loadDemo() {
   const d = demoData(today());
   store.replaceDb({ ...d, demo: true });
   window.dispatchEvent(new Event('acc:shell'));
-  toast('تم تحميل بيانات تجريبية لمتجر إلكترونيات 🧪');
+  toast('تم تحميل بيانات تجريبية لمتجر إلكترونيات في عمّان 🧪');
   go('#/');
 }
 
@@ -154,7 +154,7 @@ export function dashboard({ root }) {
       ${kpi('النقدية والبنوك', money(D.cash, { sym: true }), '#/reports/cash', 'الرصيد المتوفر الآن')}
       ${kpi('مستحق من العملاء', money(D.receivable, { sym: true }), '#/collections', D.overdue.length ? `${D.overdue.length} فاتورة متأخرة · تذكير واتساب` : 'لا توجد متأخرات')}
       ${kpi('مستحق للموردين', money(D.payable, { sym: true }), '#/reports/aging-ap')}
-      ${s.vat ? kpi(D.vatDue >= 0 ? 'ضريبة مستحقة للهيئة' : 'ضريبة قابلة للاسترداد', money(Math.abs(D.vatDue), { sym: true }), '#/reports/vat', 'الرصيد غير المسدد') : ''}
+      ${s.vat ? kpi(D.vatDue >= 0 ? `ضريبة مستحقة لل${taxAuth().slice(2)}` : 'ضريبة قابلة للاسترداد', money(Math.abs(D.vatDue), { sym: true }), '#/reports/vat', 'الرصيد غير المسدد') : ''}
       ${kpi('قيمة المخزون', money(stockValue, { sym: true }), '#/reports/stock', D.low.length ? `${D.low.length} صنف قارب على النفاد` : 'بالتكلفة المتوسطة')}
     </div>
     <div class="card" style="margin-top:14px"><div class="card-h"><h3>الإيرادات والمصروفات — آخر ستة أشهر</h3><a class="small" href="#/reports/income">قائمة الدخل ←</a></div><div data-chart></div></div>

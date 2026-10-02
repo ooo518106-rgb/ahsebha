@@ -25,7 +25,7 @@
   "screenshots": [
     { "src": "store/phone-1.jpg", "sizes": "1080x1920", "type": "image/jpeg", "form_factor": "narrow", "label": "لوحة التحكم: المبيعات والأرباح والنقدية" },
     { "src": "store/phone-2.jpg", "sizes": "1080x1920", "type": "image/jpeg", "form_factor": "narrow", "label": "الكاشير: بيع سريع بالباركود" },
-    { "src": "store/phone-3.jpg", "sizes": "1080x1920", "type": "image/jpeg", "form_factor": "narrow", "label": "فاتورة ضريبية بالعربي والإنجليزي مع رمز QR" },
+    { "src": "store/phone-3.jpg", "sizes": "1080x1920", "type": "image/jpeg", "form_factor": "narrow", "label": "فاتورة ضريبية بالعربي والإنجليزي" },
     { "src": "store/phone-4.jpg", "sizes": "1080x1920", "type": "image/jpeg", "form_factor": "narrow", "label": "قراءة الإيصال بالكاميرا وتعبئة المصروف" },
     { "src": "store/phone-5.jpg", "sizes": "1080x1920", "type": "image/jpeg", "form_factor": "narrow", "label": "قائمة الدخل وكل التقارير المالية" },
     { "src": "store/wide-1.jpg", "sizes": "1920x1080", "type": "image/jpeg", "form_factor": "wide", "label": "لوحة التحكم" },

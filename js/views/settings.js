@@ -3,7 +3,7 @@ import * as store from '../store.js';
 import { COUNTRIES, CURRENCIES, validSaudiVat, isDate, num, payrollRates } from '../core.js';
 import { html, raw, fmtDate, toast, confirmBox, modal, $, showErrors, field, MONTHS, attr } from '../ui.js';
 import { go, guard, setTitle } from '../nav.js';
-import { head, S } from './common.js';
+import { head, S, ssName } from './common.js';
 import { downloadBackup, downloadFullBackup, restoreFile, loadDemo } from './home.js';
 import { can } from '../auth.js';
 
@@ -79,7 +79,7 @@ export function view({ root }) {
       </div>
       <p class="muted small" style="margin-top:10px">المستودعات تتابع كمية كل صنف في كل مكان مع تحويلات بينها. الفروع (مراكز التكلفة) تُختار في الفواتير والمصروفات والرواتب، وتظهر قائمة الدخل لكل فرع.</p></div>
 
-    <div class="card" style="margin-top:14px"><div class="card-h"><h3>💼 الرواتب والتأمينات الاجتماعية</h3><span class="muted small">${s.payroll ? 'نسب معدّلة' : 'النسب الافتراضية للدولة'}</span></div>
+    <div class="card" style="margin-top:14px"><div class="card-h"><h3>💼 الرواتب و${ssName()}</h3><span class="muted small">${s.payroll ? 'نسب معدّلة' : 'النسب الافتراضية للدولة'}</span></div>
       <form class="form-grid" data-payroll novalidate>
         ${field('حصة الموظف المواطن %', html`<input class="inp" name="citizenEmp" type="text" inputmode="decimal" data-num value="${payrollRates(s).citizenEmp}">`)}
         ${field('حصة المنشأة عن المواطن %', html`<input class="inp" name="citizenCo" type="text" inputmode="decimal" data-num value="${payrollRates(s).citizenCo}">`)}
@@ -87,7 +87,7 @@ export function view({ root }) {
         ${field('حصة المنشأة عن الوافد %', html`<input class="inp" name="expatCo" type="text" inputmode="decimal" data-num value="${payrollRates(s).expatCo}">`)}
         ${field('الحد الأعلى للأجر الخاضع', html`<input class="inp" name="cap" type="text" inputmode="decimal" data-num value="${payrollRates(s).cap || ''}" placeholder="بدون حد">`)}
         ${field('الأجر الخاضع', html`<select class="inp" name="base">${[['bh', 'الأساسي + السكن'], ['basic', 'الأساسي فقط'], ['gross', 'كل الأجر الثابت']].map(([k, l]) => html`<option value="${k}" ${k === payrollRates(s).base ? raw('selected') : ''}>${l}</option>`)}</select>`)}
-        <p class="muted small span-all">تتغير النسب من وقت لآخر؛ تأكد منها من موقع التأمينات الاجتماعية في دولتك قبل إصدار المسير.</p>
+        <p class="muted small span-all">تتغير النسب من وقت لآخر؛ تأكد منها من موقع ${ssName()} في دولتك قبل إصدار المسير.</p>
         <div class="dlg-actions span-all"><button class="btn btn-primary btn-sm">حفظ النسب</button>${s.payroll ? html`<button type="button" class="btn btn-ghost btn-sm" data-payroll-reset>نسب الدولة الافتراضية</button>` : ''}</div>
       </form></div>
 

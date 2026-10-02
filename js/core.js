@@ -105,8 +105,14 @@ export const CONTROL_ACCOUNTS = ['ar', 'ap', 'inv'];
 const grp = (id, code, name, type, parent) => ({ id, code, name, type, parent: parent || null, group: true, sys: true });
 const acc = (id, code, name, type, parent, extra) => ({ id, code, name, type, parent, group: false, ...extra });
 
-export function defaultAccounts() {
+// أسماء تختلف حسب الدولة: الأردن «الضمان الاجتماعي» و«دائرة ضريبة الدخل والمبيعات»
+const LOCAL_ACCOUNT_NAMES = {
+  JO: { vdue: 'ضريبة مبيعات مستحقة للدائرة', gosi_pay: 'اشتراكات الضمان الاجتماعي المستحقة', e_gosi: 'الضمان الاجتماعي (حصة المنشأة)' },
+};
+
+export function defaultAccounts(country) {
   const S = { sys: true };
+  const names = LOCAL_ACCOUNT_NAMES[country] || {};
   return [
     grp('g1', '1', 'الأصول', 'asset'),
     grp('g11', '11', 'الأصول المتداولة', 'asset', 'g1'),
@@ -162,7 +168,7 @@ export function defaultAccounts() {
     acc('e_dep', '5290', 'مصروف الإهلاك', 'expense', 'g52', S),
     acc('e_gosi', '5291', 'التأمينات الاجتماعية (حصة المنشأة)', 'expense', 'g52', S),
     acc('e_eos', '5292', 'مكافأة نهاية الخدمة', 'expense', 'g52', S),
-  ];
+  ].map((a) => (names[a.id] ? { ...a, name: names[a.id] } : a));
 }
 
 export const accountMap = (db) => new Map((db.accounts || []).map((a) => [a.id, a]));
@@ -359,6 +365,14 @@ export function eosAward(emp, { to, reason = 'end', country = 'SA', dec = 2 } = 
   if (!isDate(from) || !isDate(to) || to <= from) return { years: 0, wage: 0, full: 0, amount: 0 };
   const years = daysBetween(from, to) / 365;
   const R = (x) => round(x, dec);
+  // الأردن (قانون العمل، المادة 32): المشمول بالضمان الاجتماعي ما إله مكافأة من صاحب العمل،
+  // وغير المشمول إله أجر شهر عن كل سنة خدمة وكسورها على آخر أجر، إلا المفصول بموجب المادة 28
+  if (country === 'JO') {
+    const wage = num(emp.basic) + num(emp.housing) + num(emp.transport) + num(emp.other);
+    if (emp.gosi !== false) return { years, wage, full: 0, amount: 0, share: 1, covered: true };
+    const share = reason === 'dismiss' ? 0 : 1;
+    return { years, wage, full: R(wage * years), amount: R(wage * years * share), share };
+  }
   if (country === 'AE') {
     const wage = num(emp.basic);
     const daily = wage / 30;
@@ -374,13 +388,14 @@ export function eosAward(emp, { to, reason = 'end', country = 'SA', dec = 2 } = 
 
 // رصيد سلف كل موظف: سندات الصرف على حساب السلف ناقص ما استُرد في المسيرات
 export function employeeAdvances(db) {
+  const dec = currencyInfo(db.settings && db.settings.currency).dec;
   const m = new Map();
   for (const d of db.docs || []) {
     if (d.type === 'payment' && d.account === 'adv' && d.employee) m.set(d.employee, (m.get(d.employee) || 0) + num(d.amount));
     if (d.type === 'receipt' && d.account === 'adv' && d.employee) m.set(d.employee, (m.get(d.employee) || 0) - num(d.amount));
     if (d.type === 'payroll') for (const l of d.lines || []) if (l.employee && num(l.advance)) m.set(l.employee, (m.get(l.employee) || 0) - num(l.advance));
   }
-  for (const [k, v] of m) m.set(k, round(v, 2));
+  for (const [k, v] of m) m.set(k, round(v, dec));
   return m;
 }
 
@@ -1247,7 +1262,7 @@ export function zakatEstimate(db, books, { to, calendar = 'hijri' } = {}) {
   ];
   const liabilities = [
     { key: 'ap', name: 'ذمم الموردين', amount: R(Math.max(0, -bal('ap'))) },
-    { key: 'vat', name: 'ضريبة مستحقة للهيئة', amount: R(Math.max(0, -(bal('vout') + bal('vin') + bal('vdue')))) },
+    { key: 'vat', name: 'ضريبة مستحقة', amount: R(Math.max(0, -(bal('vout') + bal('vin') + bal('vdue')))) },
     { key: 'wages', name: 'رواتب مستحقة', amount: R(Math.max(0, -bal('wages'))) },
     { key: 'chq_out', name: 'شيكات مؤجلة الدفع', amount: R(Math.max(0, -bal('chq_out'))) },
     { key: 'loans', name: 'القروض والتمويل', amount: R(Math.max(0, -bal('loans'))) },

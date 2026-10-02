@@ -3,11 +3,11 @@ import * as store from '../store.js';
 import { docNo, num, round, isDate, validateDoc, payrollRates, gosiFor, payLine, payrollTotals, eosAward, employeeAdvances, monthEnd, addMonths, balances, tafqeet, daysBetween } from '../core.js';
 import { html, raw, money, fmtDate, toast, confirmBox, modal, $, field, empty, showErrors, exportTable, download, MONTHS } from '../ui.js';
 import { go, guard, setTitle, docHref } from '../nav.js';
-import { head, bindRows, S, dec, today, moneyOptions, moneyList, accName, printPaper, entryTable, csvName, docLocked, lockedNote, lockedPage, countAr, YEARS, MONTHS_N } from './common.js';
+import { head, bindRows, S, dec, today, moneyOptions, moneyList, accName, printPaper, entryTable, csvName, docLocked, lockedNote, lockedPage, countAr, YEARS, MONTHS_N, ssName, ssWord, ssShort } from './common.js';
 
 const clone = (x) => JSON.parse(JSON.stringify(x));
 const monthLabel = (p) => (p ? `${MONTHS[Number(p.slice(5, 7)) - 1]} ${p.slice(0, 4)}` : '');
-const natLabels = () => (S().country === 'SA' ? ['سعودي', 'غير سعودي'] : ['مواطن', 'وافد']);
+const natLabels = () => (S().country === 'SA' ? ['سعودي', 'غير سعودي'] : S().country === 'JO' ? ['أردني', 'غير أردني'] : ['مواطن', 'وافد']);
 const fixedPay = (e) => round(num(e.basic) + num(e.housing) + num(e.transport) + num(e.other), dec());
 const serviceText = (from, to) => {
   if (!isDate(from)) return '—';
@@ -34,18 +34,18 @@ export function employees({ root }) {
   root.innerHTML = String(html`${head('الموظفون', { sub: `${active.length} موظف على رأس العمل`, actions: html`<a class="btn btn-ghost" href="#/payroll">💼 مسيرات الرواتب</a><a class="btn btn-primary" href="#/employees/new">➕ موظف جديد</a>` })}
     ${list.length ? html`<div class="grid g4" style="margin-bottom:14px">
       <div class="kpi"><span class="kpi-l">الرواتب الشهرية</span><span class="kpi-v">${money(monthly, { sym: true })}</span><span class="kpi-s">الأساسي والبدلات الثابتة</span></div>
-      <div class="kpi"><span class="kpi-l">التأمينات على المنشأة شهرياً</span><span class="kpi-v">${money(gosiCo, { sym: true })}</span></div>
+      <div class="kpi"><span class="kpi-l">${ssWord()} على المنشأة شهرياً</span><span class="kpi-v">${money(gosiCo, { sym: true })}</span></div>
       <div class="kpi"><span class="kpi-l">مكافأة نهاية الخدمة المستحقة</span><span class="kpi-v">${money(eos, { sym: true })}</span><span class="kpi-s">المسجّل في الحسابات ${money(booked)}</span></div>
       <div class="kpi"><span class="kpi-l">السلف القائمة</span><span class="kpi-v">${money([...adv.values()].reduce((x, v) => x + Math.max(0, v), 0), { sym: true })}</span></div></div>
     ${Math.abs(eos - booked) >= 1 ? html`<p class="note note-info" style="margin-bottom:12px">مخصص نهاية الخدمة المسجل يختلف عن المستحق بـ ${money(eos - booked, { sym: true })}. <button class="btn btn-ghost btn-sm" data-eos>📒 تسجيل الفرق بقيد</button></p>` : ''}
     <div class="toolbar"><span class="grow"></span><button class="btn btn-ghost btn-sm" data-csv>⬇️ Excel</button></div>
-    <div class="tbl-wrap"><table class="tbl" data-table><thead><tr><th>الموظف</th><th class="hide-sm">الوظيفة</th>${db.centers.length ? html`<th class="hide-sm">الفرع</th>` : ''}<th class="num">الراتب</th><th class="num hide-sm">التأمينات (موظف/منشأة)</th><th class="num hide-sm">السلف</th><th class="hide-sm">الخدمة</th></tr></thead><tbody>
+    <div class="tbl-wrap"><table class="tbl" data-table><thead><tr><th>الموظف</th><th class="hide-sm">الوظيفة</th>${db.centers.length ? html`<th class="hide-sm">الفرع</th>` : ''}<th class="num">الراتب</th><th class="num hide-sm">${ssWord()} (موظف/منشأة)</th><th class="num hide-sm">السلف</th><th class="hide-sm">الخدمة</th></tr></thead><tbody>
       ${list.map((e) => { const g = gosiFor(e, rates, dec()); return html`<tr data-href="#/employees/${e.id}"><td><b>${e.name}</b>${e.active === false || (e.leaveDate && e.leaveDate < t) ? html` <span class="badge badge-muted">منتهية خدمته</span>` : ''}<div class="muted small">${e.nationality === 'expat' ? natLabels()[1] : natLabels()[0]}</div></td>
         <td class="hide-sm">${e.job || ''}</td>${db.centers.length ? html`<td class="hide-sm">${centerName(e.cc)}</td>` : ''}<td class="num">${money(fixedPay(e))}</td>
         <td class="num hide-sm">${money(g.gosiEmp)} / ${money(g.gosiCo)}</td><td class="num hide-sm">${adv.get(e.id) ? money(adv.get(e.id)) : '—'}</td><td class="hide-sm">${serviceText(e.joinDate, e.leaveDate || t)}</td></tr>`; })}
     </tbody></table></div>`
-    : empty('👷', 'لا يوجد موظفون', 'أضف موظفيك برواتبهم وبدلاتهم، ثم أنشئ مسير الرواتب الشهري بكبسة: يحسب التأمينات والسلف والصافي ويسجل القيد.', html`<a class="btn btn-primary" href="#/employees/new">➕ موظف جديد</a>`)}
-    <p class="muted small" style="margin-top:12px">نسب التأمينات من <a href="#/settings">الإعدادات</a> ← الرواتب والتأمينات. تأكد دائماً من النسب الحالية لدى الجهة الرسمية.</p>`);
+    : empty('👷', 'لا يوجد موظفون', `أضف موظفيك برواتبهم وبدلاتهم، ثم أنشئ مسير الرواتب الشهري بكبسة: يحسب ${ssWord()} والسلف والصافي ويسجل القيد.`, html`<a class="btn btn-primary" href="#/employees/new">➕ موظف جديد</a>`)}
+    <p class="muted small" style="margin-top:12px">نسب ${ssWord()} من <a href="#/settings">الإعدادات</a> ← الرواتب و${ssName()}. تأكد دائماً من النسب الحالية لدى الجهة الرسمية.</p>`);
   bindRows(root);
   const csv = $('[data-csv]', root);
   if (csv) csv.onclick = () => exportTable($('[data-table]', root), csvName('الموظفون'));
@@ -89,11 +89,11 @@ export function employeeForm({ root, params }) {
         ${field('بدل السكن', html`<input class="inp" name="housing" ${na} value="${e.housing}">`)}
         ${field('بدل النقل', html`<input class="inp" name="transport" ${na} value="${e.transport}">`)}
         ${field('بدلات أخرى ثابتة', html`<input class="inp" name="other" ${na} value="${e.other}">`)}
-        <label class="check span-all"><input type="checkbox" name="gosi" ${e.gosi !== false ? raw('checked') : ''}> مشترك في التأمينات الاجتماعية <span class="muted small" data-gosi></span></label>
+        <label class="check span-all"><input type="checkbox" name="gosi" ${e.gosi !== false ? raw('checked') : ''}> مشترك في ${ssName()} <span class="muted small" data-gosi></span></label>
       </div></div>
       <div class="card"><div class="card-h"><h3>🏦 الحساب البنكي (لملف تحويل الرواتب)</h3></div><div class="form-grid">
         ${field('البنك', html`<input class="inp" name="bank" value="${e.bank || ''}">`)}
-        <div class="span2">${field('رقم الآيبان', html`<input class="inp" name="iban" data-f="iban" value="${e.iban || ''}" dir="ltr" placeholder="SA0000000000000000000000">`)}</div>
+        <div class="span2">${field('رقم الآيبان', html`<input class="inp" name="iban" data-f="iban" value="${e.iban || ''}" dir="ltr" placeholder="${S().country === 'JO' ? 'JO00ABCD0000000000000000000000' : 'SA0000000000000000000000'}">`)}</div>
       </div></div>
       <div class="card"><label class="check"><input type="checkbox" name="active" ${e.active !== false ? raw('checked') : ''}> نشط (يظهر في مسيرات الرواتب)</label>
         <div style="margin-top:10px">${field('ملاحظات', html`<textarea class="inp" name="notes" rows="2">${e.notes || ''}</textarea>`)}</div></div>
@@ -141,23 +141,23 @@ export function employeeShow({ root, params, query }) {
   const runs = db.docs.filter((d) => d.type === 'payroll' && (d.lines || []).some((l) => l.employee === e.id)).sort((a, b) => b.period.localeCompare(a.period));
   const advDocs = db.docs.filter((d) => d.employee === e.id && d.account === 'adv').sort((a, b) => b.date.localeCompare(a.date));
   const eosTo = query.to && isDate(query.to) ? query.to : e.leaveDate || t;
-  const reason = query.reason === 'resign' ? 'resign' : 'end';
+  const reason = ['resign', 'dismiss'].includes(query.reason) ? query.reason : 'end';
   const eos = eosAward(e, { to: eosTo, reason, country: s.country, dec: dec() });
   root.innerHTML = String(html`${head(e.name, { sub: [e.job, e.nationality === 'expat' ? natLabels()[1] : natLabels()[0], e.cc ? centerName(e.cc) : ''].filter(Boolean).join(' · '),
     actions: html`<button class="btn btn-primary" data-adv>💸 سلفة</button><a class="btn btn-ghost" href="#/employees/${e.id}/edit">✏️ تعديل</a><button class="btn btn-text-danger" data-del>🗑️ حذف</button>` })}
     <div class="grid g4" style="margin-bottom:14px">
       <div class="kpi"><span class="kpi-l">الراتب الشهري</span><span class="kpi-v">${money(fixedPay(e), { sym: true })}</span><span class="kpi-s">أساسي ${money(e.basic)}</span></div>
-      <div class="kpi"><span class="kpi-l">التأمينات شهرياً</span><span class="kpi-v">${money(g.gosiEmp + g.gosiCo, { sym: true })}</span><span class="kpi-s">موظف ${money(g.gosiEmp)} · منشأة ${money(g.gosiCo)}</span></div>
+      <div class="kpi"><span class="kpi-l">${ssWord()} شهرياً</span><span class="kpi-v">${money(g.gosiEmp + g.gosiCo, { sym: true })}</span><span class="kpi-s">موظف ${money(g.gosiEmp)} · منشأة ${money(g.gosiCo)}</span></div>
       <div class="kpi"><span class="kpi-l">رصيد السلف</span><span class="kpi-v ${adv > 0 ? 'neg' : ''}">${money(adv, { sym: true })}</span></div>
       <div class="kpi"><span class="kpi-l">مدة الخدمة</span><span class="kpi-v" style="font-size:1.05rem">${serviceText(e.joinDate, e.leaveDate || t)}</span><span class="kpi-s">منذ ${fmtDate(e.joinDate)}</span></div>
     </div>
     <div class="card"><div class="card-h"><h3>🧮 مكافأة نهاية الخدمة</h3></div>
       <div class="toolbar"><label class="inline small"><span>حتى تاريخ</span><input class="inp" type="date" data-eos-to value="${eosTo}"></label>
-        <select class="inp" data-eos-reason>${[['end', 'انتهاء العقد أو إنهاء من صاحب العمل'], ['resign', 'استقالة الموظف']].map(([k, l]) => html`<option value="${k}" ${k === reason ? raw('selected') : ''}>${l}</option>`)}</select></div>
+        <select class="inp" data-eos-reason>${(s.country === 'JO' ? [['end', 'انتهاء الخدمة أو الاستقالة'], ['dismiss', 'فصل بموجب المادة 28']] : [['end', 'انتهاء العقد أو إنهاء من صاحب العمل'], ['resign', 'استقالة الموظف']]).map(([k, l]) => html`<option value="${k}" ${k === reason ? raw('selected') : ''}>${l}</option>`)}</select></div>
       <div class="grid g3"><div class="kpi"><span class="kpi-l">الأجر المعتمد</span><span class="kpi-v">${money(eos.wage)}</span><span class="kpi-s">${s.country === 'AE' ? 'الأجر الأساسي' : 'الأساسي والبدلات الثابتة'}</span></div>
         <div class="kpi"><span class="kpi-l">سنوات الخدمة</span><span class="kpi-v">${eos.years.toFixed(2)}</span></div>
-        <div class="kpi"><span class="kpi-l">المكافأة</span><span class="kpi-v pos">${money(eos.amount, { sym: true })}</span>${eos.share != null && eos.share < 1 ? html`<span class="kpi-s">${eos.share === 0 ? 'لا يستحق (أقل من سنتين)' : `${eos.share === 1 / 3 ? 'ثلث' : 'ثلثا'} المكافأة الكاملة ${money(eos.full)}`}</span>` : ''}</div></div>
-      <p class="muted small" style="margin-top:8px">${s.country === 'AE' ? 'حسب قانون العمل الإماراتي: 21 يوماً عن كل سنة من أول خمس سنوات و30 يوماً لما بعدها، بحد أقصى أجر سنتين.' : 'حسب نظام العمل السعودي (المادتان 84 و85): نصف شهر عن كل سنة من أول خمس سنوات وشهر كامل لما بعدها، وتُخفض في الاستقالة.'} الحساب تقديري؛ راجع العقد والأنظمة المحدثة.</p></div>
+        <div class="kpi"><span class="kpi-l">المكافأة</span><span class="kpi-v pos">${money(eos.amount, { sym: true })}</span>${eos.covered ? html`<span class="kpi-s">مشمول بـ${ssName()}</span>` : eos.share != null && eos.share < 1 ? html`<span class="kpi-s">${eos.share === 0 ? (s.country === 'JO' ? 'لا يستحق (المادة 28)' : 'لا يستحق (أقل من سنتين)') : `${eos.share === 1 / 3 ? 'ثلث' : 'ثلثا'} المكافأة الكاملة ${money(eos.full)}`}</span>` : ''}</div></div>
+      <p class="muted small" style="margin-top:8px">${s.country === 'JO' ? 'حسب قانون العمل الأردني (المادة 32): لا يستحق الموظف المشمول بالضمان الاجتماعي مكافأة نهاية خدمة من صاحب العمل، ويستحق غير المشمول أجر شهر عن كل سنة خدمة وكسورها على أساس آخر أجر.' : s.country === 'AE' ? 'حسب قانون العمل الإماراتي: 21 يوماً عن كل سنة من أول خمس سنوات و30 يوماً لما بعدها، بحد أقصى أجر سنتين.' : 'حسب نظام العمل السعودي (المادتان 84 و85): نصف شهر عن كل سنة من أول خمس سنوات وشهر كامل لما بعدها، وتُخفض في الاستقالة.'} الحساب تقديري؛ راجع العقد والأنظمة المحدثة.</p></div>
     <div class="grid g2" style="margin-top:14px">
       <div class="card"><div class="card-h"><h3>💼 الرواتب</h3></div>${runs.length ? html`<div class="list-mini">${runs.slice(0, 12).map((d) => { const i = d.lines.findIndex((l) => l.employee === e.id); const x = payLine(d.lines[i], dec());
         return html`<a href="${docHref(d)}"><span>${monthLabel(d.period)} <span class="meta">${docNo(d, s)}</span></span><b>${money(x.net)}</b></a>`; })}</div>` : html`<p class="muted small">لا توجد مسيرات بعد.</p>`}</div>
@@ -198,16 +198,17 @@ export function list(type, { root }) {
   const db = store.getDb();
   const s = S();
   const rows = db.docs.filter((d) => d.type === 'payroll').sort((a, b) => b.period.localeCompare(a.period) || b.no - a.no);
-  root.innerHTML = String(html`${head('مسيرات الرواتب', { sub: 'رواتب كل شهر مع التأمينات والسلف، وقيدها تلقائياً', actions: html`<a class="btn btn-ghost" href="#/employees">👷 الموظفون</a><a class="btn btn-primary" href="#/payroll/new">➕ مسير جديد</a>` })}
+  root.innerHTML = String(html`${head('مسيرات الرواتب', { sub: `رواتب كل شهر مع ${ssWord()} والسلف، وقيدها تلقائياً`, actions: html`<a class="btn btn-ghost" href="#/employees">👷 الموظفون</a><a class="btn btn-primary" href="#/payroll/new">➕ مسير جديد</a>` })}
     ${rows.length ? html`<div class="tbl-wrap"><table class="tbl"><thead><tr><th>الرقم</th><th>الشهر</th><th class="hide-sm">التاريخ</th><th class="num hide-sm">الموظفون</th><th class="num">الإجمالي</th><th class="num">الصافي</th><th>الصرف</th></tr></thead><tbody>
       ${rows.map((d) => { const P = payrollTotals(d, dec()); return html`<tr data-href="${docHref(d)}"><td dir="ltr" class="nowrap"><b>${docNo(d, s)}</b></td><td>${monthLabel(d.period)}</td><td class="hide-sm">${fmtDate(d.date)}</td>
         <td class="num hide-sm">${d.lines.length}</td><td class="num">${money(P.gross)}</td><td class="num"><b>${money(P.net)}</b></td><td>${d.money ? html`<span class="badge badge-ok">${accName(d.money)}</span>` : html`<span class="badge badge-warn">مستحق</span>`}</td></tr>`; })}
     </tbody></table></div>`
-    : empty('💼', 'لا توجد مسيرات رواتب', store.getDb().employees.length ? 'أنشئ مسير الشهر: يعبّأ بالموظفين النشطين ورواتبهم، وتُحسب التأمينات تلقائياً.' : 'أضف الموظفين أولاً، ثم أنشئ مسير الرواتب الشهري.', html`<a class="btn btn-primary" href="${store.getDb().employees.length ? '#/payroll/new' : '#/employees/new'}">${store.getDb().employees.length ? '➕ مسير جديد' : '➕ موظف جديد'}</a>`)}`);
+    : empty('💼', 'لا توجد مسيرات رواتب', store.getDb().employees.length ? `أنشئ مسير الشهر: يعبّأ بالموظفين النشطين ورواتبهم، وتُحسب ${ssWord()} تلقائياً.` : 'أضف الموظفين أولاً، ثم أنشئ مسير الرواتب الشهري.', html`<a class="btn btn-primary" href="${store.getDb().employees.length ? '#/payroll/new' : '#/employees/new'}">${store.getDb().employees.length ? '➕ مسير جديد' : '➕ موظف جديد'}</a>`)}`);
   bindRows(root);
 }
 
-const FIELDS = [['basic', 'الأساسي'], ['housing', 'السكن'], ['transport', 'النقل'], ['other', 'بدلات'], ['additions', 'إضافي ومكافآت'], ['absence', 'غياب وخصم'], ['advance', 'سلفة'], ['gosiEmp', 'تأمينات الموظف'], ['gosiCo', 'تأمينات المنشأة']];
+const FIELDS = [['basic', 'الأساسي'], ['housing', 'السكن'], ['transport', 'النقل'], ['other', 'بدلات'], ['additions', 'إضافي ومكافآت'], ['absence', 'غياب وخصم'], ['advance', 'سلفة'], ['gosiEmp', 'الموظف'], ['gosiCo', 'المنشأة']];
+const fieldLabel = (k, l) => (k === 'gosiEmp' || k === 'gosiCo' ? `${ssShort()} ${l}` : l);
 const lineFor = (e, rates) => ({ employee: e.id, name: e.name, basic: num(e.basic), housing: num(e.housing), transport: num(e.transport), other: num(e.other), additions: 0, absence: 0, advance: 0, ...gosiFor(e, rates, dec()) });
 
 export function form(type, { root, params, query }) {
@@ -238,7 +239,7 @@ export function form(type, { root, params, query }) {
         <div class="span-all">${field('ملاحظات', html`<input class="inp" data-k="notes" value="${d.notes || ''}">`)}</div>
       </div></div>
       <div class="card" style="margin-top:14px"><div class="card-h"><h3>الموظفون</h3><span class="inline"><select class="inp" data-add-emp style="max-width:220px"></select></span></div>
-        <div class="tbl-wrap"><table class="tbl pay-tbl"><thead><tr><th>الموظف</th>${FIELDS.map(([, l]) => html`<th class="num">${l}</th>`)}<th class="num">الصافي</th><th></th></tr></thead><tbody data-lines></tbody><tfoot data-foot></tfoot></table></div>
+        <div class="tbl-wrap"><table class="tbl pay-tbl"><thead><tr><th>الموظف</th>${FIELDS.map(([k, l]) => html`<th class="num">${fieldLabel(k, l)}</th>`)}<th class="num">الصافي</th><th></th></tr></thead><tbody data-lines></tbody><tfoot data-foot></tfoot></table></div>
         <small class="fld-e" data-err="lines" hidden></small></div>
       <div class="form-actions sticky-actions"><button class="btn btn-primary">💾 حفظ المسير</button></div>
     </form>`);
@@ -313,21 +314,21 @@ export function show(type, { root, params }) {
   const P = payrollTotals(d, dec());
   const locked = docLocked(d);
   const gosiTotal = round(P.gosiEmp + P.gosiCo, dec());
-  const table = html`<table class="tbl" data-table><thead><tr><th>الموظف</th><th class="num">الأساسي</th><th class="num">البدلات</th><th class="num">إضافي</th><th class="num">غياب</th><th class="num">الإجمالي</th><th class="num">التأمينات</th><th class="num">السلفة</th><th class="num">الصافي</th></tr></thead><tbody>
+  const table = html`<table class="tbl" data-table><thead><tr><th>الموظف</th><th class="num">الأساسي</th><th class="num">البدلات</th><th class="num">إضافي</th><th class="num">غياب</th><th class="num">الإجمالي</th><th class="num">${ssWord()}</th><th class="num">السلفة</th><th class="num">الصافي</th></tr></thead><tbody>
     ${d.lines.map((l, i) => { const x = P.lines[i]; return html`<tr><td>${l.name}</td><td class="num">${money(l.basic)}</td><td class="num">${money(num(l.housing) + num(l.transport) + num(l.other))}</td><td class="num">${money(l.additions || 0)}</td><td class="num">${money(l.absence || 0)}</td>
       <td class="num">${money(x.gross)}</td><td class="num">${money(x.gosiEmp)}</td><td class="num">${money(x.advance)}</td><td class="num"><b>${money(x.net)}</b></td></tr>`; })}
   </tbody><tfoot><tr><td>المجموع</td><td></td><td></td><td></td><td></td><td class="num">${money(P.gross)}</td><td class="num">${money(P.gosiEmp)}</td><td class="num">${money(P.advance)}</td><td class="num">${money(P.net)}</td></tr></tfoot></table>`;
   root.innerHTML = String(html`${head(`مسير رواتب ${monthLabel(d.period)}`, { sub: html`<span dir="ltr">${no}</span> · ${fmtDate(d.date)} · ${d.money ? 'صُرف من ' + accName(d.money) : 'رواتب مستحقة لم تُصرف'}`,
     actions: html`<button class="btn btn-primary" data-print>🖨️ طباعة المسير</button><button class="btn btn-ghost" data-slips>🧾 قسائم الرواتب</button><button class="btn btn-ghost" data-bank>⬇️ ملف البنك</button>
       ${d.money ? '' : html`<a class="btn btn-ghost" href="#/payments/new?account=wages&amount=${P.net}">💵 صرف الرواتب</a>`}
-      ${gosiTotal ? html`<a class="btn btn-ghost" href="#/payments/new?account=gosi_pay&amount=${gosiTotal}">🏛️ سداد التأمينات</a>` : ''}
+      ${gosiTotal ? html`<a class="btn btn-ghost" href="#/payments/new?account=gosi_pay&amount=${gosiTotal}">🏛️ سداد ${ssWord()}</a>` : ''}
       ${locked ? '' : html`<a class="btn btn-ghost" href="#/payroll/${d.id}/edit">✏️ تعديل</a><button class="btn btn-text-danger" data-del>🗑️ حذف</button>`}` })}
     ${locked ? lockedNote(d) : ''}
     <div class="grid g4" style="margin-bottom:14px">
       <div class="kpi"><span class="kpi-l">إجمالي الرواتب</span><span class="kpi-v">${money(P.gross, { sym: true })}</span><span class="kpi-s">${d.lines.length} موظف</span></div>
-      <div class="kpi"><span class="kpi-l">المستقطعات</span><span class="kpi-v">${money(P.deductions, { sym: true })}</span><span class="kpi-s">تأمينات ${money(P.gosiEmp)} · سلف ${money(P.advance)}</span></div>
+      <div class="kpi"><span class="kpi-l">المستقطعات</span><span class="kpi-v">${money(P.deductions, { sym: true })}</span><span class="kpi-s">${ssShort()} ${money(P.gosiEmp)} · سلف ${money(P.advance)}</span></div>
       <div class="kpi"><span class="kpi-l">صافي الصرف</span><span class="kpi-v">${money(P.net, { sym: true })}</span></div>
-      <div class="kpi"><span class="kpi-l">تأمينات على المنشأة</span><span class="kpi-v">${money(P.gosiCo, { sym: true })}</span><span class="kpi-s">المستحق للتأمينات ${money(gosiTotal)}</span></div></div>
+      <div class="kpi"><span class="kpi-l">${ssShort()} على المنشأة</span><span class="kpi-v">${money(P.gosiCo, { sym: true })}</span><span class="kpi-s">المستحق لـ${ssName()} ${money(gosiTotal)}</span></div></div>
     <div class="tbl-wrap">${table}</div>
     <details class="card" style="margin-top:14px"><summary style="cursor:pointer;font-weight:800">📒 القيد المحاسبي</summary><div style="margin-top:12px">${entryTable(B.entries.get(d.id))}</div></details>`);
   $('[data-print]', root).onclick = () => printPaper(html`<div class="paper pp-report"><div class="pp-head"><div><h2 style="font-size:18px;font-weight:900">${s.name || ''}</h2></div><div class="pp-title"><h1>مسير رواتب ${monthLabel(d.period)}</h1><div class="en" dir="ltr">${no}</div></div></div>
@@ -360,7 +361,7 @@ function slip(d, l, x) {
         ${row('الراتب الأساسي', l.basic)}${row('بدل السكن', l.housing)}${row('بدل النقل', l.transport)}${row('بدلات أخرى', l.other)}${row('إضافي ومكافآت', l.additions)}${row('خصم غياب', -num(l.absence))}
         <tr><td><b>الإجمالي</b></td><td class="num"><b>${money(x.gross)}</b></td></tr></tbody></table>
       <table class="pp-lines"><thead><tr><th>الاستقطاعات</th><th class="num">المبلغ</th></tr></thead><tbody>
-        ${row('التأمينات الاجتماعية', l.gosiEmp)}${row('استرداد سلفة', l.advance)}
+        ${row(ssName(), l.gosiEmp)}${row('استرداد سلفة', l.advance)}
         <tr><td><b>مجموع الاستقطاعات</b></td><td class="num"><b>${money(x.deductions)}</b></td></tr></tbody></table>
     </div>
     <div class="pp-box" style="display:flex;justify-content:space-between;margin-top:10px"><b>صافي الراتب</b><span class="pp-amount">${money(x.net)}</span></div>

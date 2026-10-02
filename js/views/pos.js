@@ -310,12 +310,12 @@ export function pos({ root }) {
       title: 'إعدادات الكاشير',
       body: html`<form class="form-grid" novalidate>
         ${field('حساب النقد', html`<select class="inp" name="posCash">${accs.money.map((a) => html`<option value="${a.id}" ${a.id === accs.cash.id ? raw('selected') : ''}>${a.name}</option>`)}</select>`)}
-        ${field('حساب البطاقة / مدى', html`<select class="inp" name="posCard">${accs.money.map((a) => html`<option value="${a.id}" ${a.id === accs.card.id ? raw('selected') : ''}>${a.name}</option>`)}</select>`)}
+        ${field(S().country === 'SA' ? 'حساب البطاقة / مدى' : 'حساب البطاقة وكليك', html`<select class="inp" name="posCard">${accs.money.map((a) => html`<option value="${a.id}" ${a.id === accs.card.id ? raw('selected') : ''}>${a.name}</option>`)}</select>`)}
         ${store.getDb().warehouses.length ? field('المستودع', html`<select class="inp" name="posWh">${store.getDb().warehouses.map((w) => html`<option value="${w.id}" ${w.id === (s.posWh || defaultWh()) ? raw('selected') : ''}>${w.name}</option>`)}</select>`) : ''}
         ${store.getDb().centers.length ? field('الفرع', html`<select class="inp" name="posCc"><option value="">— بدون —</option>${store.getDb().centers.map((c) => html`<option value="${c.id}" ${c.id === s.posCc ? raw('selected') : ''}>${c.name}</option>`)}</select>`) : ''}
         ${field('حجم الإيصال', html`<select class="inp" name="posPrintSize"><option value="receipt" ${s.posPrintSize !== 'a4' ? raw('selected') : ''}>حراري 80 مم</option><option value="a4" ${s.posPrintSize === 'a4' ? raw('selected') : ''}>A4</option></select>`)}
         <label class="check span-all"><input type="checkbox" name="posAutoPrint" ${s.posAutoPrint !== false ? raw('checked') : ''}> طباعة الإيصال تلقائياً بعد كل بيع</label>
-        <p class="muted small span-all">لإضافة حساب مدى أو محفظة: دليل الحسابات ← حساب جديد تحت «الأصول المتداولة» مع تفعيل «صندوق أو بنك».</p>
+        <p class="muted small span-all">لإضافة حساب ${S().country === 'SA' ? 'مدى' : 'بطاقات'} أو محفظة: دليل الحسابات ← حساب جديد تحت «الأصول المتداولة» مع تفعيل «صندوق أو بنك».</p>
         <div class="dlg-actions span-all"><button class="btn btn-primary">حفظ</button></div></form>`,
       onMount: (dlg, done) => {
         const f = $('form', dlg);

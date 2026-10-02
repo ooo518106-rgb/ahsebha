@@ -6,7 +6,7 @@ import {
 } from '../core.js';
 import { html, raw, money, qty, fmtDate, toast, confirmBox, empty, $, exportTable, attr } from '../ui.js';
 import { go, setTitle, docHref, withQuery } from '../nav.js';
-import { head, bindRows, today, S, dec, taxLabel, partyName, periodOf, periodBar, bindPeriod, periodLabel, printReport, csvName } from './common.js';
+import { head, bindRows, today, S, dec, taxLabel, partyName, periodOf, periodBar, bindPeriod, periodLabel, printReport, csvName, accName, taxAuth } from './common.js';
 
 const REPORTS = [
   { sec: 'القوائم المالية' },
@@ -185,21 +185,21 @@ function vat(ctx, r) {
       <tr class="strong"><td></td><td>إجمالي المشتريات</td><td class="num">${money(round(sumNet(V.purchase) + sumNet(V.expense), dec()))}</td><td class="num">${money(-sumNet(V.preturn))}</td><td class="num">${money(V.input)}</td></tr>
     </tbody><tfoot><tr><td></td><td>${V.net >= 0 ? 'صافي الضريبة المستحقة للسداد' : 'صافي الضريبة القابلة للاسترداد أو الترحيل'}</td><td></td><td></td><td class="num">${money(V.net)}</td></tr></tfoot></table></div>
     <div class="card" style="margin-top:14px"><div class="card-h"><h3>تسوية الضريبة وسدادها</h3></div>
-      ${settled ? html`<p>تم تسجيل قيد التسوية لهذه الفترة: <a href="${docHref(settled)}">${docNo(settled, s)}</a>. لسداد المبلغ للهيئة سجّل <a href="#/payments/new?account=vdue&amount=${Math.max(0, V.net)}">سند صرف</a> على حساب «ضريبة مستحقة للهيئة».</p>`
-        : html`<p class="muted small" style="margin-bottom:10px">بعد تقديم الإقرار، سجّل قيد التسوية: يُقفل حسابي ضريبة المبيعات والمشتريات للفترة ويُرحّل الصافي إلى «ضريبة مستحقة للهيئة»، ثم سجّل سند صرف عند السداد.</p>
+      ${settled ? html`<p>تم تسجيل قيد التسوية لهذه الفترة: <a href="${docHref(settled)}">${docNo(settled, s)}</a>. لسداد المبلغ لل${taxAuth().slice(2)} سجّل <a href="#/payments/new?account=vdue&amount=${Math.max(0, V.net)}">سند صرف</a> على حساب «${accName('vdue')}».</p>`
+        : html`<p class="muted small" style="margin-bottom:10px">بعد تقديم الإقرار، سجّل قيد التسوية: يُقفل حسابي ضريبة المبيعات والمشتريات للفترة ويُرحّل الصافي إلى «${accName('vdue')}»، ثم سجّل سند صرف عند السداد.</p>
           <button class="btn btn-primary btn-sm" data-settle ${per.from && per.to && (V.output || V.input) ? '' : raw('disabled')}>📒 إنشاء قيد تسوية الضريبة للفترة</button>`}</div>
     <details class="card" style="margin-top:14px"><summary style="cursor:pointer;font-weight:800">🗂️ المستندات المشمولة (${V.docs.length})</summary>
       <div class="tbl-wrap" style="margin-top:12px"><table class="tbl"><thead><tr><th>المستند</th><th>التاريخ</th><th>الطرف</th><th class="num">الصافي</th><th class="num">${taxLabel()}</th></tr></thead><tbody>
         ${V.docs.map((x) => { const sg = x.doc.type === 'sreturn' || x.doc.type === 'preturn' ? -1 : 1; return html`<tr data-href="${docHref(x.doc)}"><td>${DOC_TYPES[x.doc.type].name} <span dir="ltr" class="muted">${docNo(x.doc, s)}</span></td><td>${fmtDate(x.doc.date)}</td><td>${partyName(x.doc.party, x.doc.payee || '')}</td><td class="num">${money(sg * x.net)}</td><td class="num">${money(sg * x.vat)}</td></tr>`; })}
       </tbody></table></div></details>`;
-  frame(ctx, r, { per, body, note: 'التقرير مساعد لتعبئة الإقرار في بوابة الهيئة، ويعتمد على الفواتير والمصروفات المسجلة. راجع الأرقام قبل التقديم.' });
+  frame(ctx, r, { per, body, note: `التقرير مساعد لتعبئة الإقرار في بوابة ${taxAuth()}، ويعتمد على الفواتير والمصروفات المسجلة. راجع الأرقام قبل التقديم.` });
   const btn = $('[data-settle]', ctx.root);
   if (btn) btn.onclick = async () => {
-    if (!(await confirmBox(`سيُنشأ قيد بتاريخ ${fmtDate(per.to)} يُقفل ضريبة المخرجات (${money(V.output)}) والمدخلات (${money(V.input)}) ويرحّل الصافي إلى «ضريبة مستحقة للهيئة».`, { ok: 'إنشاء القيد' }))) return;
+    if (!(await confirmBox(`سيُنشأ قيد بتاريخ ${fmtDate(per.to)} يُقفل ضريبة المخرجات (${money(V.output)}) والمدخلات (${money(V.input)}) ويرحّل الصافي إلى «${accName('vdue')}».`, { ok: 'إنشاء القيد' }))) return;
     const lines = [];
     if (V.output) lines.push({ account: 'vout', dr: V.output, cr: 0, memo: 'إقفال ضريبة المخرجات' });
     if (V.input) lines.push({ account: 'vin', dr: 0, cr: V.input, memo: 'إقفال ضريبة المدخلات' });
-    if (V.net > 0) lines.push({ account: 'vdue', dr: 0, cr: V.net, memo: 'صافي مستحق للهيئة' });
+    if (V.net > 0) lines.push({ account: 'vdue', dr: 0, cr: V.net, memo: `صافي مستحق لل${taxAuth().slice(2)}` });
     if (V.net < 0) lines.push({ account: 'vdue', dr: -V.net, cr: 0, memo: 'صافي قابل للاسترداد' });
     const doc = store.saveDoc({ type: 'journal', date: per.to, notes: `تسوية ${taxLabel()} للفترة ${fmtDate(per.from)} - ${fmtDate(per.to)}`, lines, vatPeriod: { from: per.from, to: per.to } });
     toast('تم إنشاء قيد التسوية ✓');

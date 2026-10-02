@@ -56,6 +56,18 @@ export function ccField(d) {
   return field('الفرع / مركز التكلفة', html`<select class="inp" data-k="cc" data-f="cc"><option value="">— بدون —</option>${cs.map((c) => html`<option value="${c.id}" ${c.id === d.cc ? raw('selected') : ''}>${c.name}</option>`)}</select>`);
 }
 export const accName = (id) => store.findAccount(id)?.name || 'حساب محذوف';
+
+// ─── مصطلحات تختلف حسب الدولة ───
+const isJO = () => store.getDb()?.settings?.country === 'JO';
+// الأردن: «الضمان الاجتماعي»؛ الخليج: «التأمينات الاجتماعية»
+export const ssName = () => (isJO() ? 'الضمان الاجتماعي' : 'التأمينات الاجتماعية');
+export const ssWord = () => (isJO() ? 'اشتراكات الضمان' : 'التأمينات');
+export const ssShort = () => (isJO() ? 'ضمان' : 'تأمينات');
+// جهة الضريبة: الأردن «دائرة ضريبة الدخل والمبيعات»، والسعودية «هيئة الزكاة والضريبة والجمارك»
+export const taxAuth = () => (isJO() ? 'الدائرة' : 'الهيئة');
+// الأردن ضريبة مبيعات عامة (Sales Tax)، والخليج ضريبة قيمة مضافة (VAT)
+const taxEn = (s) => (s.country === 'JO' ? 'Sales Tax' : 'VAT');
+const taxNoEn = (s) => (s.country === 'JO' ? 'Tax No.' : 'VAT No.');
 export const productName = (id) => store.findProduct(id)?.name || '';
 
 // حالة السداد مع التأخير
@@ -208,14 +220,15 @@ function coBlock(s, bi = false) {
     ${s.address ? html`<div>${s.address}</div>` : ''}
     ${bi && s.addressEn ? html`<div class="muted"><span dir="ltr">${s.addressEn}</span></div>` : ''}
     ${contact ? html`<div class="muted">${contact}</div>` : ''}
-    ${s.vat && s.vatNo ? html`<div>${lbl2('الرقم الضريبي', 'VAT No.', bi)}: <b dir="ltr">${s.vatNo}</b></div>` : ''}
+    ${s.vat && s.vatNo ? html`<div>${lbl2('الرقم الضريبي', taxNoEn(s), bi)}: <b dir="ltr">${s.vatNo}</b></div>` : ''}
     ${s.crNo ? html`<div>${lbl2('السجل التجاري', 'CR No.', bi)}: <b dir="ltr">${s.crNo}</b></div>` : ''}
   </div></div>`;
 }
 
 export function paperTitle(d, party, s = S()) {
   const tax = !!s.vat || num(d.vatRate) > 0;
-  const b2b = !!(party && party.vatNo);
+  // الفاتورة المبسطة مفهوم سعودي وخليجي؛ في الأردن كل فاتورة خاضعة «فاتورة ضريبية»
+  const b2b = !!(party && party.vatNo) || s.country === 'JO';
   if (d.type === 'sale') return tax ? (b2b ? ['فاتورة ضريبية', 'Tax Invoice'] : ['فاتورة ضريبية مبسطة', 'Simplified Tax Invoice']) : ['فاتورة', 'Invoice'];
   if (d.type === 'sreturn') return tax ? [b2b ? 'إشعار دائن' : 'إشعار دائن مبسط', 'Credit Note'] : ['إشعار مرتجع مبيعات', 'Sales Return'];
   if (d.type === 'quote') return ['عرض سعر', 'Quotation'];
@@ -246,7 +259,7 @@ export function docPaper(d, { size = 'a4' } = {}) {
   const partyLabel = { sale: ['العميل', 'Customer'], quote: ['مقدم إلى', 'Quoted to'], sreturn: ['العميل', 'Customer'], purchase: ['المورد', 'Supplier'], preturn: ['المورد', 'Supplier'], sorder: ['العميل', 'Customer'], porder: ['إلى المورد', 'Supplier'] }[d.type];
   const partyBox = party ? html`<div><h4>${L(...partyLabel)}</h4><div class="nm">${party.name}</div>
       ${bi && party.nameEn ? html`<div class="pp-en-name"><span dir="ltr">${party.nameEn}</span></div>` : ''}
-      ${party.vatNo ? html`<div>${lbl2('الرقم الضريبي', 'VAT No.', bi)}: <b dir="ltr">${party.vatNo}</b></div>` : ''}
+      ${party.vatNo ? html`<div>${lbl2('الرقم الضريبي', taxNoEn(s), bi)}: <b dir="ltr">${party.vatNo}</b></div>` : ''}
       ${party.crNo ? html`<div>${lbl2('السجل التجاري', 'CR No.', bi)}: <span dir="ltr">${party.crNo}</span></div>` : ''}
       ${party.address ? html`<div>${party.address}</div>` : ''}
       ${party.phone ? html`<div class="muted"><span dir="ltr">${party.phone}</span></div>` : ''}</div>`
@@ -266,7 +279,7 @@ export function docPaper(d, { size = 'a4' } = {}) {
   });
   const headRow = small
     ? html`<tr><th>${L('البيان', 'Item')}</th><th class="num">${L('الكمية', 'Qty')}</th><th class="num">${L('السعر', 'Price')}</th><th class="num">${L('الإجمالي', 'Total')}</th></tr>`
-    : html`<tr><th class="c-n">#</th><th>${L('البيان', 'Description')}</th><th class="num">${L('الكمية', 'Qty')}</th><th class="num">${L('سعر الوحدة', 'Unit price')}</th>${anyDisc ? html`<th class="num">${L('الخصم', 'Discount')}</th>` : ''}${tax ? html`<th class="num c-net">${L('الخاضع للضريبة', 'Taxable amount')}</th><th class="num">${L('الضريبة', 'VAT')}</th>` : ''}<th class="num">${L('الإجمالي', 'Total')}</th></tr>`;
+    : html`<tr><th class="c-n">#</th><th>${L('البيان', 'Description')}</th><th class="num">${L('الكمية', 'Qty')}</th><th class="num">${L('سعر الوحدة', 'Unit price')}</th>${anyDisc ? html`<th class="num">${L('الخصم', 'Discount')}</th>` : ''}${tax ? html`<th class="num c-net">${L('الخاضع للضريبة', 'Taxable amount')}</th><th class="num">${L('الضريبة', taxEn(s))}</th>` : ''}<th class="num">${L('الإجمالي', 'Total')}</th></tr>`;
 
   // الدفع من الكاشير: طرق الدفع والمبلغ المستلم والباقي، واسم الكاشير
   const pays = paymentList(d).filter((p) => num(p.amount) > 0);
@@ -294,8 +307,8 @@ export function docPaper(d, { size = 'a4' } = {}) {
         ${note ? html`<div class="pp-note">${note}</div>` : ''}</div>
       <div><div class="pp-totals">
         ${anyDisc ? html`<div><span>${L('المجموع قبل الخصم', 'Subtotal')}</span>${money(T.gross)}</div><div><span>${L('الخصم', 'Discount')}</span>${money(T.discount)}</div>` : ''}
-        ${tax ? html`<div><span>${L('الإجمالي غير شامل الضريبة', 'Total excl. VAT')}</span>${money(T.net)}</div><div><span>${L(`${s.taxLabel || 'الضريبة'}${num(d.vatRate) ? ` (${num(d.vatRate)}%)` : ''}`, `VAT${num(d.vatRate) ? ` (${num(d.vatRate)}%)` : ''}`)}</span>${money(T.vat)}</div>` : ''}
-        <div class="grand"><span>${tax ? L('الإجمالي شامل الضريبة', 'Total incl. VAT') : L('الإجمالي', 'Total')}</span><span>${money(T.total)} ${currencyInfo(s.currency).sym}</span></div>
+        ${tax ? html`<div><span>${L('الإجمالي غير شامل الضريبة', `Total excl. ${taxEn(s)}`)}</span>${money(T.net)}</div><div><span>${L(`${s.taxLabel || 'الضريبة'}${num(d.vatRate) ? ` (${num(d.vatRate)}%)` : ''}`, `${taxEn(s)}${num(d.vatRate) ? ` (${num(d.vatRate)}%)` : ''}`)}</span>${money(T.vat)}</div>` : ''}
+        <div class="grand"><span>${tax ? L('الإجمالي شامل الضريبة', `Total incl. ${taxEn(s)}`) : L('الإجمالي', 'Total')}</span><span>${money(T.total)} ${currencyInfo(s.currency).sym}</span></div>
         ${showPays ? html`${pays.map((p) => html`<div><span>${accName(p.acc)}</span>${money(p.amount)}</div>`)}
           ${num(d.tendered) > 0 ? html`<div><span>${L('المبلغ المستلم', 'Tendered')}</span>${money(d.tendered)}</div><div><span>${L('الباقي للعميل', 'Change')}</span>${money(d.change || 0)}</div>` : ''}` : ''}
         ${st && st.paid > 0 && st.due > 0 ? html`<div><span>${L('المدفوع', 'Paid')}</span>${money(st.paid)}</div><div><span>${L('المتبقي', 'Balance due')}</span>${money(st.due)}</div>` : ''}
@@ -374,7 +387,7 @@ export function voucherPaper(d) {
   </div>`;
 }
 
-export const METHODS = { cash: 'نقداً', transfer: 'تحويل بنكي', card: 'بطاقة / مدى', cheque: 'شيك', wallet: 'محفظة إلكترونية', other: 'أخرى' };
+export const METHODS = { cash: 'نقداً', transfer: 'تحويل بنكي', get card() { return store.getDb()?.settings?.country === 'SA' ? 'بطاقة / مدى' : 'بطاقة'; }, cheque: 'شيك', wallet: 'محفظة إلكترونية', other: 'أخرى' };
 
 export function printPaper(content, { size = 'a4', title, page } = {}) { printHTML(content, { size, title, page }); }
 

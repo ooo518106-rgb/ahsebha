@@ -127,7 +127,7 @@ export function normalize(d) {
     createdAt: d.createdAt || now(),
     updatedAt: d.updatedAt || now(),
     settings: defaultSettings(isObj(d.settings) ? d.settings : {}),
-    accounts: arr(d.accounts).length ? arr(d.accounts) : defaultAccounts(),
+    accounts: arr(d.accounts).length ? arr(d.accounts) : defaultAccounts(isObj(d.settings) ? d.settings.country : undefined),
     parties: arr(d.parties),
     products: arr(d.products),
     docs: arr(d.docs).filter((x) => typeof x.type === 'string'),
@@ -145,7 +145,7 @@ export function normalize(d) {
   if (d.demo) out.demo = true;
   const byId = new Map(out.accounts.map((a) => [a.id, a]));
   // حسابات النظام الجديدة تُضاف للدليل القديم، والموجود منها يصير أساسياً لا يُحذف
-  for (const a of defaultAccounts()) {
+  for (const a of defaultAccounts(out.settings.country)) {
     if (!a.sys) continue;
     if (!byId.has(a.id)) out.accounts.push(a);
     else byId.get(a.id).sys = true;
@@ -174,7 +174,7 @@ function mutate(fn) {
 
 // ─── الشركة ───
 export function createCompany(settings, extra = {}) {
-  db = normalize({ settings: defaultSettings(settings), accounts: defaultAccounts(), ...extra });
+  db = normalize({ settings: defaultSettings(settings), accounts: defaultAccounts(settings.country), ...extra });
   rev++;
   schedule();
   requestPersist();
