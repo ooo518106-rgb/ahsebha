@@ -6,7 +6,7 @@ import { pemToDer } from '../public/js/asn1.js';
 import * as gw from './gwallet.js';
 import * as webpush from './webpush.js';
 import * as perks from './perks.js';
-import { DEMO_EMAIL, seedDemo } from './demo.js';
+import { DEMO_EMAIL, DEMO_VERSION, seedDemo } from './demo.js';
 import { defaultLogoPng } from './png.js';
 import { earnFor, progress, rewardCost, rewardRule, stampsLine, unitLabel } from '../public/js/rules.js';
 import { b64ToBytes, bytesToB64, clean, fail, HttpError, isUniqueError, json, normPhone, randomDigits, randomToken } from './util.js';
@@ -610,10 +610,12 @@ export async function runScheduled(ctx, now = Date.now()) {
   if (c.budget > 0) out.reminders = await reminderJob(c, platformShop, now);
   Object.assign(out, await expiryJob(c, shopOf, now));
   out.giftsRefunded = await giftRefundJob(c, now);
-  // حساب العرض بيرجع لوضعه الأصلي كل يوم الساعة 4 الفجر
   const day = localDayKey('JO', now);
-  if (perks.localTime('JO', now).hour >= 4 && (await getSetting(c.db, 'demo_day')) !== day && (await c.db.get('SELECT id FROM shops WHERE demo = 1 LIMIT 1'))) {
+  // حساب العرض بيرجع لحاله كل يوم الساعة 4 الصبح، أو فوراً لما ينضافله إشي جديد (رقم النسخة تغيّر)
+  const demoOld = (await getSetting(c.db, 'demo_version')) !== String(DEMO_VERSION);
+  if (((perks.localTime('JO', now).hour >= 4 && (await getSetting(c.db, 'demo_day')) !== day) || demoOld) && (await c.db.get('SELECT id FROM shops WHERE demo = 1 LIMIT 1'))) {
     await setSetting(c.db, 'demo_day', day);
+    await setSetting(c.db, 'demo_version', String(DEMO_VERSION));
     await seedDemo(c.db, now);
     out.demoReset = true;
   }
@@ -1406,9 +1408,10 @@ async function signup(c) {
 async function demoLogin(c) {
   await rateLimit(c, `demo:${c.ip}`, 20, 60 * MIN, 'جرّبت كتير، استنى شوي');
   let owner = await c.db.get('SELECT * FROM users WHERE email = ?', DEMO_EMAIL);
-  if (!owner) {
+  if (!owner || (await getSetting(c.db, 'demo_version')) !== String(DEMO_VERSION)) {
     await seedDemo(c.db);
     await setSetting(c.db, 'demo_day', localDayKey('JO'));
+    await setSetting(c.db, 'demo_version', String(DEMO_VERSION));
     owner = await c.db.get('SELECT * FROM users WHERE email = ?', DEMO_EMAIL);
   }
   const token = await auth.createSession(c.db, owner.id);

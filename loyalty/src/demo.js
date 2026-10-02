@@ -1,9 +1,13 @@
 // حساب العرض: محل تجريبي مليان زبائن وزيارات وتقييمات، عشان تفرجيه لأصحاب المحلات. بيرجع لحاله كل يوم.
+// قاعدة: كل ميزة جديدة بالمنصة لازم تنضاف هون كمان، عشان اللي بيجرّب العرض يشوفها شغّالة.
 import { hashPassword } from './auth.js';
 import { randomDigits, randomToken } from './util.js';
+import { DEMO_LOGO, MENU_IMAGES } from './demo-assets.js';
 
 export const DEMO_SLUG = 'demo-cafe';
 export const DEMO_EMAIL = 'demo@nuqatak.demo';
+// زيد الرقم كل ما تضيف إشي جديد للعرض: الحساب بيتجدّد لحاله بعد النشر (بدل ما يستنى الساعة 4 الصبح)
+export const DEMO_VERSION = 2;
 const DAY = 864e5;
 const AMMAN = 3 * 36e5; // الأردن UTC+3 طول السنة
 
@@ -23,6 +27,67 @@ const FIRST = ['سارة', 'عمر', 'ليلى', 'خالد', 'رنا', 'يزن',
 const LAST = ['الخطيب', 'العلي', 'حداد', 'المصري', 'النجار', 'الزعبي', 'خوري', 'العمري', 'الشامي', 'عبيدات'];
 const COMMENTS_GOOD = ['أحلى قهوة بالمنطقة ☕', 'الموظفين كتير لطيفين', 'المكان مرتب والخدمة سريعة', 'الكيك عندكم خرافي'];
 const COMMENTS_BAD = ['الانتظار كان طويل شوي', 'القهوة كانت باردة', 'الموسيقى كانت عالية'];
+
+const firstName = (name) => name.split(' ')[0];
+const topOf = (members) => members.reduce((a, b) => (b.visits > a.visits ? b : a));
+
+// ميزات على زبائن معيّنين: دعوة صاحب، هدية عيد ميلاد، وزبائن غابوا ووصلهم «اشتقنالك» (نفس اللي بتعمله المهام الحقيقية)
+async function addPerks(db, { s, now, members, ids }) {
+  const all = members.map((_, i) => i);
+  const top = members.indexOf(topOf(members));
+  const year = new Date(now + AMMAN).getUTCFullYear();
+  const adds = [];
+  // 👥 ادعُ صاحبك: 3 زبائن جداد انضموا بدعوة من زبائن دايمين، والاتنين أخدوا الهدية
+  const newest = [...all].sort((a, b) => members[b].created - members[a].created).filter((i) => i !== top).slice(0, 3);
+  const loyal = [...all].sort((a, b) => members[b].visits - members[a].visits).filter((i) => i !== top && !newest.includes(i)).slice(0, 3);
+  for (let k = 0; k < newest.length; k++) {
+    const n = newest[k];
+    const by = loyal[k];
+    const at = Math.min(now - 36e5, members[n].created + DAY);
+    adds.push([n, 10, `👥 هدية الانضمام بدعوة من ${firstName(members[by].name)}`, at], [by, 10, `👥 دعوة ${firstName(members[n].name)}`, at]);
+    await db.run('UPDATE members SET referred_by = ?, ref_rewarded = ? WHERE id = ?', ids[by], at, ids[n]);
+  }
+  // 🎂 هدية عيد الميلاد لزبائن عيدهم مرق هالسنة
+  const bdayAt = (i) => {
+    const [mm, dd] = members[i].birthday.split('-').map(Number);
+    return Date.UTC(year, mm - 1, dd, 9, 0) - AMMAN;
+  };
+  const bdays = all.filter((i) => members[i].birthday && bdayAt(i) < now - DAY && bdayAt(i) > members[i].created + 14 * DAY).slice(0, 3);
+  for (const i of bdays) {
+    adds.push([i, 100, '🎂 هدية عيد الميلاد', bdayAt(i)]);
+    await db.run('UPDATE members SET bday_year = ? WHERE id = ?', year, ids[i]);
+  }
+  // 💤 زبائن غابوا أكتر من شهر: وصلهم «اشتقنالك» ونقاطهم دبل لـ 3 أيام لما يرجعوا
+  const absent = all.filter((i) => now - members[i].last >= 32 * DAY).slice(0, 3);
+  for (const i of absent) await db.run('UPDATE members SET nudged_at = ?, boost_until = ? WHERE id = ?', now - DAY, now + 2 * DAY, ids[i]);
+  for (const [i, delta, note, at] of adds) {
+    await db.batch([
+      ["INSERT INTO txns (shop_id, member_id, kind, delta, note, created_at) VALUES (?, ?, 'adjust', ?, ?, ?)", [s, ids[i], delta, note, at]],
+      ['UPDATE members SET balance = balance + ? WHERE id = ?', [delta, ids[i]]],
+    ]);
+  }
+}
+
+// 🎁 هدايا رصيد بين الزبائن: وحدة انستلمت، ووحدة لسا بتستنى صاحبها يستلمها
+async function addGifts(db, { s, now, members, ids }) {
+  const top = topOf(members);
+  const rich = members.map((_, i) => i).filter((i) => members[i] !== top && members[i].credit >= 5000);
+  const poor = members.findIndex((m) => m !== top && !m.credit);
+  if (rich.length < 2 || poor < 0) return;
+  const [a, c] = rich;
+  const sent = now - 3 * DAY;
+  const claimed = sent + 3 * 36e5;
+  await db.batch([
+    ['INSERT INTO credit_gifts (shop_id, from_member, amount, code, claimed_by, claimed_at, created_at) VALUES (?, ?, 2000, ?, ?, ?, ?)', [s, ids[a], randomToken(), ids[poor], claimed, sent]],
+    ["INSERT INTO credit_txns (shop_id, member_id, kind, amount, note, created_at) VALUES (?, ?, 'spend', 2000, '🎁 هدية لصاحب', ?)", [s, ids[a], sent]],
+    ["INSERT INTO credit_txns (shop_id, member_id, kind, amount, note, created_at) VALUES (?, ?, 'topup', 2000, '🎁 هدية من صاحب', ?)", [s, ids[poor], claimed]],
+    ['UPDATE members SET credit = credit - 2000 WHERE id = ?', [ids[a]]],
+    ['UPDATE members SET credit = credit + 2000 WHERE id = ?', [ids[poor]]],
+    ['INSERT INTO credit_gifts (shop_id, from_member, amount, code, created_at) VALUES (?, ?, 1000, ?, ?)', [s, ids[c], randomToken(), now - DAY]],
+    ["INSERT INTO credit_txns (shop_id, member_id, kind, amount, note, created_at) VALUES (?, ?, 'spend', 1000, '🎁 هدية لصاحب', ?)", [s, ids[c], now - DAY]],
+    ['UPDATE members SET credit = credit - 1000 WHERE id = ?', [ids[c]]],
+  ]);
+}
 
 // بيعمل حساب العرض أول مرة، أو بيرجّعه لوضعه الأصلي
 export async function seedDemo(db, now = Date.now()) {
@@ -58,20 +123,24 @@ export async function seedDemo(db, now = Date.now()) {
     [`DELETE FROM sessions WHERE user_id IN (SELECT id FROM users WHERE shop_id = ? AND id <> ?)`, [s, owner.id]],
     [`DELETE FROM user_push_subs WHERE user_id IN (SELECT id FROM users WHERE shop_id = ?)`, [s]],
     [`DELETE FROM users WHERE shop_id = ? AND id <> ?`, [s, owner.id]],
+    ['INSERT OR REPLACE INTO shop_logos (shop_id, mime, data) VALUES (?, ?, ?)', [s, DEMO_LOGO.mime, DEMO_LOGO.data]],
     [`UPDATE shops SET name = 'كوفي العرض', slug = ?, color = '#2f5d50', program_type = 'points', points_per_unit = 1, reward_threshold = 100,
-      stamps_required = 9, reward_name = 'مشروب مجاني', welcome_text = 'كوفي العرض ترحب بكم ☕', custom_logo = 0, demo = 1, paid = 1, active_until = ?,
+      stamps_required = 9, reward_name = 'مشروب مجاني', welcome_text = 'كوفي العرض ترحب بكم ☕', custom_logo = 1, logo_version = logo_version + 1, demo = 1, paid = 1, active_until = ?,
       locations = ?, links = ?, boosts = ?, tiers_on = 1, tier_silver = 5, tier_gold = 12, bday_on = 1, bday_gift = NULL, winback_days = 30, winback_text = '',
       winback_double = 1, review_on = 1, review_url = '', ref_bonus = NULL, guard_cooldown = 10, guard_daily = 3, guard_big = NULL, credit_on = 1, credit_bonus = 10,
-      expiry_months = 0, onboard = '{}', updated_at = ? WHERE id = ?`, [
+      expiry_months = 12, expiry_since = ?, onboard = '{}', updated_at = ? WHERE id = ?`, [
       DEMO_SLUG, now + 3650 * DAY,
       JSON.stringify([{ id: 'bdemo01', name: 'الفرع الرئيسي — عبدون', lat: 31.9539, lng: 35.8806 }, { id: 'bdemo02', name: 'فرع الصويفية', lat: 31.9605, lng: 35.8622 }]),
-      JSON.stringify({ instagram: 'https://instagram.com/nuqatak.demo', whatsapp: 'https://wa.me/962790000000' }),
-      JSON.stringify([{ days: [0], from: '14:00', to: '17:00', mult: 2 }]),
-      now, s,
+      JSON.stringify({ instagram: 'https://instagram.com/nuqatak.demo', tiktok: 'https://www.tiktok.com/@nuqatak.demo', facebook: 'https://facebook.com/nuqatak.demo', whatsapp: 'https://wa.me/962790000000' }),
+      JSON.stringify([{ days: [0], from: '14:00', to: '17:00', mult: 2 }, { days: [5], from: '08:00', to: '11:00', mult: 2 }]),
+      now - 100 * DAY, now, s,
     ]],
     [`INSERT INTO users (shop_id, email, name, role, pw_hash, branch_id, created_at) VALUES (?, ?, 'سامر (كاشير)', 'staff', ?, 'bdemo01', ?)`, [s, `staff-${randomDigits(6)}@nuqatak.demo`, owner.pw_hash, now - 100 * DAY]],
+    [`INSERT INTO users (shop_id, email, name, role, pw_hash, branch_id, created_at) VALUES (?, ?, 'ريم (كاشير)', 'staff', ?, 'bdemo02', ?)`, [s, `staff-${randomDigits(6)}@nuqatak.demo`, owner.pw_hash, now - 80 * DAY]],
   ]);
-  const staff = await db.get("SELECT id FROM users WHERE shop_id = ? AND role = 'staff'", s);
+  const staffRows = await db.all("SELECT id, branch_id FROM users WHERE shop_id = ? AND role = 'staff' ORDER BY id", s);
+  const staff = staffRows[0];
+  const staffOf = (branch) => (staffRows.find((u) => u.branch_id === branch) || staff).id;
 
   // زبائن وزيارات آخر 60 يوم (أكتر الزيارات الصبح والعصر والمسا)
   const r = rng(20261002);
@@ -110,6 +179,18 @@ export async function seedDemo(db, now = Date.now()) {
     members.push({ name, phone: `0790${String(100000 + i * 137).slice(-6)}`, balance, lifetime, redeemed, visits, last, created, birthday, credit: r() < 0.2 ? Math.round(r() * 20) * 1000 : 0 });
   }
 
+  // البطاقة اللي بتنعرض بالعرض (أكتر زبون بيزور): إلها رصيد عشان يبيّن على البطاقة
+  topOf(members).credit ||= 8000;
+  // 3 زبائن قدام آخر زيارة إلهم من أكتر من شهر (عشان يبيّن «اشتقنالك» والنقاط الدبل لما يرجعوا)
+  const ABSENT = 33 * DAY;
+  members.map((m, i) => i).filter((i) => members[i].visits <= 4 && now - members[i].created > 70 * DAY).slice(0, 3).forEach((i) => {
+    const m = members[i];
+    const shift = Math.max(0, m.last - (now - ABSENT));
+    for (const t of txns) if (t.m === i) t.at -= shift;
+    m.last -= shift;
+    m.created = Math.min(m.created, Math.min(...txns.filter((t) => t.m === i).map((t) => t.at)) - DAY);
+  });
+
   // إدخال على دفعات (D1 بيسمح لحد 100 قيمة بكل استعلام)
   const insertRows = async (sql, cols, rows) => {
     const per = Math.floor(99 / cols);
@@ -127,8 +208,9 @@ export async function seedDemo(db, now = Date.now()) {
   const ids = members.map((m) => idOf.get(m.phone));
   await insertRows(
     'INSERT INTO txns (shop_id, member_id, kind, delta, amount, user_id, branch_id, created_at)', 8,
-    txns.sort((a, b) => a.at - b.at).map((t) => [s, ids[t.m], t.kind, t.delta, t.amount, r() < 0.7 ? staff.id : owner.id, t.branch, t.at]),
+    txns.sort((a, b) => a.at - b.at).map((t) => [s, ids[t.m], t.kind, t.delta, t.amount, r() < 0.7 ? staffOf(t.branch) : owner.id, t.branch, t.at]),
   );
+  await addPerks(db, { s, now, members, ids, owner, staff, r });
   // تقييمات، وكوبون شغّال، ورصيد لبعض الزبائن
   const reviews = [];
   for (let i = 0; i < 18; i++) {
@@ -140,12 +222,32 @@ export async function seedDemo(db, now = Date.now()) {
   const ins = await db.run('INSERT INTO member_coupons (coupon_id, member_id, shop_id) SELECT ?, id, shop_id FROM members WHERE shop_id = ? AND visits >= 5', cp.lastId, s);
   await db.run('UPDATE member_coupons SET used_at = ?, used_by = ? WHERE coupon_id = ? AND member_id IN (SELECT member_id FROM member_coupons WHERE coupon_id = ? LIMIT 4)', now - DAY, staff.id, cp.lastId, cp.lastId);
   await db.run('UPDATE coupons SET issued = ?, used = 4 WHERE id = ?', ins.changes, cp.lastId);
+  const cp2 = await db.run("INSERT INTO coupons (shop_id, title, details, segment, expires_at, created_at) VALUES (?, 'قهوة الصبح بنص السعر', 'من 8 لـ 11 الصبح', 'all', ?, ?)", s, now + 3 * DAY, now - DAY);
+  const ins2 = await db.run('INSERT INTO member_coupons (coupon_id, member_id, shop_id) SELECT ?, id, shop_id FROM members WHERE shop_id = ?', cp2.lastId, s);
+  await db.run('UPDATE member_coupons SET used_at = ?, used_by = ? WHERE coupon_id = ? AND member_id IN (SELECT member_id FROM member_coupons WHERE coupon_id = ? ORDER BY member_id DESC LIMIT 6)', now - 3 * 36e5, staff.id, cp2.lastId, cp2.lastId);
+  await db.run('UPDATE coupons SET issued = ?, used = 6 WHERE id = ?', ins2.changes, cp2.lastId);
   await insertRows(
     'INSERT INTO credit_txns (shop_id, member_id, kind, amount, bonus, user_id, created_at)', 7,
-    members.map((m, i) => (m.credit ? [s, ids[i], 'topup', Math.round(m.credit / 1.1), m.credit - Math.round(m.credit / 1.1), staff.id, now - 7 * DAY] : null)).filter(Boolean),
+    members.map((m, i) => {
+      if (!m.credit) return null;
+      const paid = Math.max(1000, Math.round(m.credit / 1.1 / 1000) * 1000); // شحن بدنانير كاملة والباقي هدية
+      return [s, ids[i], 'topup', Math.min(paid, m.credit), Math.max(0, m.credit - paid), staff.id, now - 7 * DAY];
+    }).filter(Boolean),
   );
-  // منيو صغير
-  const menu = [['مشروبات ساخنة', 'إسبريسو', 1.5], ['مشروبات ساخنة', 'كابتشينو', 2.5], ['مشروبات ساخنة', 'لاتيه', 2.75], ['مشروبات ساردة', 'آيس لاتيه', 3], ['مشروبات ساردة', 'موهيتو', 2.5], ['حلويات', 'تشيز كيك', 3.5], ['حلويات', 'كرواسون شوكولا', 1.75]];
-  await insertRows('INSERT INTO menu_items (shop_id, category, name, price, sort, updated_at, created_at)', 7, menu.map(([cat, name, price], i) => [s, cat.replace('ساردة', 'باردة'), name, price, i, now, now]));
+  await addGifts(db, { s, now, members, ids });
+  // منيو بالصور والوصف (واحد مش متوفّر، عشان يبيّن كيف بيختفي من منيو الزبون)
+  const menu = [
+    ['مشروبات ساخنة', 'إسبريسو', 1.5, 'شوت مركّز من حبوب محمّصة عنا', 'espresso'],
+    ['مشروبات ساخنة', 'كابتشينو', 2.5, 'إسبريسو مع حليب مرغّى ورسمة قلب', 'cappuccino'],
+    ['مشروبات ساخنة', 'لاتيه', 2.75, 'ناعم وخفيف، بحليب كامل الدسم', 'latte'],
+    ['مشروبات ساخنة', 'سبانش لاتيه', 3.25, 'بالحليب المكثّف المحلّى', 'spanish'],
+    ['مشروبات باردة', 'آيس لاتيه', 3, 'إسبريسو وحليب بارد وتلج', 'icedLatte'],
+    ['مشروبات باردة', 'موهيتو', 2.5, 'نعنع وليمون وصودا', 'mojito'],
+    ['مشروبات باردة', 'ماتشا مثلّجة', 3.5, 'خلصت اليوم، بترجع بكرا', null, 0],
+    ['حلويات', 'تشيز كيك', 3.5, 'بصوص التوت الأحمر', 'cheesecake'],
+    ['حلويات', 'كرواسون شوكولا', 1.75, 'طازة كل صبح', 'croissant'],
+  ];
+  await insertRows('INSERT INTO menu_items (shop_id, category, name, price, description, image, available, sort, updated_at, created_at)', 10,
+    menu.map(([cat, name, price, desc, img, available = 1], i) => [s, cat, name, price, desc, img ? MENU_IMAGES[img] : null, available, i, now, now]));
   return { shopId: s, ownerId: owner.id, sampleToken: (await db.get('SELECT token FROM members WHERE shop_id = ? ORDER BY visits DESC LIMIT 1', s)).token };
 }

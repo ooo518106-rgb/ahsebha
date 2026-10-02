@@ -360,6 +360,21 @@ test('حساب العرض: دخول بكبسة، بيانات جاهزة، إج�
   const v2 = p.client();
   await v2.post('/api/demo/login', {});
   assert.equal((await v2.get('/api/me')).data.shop.name, 'كوفي العرض');
+  // كل الميزات معبّاية: شعار، منيو بالصور، كاشيرين، كوبونين، هدايا، دعوات، أعياد ميلاد، وزبائن غابوا
+  assert.equal((await v2.get('/api/me')).data.shop.customLogo, true);
+  const menu = (await p.client().get('/api/shops/demo-cafe/menu')).data.categories.flatMap((c) => c.items);
+  assert.ok(menu.length >= 8 && menu.every((i) => i.image && i.description));
+  assert.equal((await v2.get('/api/staff')).data.users.filter((u) => u.role === 'staff').length, 2);
+  assert.equal((await v2.get('/api/coupons')).data.coupons.length, 2);
+  const count = async (sql) => (await p.db.get(sql)).n;
+  assert.equal(await count("SELECT COUNT(*) AS n FROM credit_gifts g JOIN shops s ON s.id = g.shop_id WHERE s.demo = 1"), 2);
+  assert.equal(await count("SELECT COUNT(*) AS n FROM txns t JOIN shops s ON s.id = t.shop_id WHERE s.demo = 1 AND t.note LIKE '👥%'"), 6);
+  assert.ok(await count("SELECT COUNT(*) AS n FROM txns t JOIN shops s ON s.id = t.shop_id WHERE s.demo = 1 AND t.note LIKE '🎂%'") >= 1);
+  assert.equal(await count('SELECT COUNT(*) AS n FROM members m JOIN shops s ON s.id = m.shop_id WHERE s.demo = 1 AND m.boost_until > ' + Date.now()), 3);
+  // إشي جديد انضاف للعرض (رقم نسخة مختلف) ← بيتجدّد بأول تشغيلة بدون ما يستنى الصبح
+  await p.db.run("UPDATE platform_settings SET v = '0' WHERE k = 'demo_version'");
+  assert.equal((await p.cron(tomorrow5am + 2 * 3600e3)).demoReset, true);
+  assert.equal((await p.cron(tomorrow5am + 3 * 3600e3)).demoReset, undefined);
 });
 
 test('خطوات البداية، تذكير نهاية التجربة، وأرقام المنصة للمدير', async () => {
