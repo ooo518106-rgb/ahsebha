@@ -176,7 +176,7 @@ export function zip(files, date = new Date()) {
 const rgb = (hex) => { const [r, g, b] = hexToRgb(hex); return `rgb(${r}, ${g}, ${b})`; };
 const isLight = (hex) => { const [r, g, b] = hexToRgb(hex); return (0.299 * r + 0.587 * g + 0.114 * b) / 255 > 0.7; };
 
-export function buildPassJson(shop, member, { passTypeId, teamId, origin, authToken }) {
+export function buildPassJson(shop, member, { passTypeId, teamId, origin, authToken, menuUrl = null }) {
   const p = progress(shop, member.balance);
   const stamps = shop.program_type === 'stamps';
   const light = isLight(shop.color);
@@ -217,6 +217,7 @@ export function buildPassJson(shop, member, { passTypeId, teamId, origin, authTo
       auxiliaryFields: stamps ? [{ key: 'stamps', label: 'التقدّم', value: stampsLine(shop, member.balance) }] : [],
       backFields: [
         { key: 'rule', label: 'المكافأة', value: rewardRule(shop) },
+        ...(menuUrl ? [{ key: 'menu', label: 'المنيو', value: menuUrl, attributedValue: `<a href="${menuUrl}">افتح المنيو</a>` }] : []),
         { key: 'web', label: 'بطاقتي على الويب', value: cardUrl, attributedValue: `<a href="${cardUrl}">افتح البطاقة</a>` },
         { key: 'privacy', label: 'الخصوصية', value: `${origin}/privacy`, attributedValue: `<a href="${origin}/privacy">سياسة الخصوصية</a>` },
         { key: 'by', label: '', value: 'بطاقات الولاء من نقاطك' },

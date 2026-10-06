@@ -663,6 +663,16 @@ html[dir="ltr"] body, html[dir="ltr"] .stamps { direction: ltr; }
 .menu-items img { width: 70px; height: 70px; border-radius: 16px; object-fit: cover; flex: none; box-shadow: var(--shadow-sm); }
 .menu-items .price { font-weight: 700; white-space: nowrap; color: var(--brand-text); background: color-mix(in srgb, var(--brand) 9%, transparent); padding: 3px 10px; border-radius: 99px; font-size: .88rem; }
 .menu-items li .grow { flex: 1; min-width: 0; }
+.row.size-row { flex-wrap: nowrap; gap: 8px; }
+.row.size-row > input { min-width: 0; flex: 1 1 0; }
+.row.size-row > [name=sizeName] { flex-grow: 1.4; }
+.row.size-row > .btn { flex: none; }
+.menu-items .sizes { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.menu-items .size { border: 1px solid var(--border-strong); background: var(--card); color: var(--text); border-radius: 999px; padding: 4px 12px; min-height: 30px; font: inherit; font-size: .8rem; font-weight: 500; cursor: pointer; transition: background-color .2s, color .2s, border-color .2s, transform .15s; }
+.menu-items .size:active { transform: scale(.94); }
+.menu-items .size.on { background: var(--brand); border-color: var(--brand); color: var(--brand-ink); }
+.menu-items .price.bump { animation: bump .3s ease; }
+@keyframes bump { 40% { transform: scale(1.12); } }
 .menu-pdf { display: grid; gap: 8px; padding: 14px; border-radius: 18px; border: 1.5px dashed var(--border-strong); background: var(--card-2); }
 .menu-pdf .bar { height: 8px; }
 .menu-pdf-open { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; text-decoration: none; color: inherit; transition: transform .2s var(--ease); }

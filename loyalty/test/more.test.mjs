@@ -364,6 +364,7 @@ test('حساب العرض: دخول بكبسة، بيانات جاهزة، إج�
   assert.equal((await v2.get('/api/me')).data.shop.customLogo, true);
   const menu = (await p.client().get('/api/shops/demo-cafe/menu')).data.categories.flatMap((c) => c.items);
   assert.ok(menu.length >= 8 && menu.every((i) => i.image && i.description));
+  assert.ok(menu.filter((i) => i.sizes.length >= 2).length >= 3, 'العرض فيه أصناف بأحجام');
   const demoPdf = (await p.client().get('/api/shops/demo-cafe/menu')).data.pdf;
   const pdfFile = await p.client().get(demoPdf.url.replace(/^https?:\/\/[^/]+/, ''));
   assert.equal(pdfFile.status, 200);
@@ -445,6 +446,49 @@ test('المنيو: المالك بيضيف ويعدّل ويخفي، والصف
   const st = await p.staffClient();
   assert.equal((await st.post('/api/menu', { name: 'x' })).status, 403);
   assert.equal((await p.client().get(`/m/${p.shop.slug}`)).status, 200);
+});
+
+test('أحجام الصنف: كل حجم بسعره، والسعر الأساسي أرخص حجم', async () => {
+  const p = await platform();
+  const { owner } = p;
+  const bad = (body) => owner.post('/api/menu', { name: 'كابتشينو', ...body });
+  assert.equal((await bad({ sizes: [{ name: 'صغير', price: 2 }] })).status, 400, 'حجم واحد ما بيكفي');
+  assert.equal((await bad({ sizes: [{ name: 'صغير', price: 2 }, { name: 'كبير', price: '' }] })).status, 400, 'حجم بدون سعر');
+  assert.equal((await bad({ sizes: [{ name: '', price: 2 }, { name: 'كبير', price: 3 }] })).status, 400, 'حجم بدون اسم');
+  assert.equal((await bad({ sizes: [{ name: 'كبير', price: 2 }, { name: 'كبير', price: 3 }] })).status, 400, 'مكرر');
+  assert.equal((await bad({ sizes: Array.from({ length: 6 }, (_, i) => ({ name: `ح${i}`, price: i })) })).status, 400, 'أكتر من 5');
+  assert.equal((await bad({ sizes: 'كبير' })).status, 400);
+  // الصفوف الفاضية بالكامل بتنتجاهل
+  let r = await owner.post('/api/menu', { name: 'كابتشينو', price: 9, sizes: [{ name: 'صغير', price: '2.5' }, { name: 'وسط', price: 2.75 }, { name: 'كبير', price: 3 }, { name: '', price: '' }] });
+  assert.equal(r.status, 200);
+  let cap = r.data.items[0];
+  assert.deepEqual(cap.sizes, [{ name: 'صغير', price: 2.5 }, { name: 'وسط', price: 2.75 }, { name: 'كبير', price: 3 }]);
+  assert.equal(cap.price, 2.5);
+  // تعديل التوفر بس بيخلّي الأحجام
+  r = await owner.put(`/api/menu/${cap.id}`, { available: false });
+  assert.equal(r.data.items[0].sizes.length, 3);
+  r = await owner.put(`/api/menu/${cap.id}`, { available: true });
+  const pub = (await p.client().get(`/api/shops/${p.shop.slug}/menu`)).data.categories[0].items[0];
+  assert.deepEqual(pub.sizes.map((z) => z.name), ['صغير', 'وسط', 'كبير']);
+  // شيل الأحجام والرجوع لسعر واحد
+  r = await owner.put(`/api/menu/${cap.id}`, { sizes: [], price: 2.25 });
+  cap = r.data.items[0];
+  assert.deepEqual(cap.sizes, []);
+  assert.equal(cap.price, 2.25);
+});
+
+test('زر المنيو على بطاقة الزبون: بس إذا المحل عنده منيو (أصناف أو PDF)', async () => {
+  const p = await platform();
+  const { owner } = p;
+  const join = await p.client().post(`/api/shops/${p.shop.slug}/join`, { name: 'سامي', phone: '0791112223' });
+  const card = async () => (await p.client().get(`/api/cards/${join.data.token}`)).data.menuUrl;
+  assert.equal(await card(), null);
+  const r = await owner.post('/api/menu', { name: 'لاتيه', price: 2 });
+  assert.match(await card(), new RegExp(`/m/${p.shop.slug}$`));
+  await owner.req('DELETE', `/api/menu/${r.data.items[0].id}`);
+  assert.equal(await card(), null);
+  await p.db.run('UPDATE shops SET menu_pdf = 1 WHERE id = ?', p.shop.id);
+  assert.match(await card(), /\/m\//, 'ملف PDF لحاله بيكفي');
 });
 
 test('استيراد الزبائن: أرقام بدون صفر، رصيد، أعياد ميلاد، وتخطّي المكرر والغلط', async () => {

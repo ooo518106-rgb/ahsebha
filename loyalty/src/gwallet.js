@@ -45,7 +45,7 @@ export async function signJwt(claims, privateKeyPem) {
 
 const ar = (value) => ({ defaultValue: { language: 'ar', value } });
 
-export function buildClass(cfg, shop, origin) {
+export function buildClass(cfg, shop, origin, { menuUrl = null } = {}) {
   const locations = JSON.parse(shop.locations || '[]').slice(0, 10);
   const cls = {
     id: classId(cfg, shop.id),
@@ -64,6 +64,9 @@ export function buildClass(cfg, shop, origin) {
     textModulesData: [{ id: 'reward', header: 'المكافأة', body: rewardRule(shop) }],
   };
   if (locations.length) cls.merchantLocations = locations.map((l) => ({ latitude: l.lat, longitude: l.lng }));
+  // رابط المنيو على مستوى الفئة: بيطلع بتفاصيل كل بطاقات المحل مرة وحدة (جنب رابط البطاقة تبع كل زبون).
+  // التحديث عند Google بـ PATCH، فلازم نبعت القائمة فاضية لما ينشال المنيو عشان ينمسح الرابط
+  cls.linksModuleData = { uris: menuUrl ? [{ id: 'menu', uri: menuUrl, description: 'المنيو' }] : [] };
   return cls;
 }
 

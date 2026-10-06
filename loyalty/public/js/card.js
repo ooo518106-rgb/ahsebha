@@ -211,7 +211,7 @@ function inviteText() {
 
 function draw() {
   if (!lastData || deleted) return;
-  const { shop, member, google, apple, refUrl, canRate, coupons = [] } = lastData;
+  const { shop, member, google, apple, refUrl, canRate, menuUrl, coupons = [] } = lastData;
   setBrand(shop.color, { theme: false });
   document.title = t('cardTitle', { shop: shop.name });
   homeScreen(shop.logo, shop.name);
@@ -225,6 +225,7 @@ function draw() {
     <div class="stack" style="margin-top:16px">
       ${google && !ios ? html`<a class="gw-button" href="/c/${token}/google">${LANG === 'en' ? html`<img src="/img/google-wallet-button-en.svg" alt="${t('gwAlt')}" width="283" height="50">` : html`<img src="/img/google-wallet-button-ar.svg" alt="${t('gwAlt')}" width="309" height="50">`}</a>` : ''}
       ${ios && apple ? html`<a class="gw-button" href="/c/${token}/apple"><img class="apple-badge" src="/img/add-to-apple-wallet.svg" alt="Add to Apple Wallet" width="160" height="50"></a>` : ''}
+      ${menuUrl ? html`<a class="btn ghost block" href="${menuUrl}">${t('seeMenu')}</a>` : ''}
       ${ios && !standalone ? html`<div class="panel small">${raw(t('iosTip'))}</div>` : ''}
       ${perksPanels(shop, member, refUrl, canRate, coupons)}
       ${pushPanel()}

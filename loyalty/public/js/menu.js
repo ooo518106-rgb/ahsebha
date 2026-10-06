@@ -32,8 +32,10 @@ async function main() {
         ${c.name ? html`<h2>${c.name}</h2>` : ''}
         <ul class="menu-items">${c.items.map((it) => html`<li>
           ${it.image ? html`<img src="${it.image}" alt="" loading="lazy">` : ''}
-          <div class="grow"><b>${it.name}</b>${it.description ? html`<div class="small muted">${it.description}</div>` : ''}</div>
-          ${it.price != null ? html`<span class="price num">${fmtPrice(it.price, shop.currency)}</span>` : ''}</li>`)}</ul>
+          <div class="grow"><b>${it.name}</b>${it.description ? html`<div class="small muted">${it.description}</div>` : ''}
+            ${it.sizes.length ? html`<div class="sizes" role="group" aria-label="${t('sizeLabel')}">${it.sizes.map((z, j) => html`<button type="button" class="size${j ? '' : ' on'}" aria-pressed="${j ? 'false' : 'true'}" data-price="${fmtPrice(z.price, shop.currency)}">${z.name}</button>`)}</div>` : ''}</div>
+          ${it.sizes.length ? html`<span class="price num">${fmtPrice(it.sizes[0].price, shop.currency)}</span>`
+            : it.price != null ? html`<span class="price num">${fmtPrice(it.price, shop.currency)}</span>` : ''}</li>`)}</ul>
       </section>`) : pdf ? '' : html`<p class="panel center muted">${t('menuEmpty')}</p>`}
     <section class="panel center stack menu-join">
       <b>${t('menuJoin', { reward: shop.rewardName })}</b>
@@ -43,5 +45,18 @@ async function main() {
     <p class="powered">${t('powered')} <a href="/">نقاطك</a></p>`);
   $('#langBtn').onclick = () => { setLang(LANG === 'ar' ? 'en' : 'ar'); location.reload(); };
 }
+
+// الزبون بيختار الحجم (صغير، كبير…) وبيتغيّر السعر قدّامه
+root.addEventListener('click', (e) => {
+  const btn = e.target.closest('.size');
+  if (!btn) return;
+  const li = btn.closest('li');
+  for (const b of li.querySelectorAll('.size')) { b.classList.toggle('on', b === btn); b.setAttribute('aria-pressed', String(b === btn)); }
+  const price = li.querySelector('.price');
+  price.textContent = btn.dataset.price;
+  price.classList.remove('bump');
+  void price.offsetWidth;
+  price.classList.add('bump');
+});
 
 main();

@@ -842,6 +842,7 @@ function menuPanel(slug, currency, printLink) {
           <input class="grow num" name="price" type="number" inputmode="decimal" min="0" step="0.001" placeholder="${currency ? `السعر (${currency})` : 'السعر'}">
           <input class="grow" name="description" placeholder="وصف قصير (اختياري)" maxlength="200">
         </div>
+        ${sizesBox()}
         <label class="btn ghost" style="margin:0">📷 صورة (اختياري)<input type="file" name="imageFile" accept="image/*" class="hidden"></label>
         <button class="btn" type="submit">+ أضف الصنف</button>
       </form>
@@ -849,8 +850,48 @@ function menuPanel(slug, currency, printLink) {
       <div id="menuList"><p class="muted small">جاري التحميل…</p></div>
     </section>`;
 }
+// الأحجام (صغير، وسط، كبير…): كل حجم بسعره، ولما يكون في أحجام بينخفى حقل السعر الواحد
+const SIZES_MAX = 5;
+const sizeRow = (z = {}) => html`<div class="row size-row">
+    <input class="grow" name="sizeName" value="${z.name ?? ''}" placeholder="الحجم: وسط" maxlength="20">
+    <input class="grow num" name="sizePrice" type="number" inputmode="decimal" min="0" step="0.001" value="${z.price ?? ''}" placeholder="السعر">
+    <button class="btn ghost sm" type="button" data-size-del aria-label="شيل الحجم">✕</button></div>`;
+const sizesBox = (sizes = []) => html`<div class="stack sizes-ed"><div class="stack sizes-rows">${sizes.map(sizeRow)}</div>
+    <button class="btn ghost sm" type="button" data-size-add></button></div>`;
+function syncSizes(form) {
+  const n = $('.sizes-rows', form).children.length;
+  form.price.classList.toggle('hidden', n > 0);
+  const add = $('[data-size-add]', form);
+  add.textContent = n ? '+ حجم كمان' : '📏 أحجام وأسعار (صغير / كبير)';
+  add.classList.toggle('hidden', n >= SIZES_MAX);
+}
+function bindSizes(form) {
+  const rows = $('.sizes-rows', form);
+  $('[data-size-add]', form).onclick = () => {
+    const first = !rows.children.length;
+    rows.insertAdjacentHTML('beforeend', first ? `${sizeRow({ name: 'صغير' })}${sizeRow({ name: 'كبير' })}` : String(sizeRow()));
+    syncSizes(form);
+    $(first ? '[name=sizePrice]' : '.size-row:last-child [name=sizeName]', rows).focus();
+  };
+  rows.onclick = (e) => {
+    const del = e.target.closest('[data-size-del]');
+    if (!del) return;
+    del.closest('.size-row').remove();
+    syncSizes(form);
+  };
+  syncSizes(form);
+}
+const formSizes = (f) => {
+  const prices = f.getAll('sizePrice');
+  return f.getAll('sizeName').map((name, i) => ({ name: name.trim(), price: prices[i] })).filter((z) => z.name || z.price !== '');
+};
+const sizesText = (it, currency) => (it.sizes.length
+  ? `${it.sizes.map((z) => `${z.name} ${fmt(z.price)}`).join(' · ')} ${currency}`
+  : it.price != null ? `${fmt(it.price)} ${currency}` : '');
+
 function bindMenuPanel(slug) {
   bindCopy(view);
+  bindSizes($('#menuForm'));
   if (menuBase === '/api/menu') $$('[data-print]').forEach((a) => { a.addEventListener('click', markPoster); });
   $('#menuImport').onchange = async (e) => {
     const file = e.target.files[0];
@@ -904,7 +945,7 @@ async function importMenu(file) {
   let failed = 0;
   for (const it of b.items) {
     try {
-      last = await api(menuBase, { method: 'POST', body: { category: it.category, name: it.name, description: it.description, price: it.price, available: it.available ?? true, image: it.image || undefined } });
+      last = await api(menuBase, { method: 'POST', body: { category: it.category, name: it.name, description: it.description, price: it.price, sizes: Array.isArray(it.sizes) ? it.sizes : [], available: it.available ?? true, image: it.image || undefined } });
     } catch { failed++; }
     show(++done / steps);
   }
@@ -923,7 +964,7 @@ async function exportMenu(slug, btn) {
       return `data:${blob.type};base64,${await blobB64(blob)}`;
     };
     const items = [];
-    for (const it of r.items) items.push({ category: it.category, name: it.name, description: it.description, price: it.price, available: it.available, image: it.image ? await asData(it.image) : null });
+    for (const it of r.items) items.push({ category: it.category, name: it.name, description: it.description, price: it.price, sizes: it.sizes, available: it.available, image: it.image ? await asData(it.image) : null });
     const pdf = r.pdf ? await blobB64(await (await fetch(r.pdf.url)).blob()) : null;
     downloadText(JSON.stringify({ app: 'nuqatak-menu', v: 1, name: slug, items, pdf }), `menu-${slug}.json`);
     toast('انحفظ ملف المنيو ✅', 'ok');
@@ -992,7 +1033,7 @@ async function loadMenu(data) {
   render(box, r.items.length ? html`${cats.map((cat) => html`<h3 style="margin-top:10px">${cat || 'بدون قسم'}</h3>
       <ul class="list">${r.items.filter((x) => x.category === cat).map((it) => html`<li class="${it.available ? '' : 'off'}">
         ${it.image ? html`<img class="thumb" src="${it.image}" alt="">` : ''}
-        <div class="main"><b>${it.name}</b><span class="small muted">${it.price != null ? `${fmt(it.price)} ${state.shop.currency}` : ''}${it.description ? ` · ${it.description}` : ''}</span></div>
+        <div class="main"><b>${it.name}</b><span class="small muted">${[sizesText(it, state.shop.currency), it.description].filter(Boolean).join(' · ')}</span></div>
         <label class="small check"><input type="checkbox" data-avail="${it.id}" ${it.available ? 'checked' : ''}> متوفّر</label>
         <button class="btn ghost sm" type="button" data-edit="${it.id}" aria-label="تعديل">✏️</button>
         <button class="btn ghost sm" type="button" data-del="${it.id}" aria-label="حذف">✕</button></li>`)}</ul>`)}`
@@ -1016,11 +1057,14 @@ async function loadMenu(data) {
     btn.disabled = true;
     try {
       const file = f.get('imageFile');
-      const body = { category: f.get('category'), name: f.get('name'), price: f.get('price'), description: f.get('description') };
+      const body = { category: f.get('category'), name: f.get('name'), price: f.get('price'), sizes: formSizes(f), description: f.get('description') };
       if (file && file.size) body.image = await resizeMenuImage(file);
       loadMenu(await api(menuBase, { method: 'POST', body }));
       form.reset();
       form.category.value = body.category;
+      // بنخلّي أسماء الأحجام للصنف الجاي (غالباً نفس الأحجام) وبنفضّي الأسعار
+      const names = f.getAll('sizeName');
+      $$('[name=sizeName]', form).forEach((input, i) => { input.value = names[i]; });
       form.name.focus();
       toast('انضاف ✅', 'ok');
     } catch (err) { toast(err.message, 'bad'); }
@@ -1033,17 +1077,19 @@ function editMenuItem(it) {
       <input name="category" value="${it.category}" placeholder="القسم" maxlength="40" list="menuCats">
       <input name="name" value="${it.name}" placeholder="الاسم" maxlength="60" required>
       <input name="price" class="num" type="number" inputmode="decimal" min="0" step="0.001" value="${it.price ?? ''}" placeholder="السعر">
+      ${sizesBox(it.sizes)}
       <input name="description" value="${it.description}" placeholder="وصف قصير" maxlength="200">
       ${it.image ? html`<div class="row"><img class="thumb" src="${it.image}" alt=""><label class="check small"><input type="checkbox" name="removeImage"> شيل الصورة</label></div>` : ''}
       <label class="btn ghost" style="margin:0">📷 ${it.image ? 'غيّر الصورة' : 'ضيف صورة'}<input type="file" name="imageFile" accept="image/*" class="hidden"></label>
       <button class="btn" type="submit">حفظ</button>
     </form>`);
+  bindSizes($('#menuEdit', body));
   $('#menuEdit', body).onsubmit = async (e) => {
     e.preventDefault();
     const f = new FormData(e.target);
     try {
       const file = f.get('imageFile');
-      const payload = { category: f.get('category'), name: f.get('name'), price: f.get('price'), description: f.get('description'), removeImage: f.get('removeImage') === 'on' };
+      const payload = { category: f.get('category'), name: f.get('name'), price: f.get('price'), sizes: formSizes(f), description: f.get('description'), removeImage: f.get('removeImage') === 'on' };
       if (file && file.size) payload.image = await resizeMenuImage(file);
       const r = await api(`${menuBase}/${it.id}`, { method: 'PUT', body: payload });
       $('#dlg').close();

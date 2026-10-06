@@ -60,7 +60,7 @@ const AR = {
   consent: 'لما تنضم بتوافق على <a href="/privacy" target="_blank" rel="noopener">سياسة الخصوصية</a>. منحفظ اسمك ورقمك ونقاطك (وتاريخ ميلادك لو كتبته) بس، وبتقدر تحذفهم بأي وقت.',
   loading: 'جاري التحميل…',
   // المنيو
-  menu: 'المنيو', menuEmpty: 'المنيو لسا فاضي.', menuJoin: '🎁 اجمع نقاط مع كل طلب واحصل على {reward}', menuJoinBtn: 'خذ بطاقة الولاء', menuOpenCard: 'افتح بطاقتي', menuPdf: 'افتح المنيو', menuPdfHint: 'المنيو الكامل (PDF)',
+  menu: 'المنيو', menuEmpty: 'المنيو لسا فاضي.', menuJoin: '🎁 اجمع نقاط مع كل طلب واحصل على {reward}', menuJoinBtn: 'خذ بطاقة الولاء', menuOpenCard: 'افتح بطاقتي', menuPdf: 'افتح المنيو', menuPdfHint: 'المنيو الكامل (PDF)', sizeLabel: 'الحجم', seeMenu: '📋 شوف المنيو',
   // كل بطاقاتي والهدايا
   myCards: '💼 بطاقاتي', myCardsEmpty: 'ما في بطاقات محفوظة على هالجهاز لسا. افتح رابط بطاقتك مرة وبتنحفظ هون.', addCardLink: 'الصق رابط بطاقة', addCard: 'ضيف', removeCard: 'شيلها من هون',
   myCardsHint: 'ضيف هالصفحة على الشاشة الرئيسية، وبتصير عندك أيقونة وحدة لكل بطاقاتك.', allCards: '💼 كل بطاقاتي',
@@ -106,7 +106,7 @@ const EN = {
   getCard: 'Get my card', walletNote: 'It saves to your phone wallet and pops up when you’re near {shop}.',
   consent: 'By joining you agree to the <a href="/privacy" target="_blank" rel="noopener">privacy policy</a>. We only keep your name, number, points (and birthday if you add it), and you can delete them anytime.',
   loading: 'Loading…',
-  menu: 'Menu', menuEmpty: 'The menu is empty for now.', menuJoin: '🎁 Earn points with every order and get {reward}', menuJoinBtn: 'Get the loyalty card', menuOpenCard: 'Open my card', menuPdf: 'Open the menu', menuPdfHint: 'Full menu (PDF)',
+  menu: 'Menu', menuEmpty: 'The menu is empty for now.', menuJoin: '🎁 Earn points with every order and get {reward}', menuJoinBtn: 'Get the loyalty card', menuOpenCard: 'Open my card', menuPdf: 'Open the menu', menuPdfHint: 'Full menu (PDF)', sizeLabel: 'Size', seeMenu: '📋 See the menu',
   myCards: '💼 My cards', myCardsEmpty: 'No cards saved on this device yet. Open your card link once and it will show up here.', addCardLink: 'Paste a card link', addCard: 'Add', removeCard: 'Remove from here',
   myCardsHint: 'Add this page to your home screen to get one icon for all your cards.', allCards: '💼 All my cards',
   giftBtn: '🎁 Gift credit to a friend', giftAsk: 'How much do you want to gift? ({cur})', giftMade: 'Your gift is ready 🎁 Send the link to your friend', giftText: '🎁 I gifted you {amount} {cur} of credit at {shop}! Open the link to claim it:\n{url}',

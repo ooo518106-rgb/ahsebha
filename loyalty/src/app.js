@@ -155,12 +155,18 @@ const viewFor = (c, m) => memberView(m, c.shop, c.user?.role === 'staff');
 
 const logoUrl = (shop, origin) => `${origin}/media/logo/${shop.id}.png?v=${shop.logo_version}`;
 
+// رابط المنيو (للبطاقة والمحفظة) بس إذا المحل عنده أصناف متوفرة أو ملف PDF، عشان ما نودّي الزبون لصفحة فاضية
+async function menuUrlOf(c, shop) {
+  const row = await c.db.get('SELECT 1 AS x FROM shops s WHERE s.id = ? AND (s.menu_pdf > 0 OR EXISTS (SELECT 1 FROM menu_items WHERE shop_id = s.id AND available = 1))', shop.id);
+  return row ? `${c.origin}/m/${shop.slug}` : null;
+}
+
 // ─── Google Wallet ───
 async function syncClass(c, shop) {
   const cfg = gw.googleConfig(c.env);
   if (!cfg) return { enabled: false };
   try {
-    await gw.upsertClass(cfg, gw.buildClass(cfg, shop, c.origin));
+    await gw.upsertClass(cfg, gw.buildClass(cfg, shop, c.origin, { menuUrl: await menuUrlOf(c, shop) }));
     shop.gw_synced_at = Date.now();
     await c.db.run('UPDATE shops SET gw_synced_at = ?, gw_error = NULL WHERE id = ?', shop.gw_synced_at, shop.id);
     return { enabled: true, ok: true };
@@ -199,7 +205,7 @@ async function googleSave(c, token) {
   } catch (e) {
     // لو الـ API ما زبط، منبعت الفئة والبطاقة كاملين جوّا الرابط و Google بتنشئهم وقت الحفظ
     console.error('gwallet save:', e.message);
-    url = await gw.saveUrl(cfg, c.origin, { classes: [gw.buildClass(cfg, shop, c.origin)], objects: [obj] });
+    url = await gw.saveUrl(cfg, c.origin, { classes: [gw.buildClass(cfg, shop, c.origin, { menuUrl: await menuUrlOf(c, shop) })], objects: [obj] });
   }
   await c.db.run('UPDATE members SET gw_object = 1 WHERE id = ?', m.id);
   return new Response(null, { status: 302, headers: { location: url, 'cache-control': 'no-store' } });
@@ -228,7 +234,7 @@ async function passImages(c, shop) {
 
 async function pkpassFor(c, cfg, member) {
   const shop = await c.db.get('SELECT * FROM shops WHERE id = ?', member.shop_id);
-  const passJson = apple.buildPassJson(shop, member, { ...cfg, origin: c.origin, authToken: await apple.authTokenFor(cfg.authSecret, member.token) });
+  const passJson = apple.buildPassJson(shop, member, { ...cfg, origin: c.origin, authToken: await apple.authTokenFor(cfg.authSecret, member.token), menuUrl: await menuUrlOf(c, shop) });
   const bytes = await apple.buildPkpass({ passJson, images: await passImages(c, shop), ...cfg });
   const updated = Math.max(member.updated_at || member.created_at, shop.updated_at || shop.created_at);
   return { bytes, updated };
@@ -1037,6 +1043,7 @@ async function cardInfo(c, token) {
     refUrl: code ? `${c.origin}/j/${shop.slug}?ref=${code}` : null,
     coupons: await activeCoupons(c.db, m.id),
     canRate: await canRate(c, shop, m),
+    menuUrl: await menuUrlOf(c, shop),
   });
 }
 
@@ -2277,24 +2284,47 @@ async function setStaffBranch(c, id) {
 const MAX_MENU = 300;
 const MAX_MENU_IMAGE = 200 * 1024;
 const menuImageUrl = (it, origin) => (it.has_image ? `${origin}/media/menu/${it.id}.jpg?v=${it.updated_at}` : null);
-const menuView = (it, origin) => ({ id: it.id, category: it.category, name: it.name, description: it.description, price: it.price, available: !!it.available, sort: it.sort, image: menuImageUrl(it, origin) });
-const MENU_COLS = 'id, shop_id, category, name, description, price, available, sort, updated_at, image IS NOT NULL AS has_image';
+const menuView = (it, origin) => ({ id: it.id, category: it.category, name: it.name, description: it.description, price: it.price, sizes: JSON.parse(it.sizes || '[]'), available: !!it.available, sort: it.sort, image: menuImageUrl(it, origin) });
+const MENU_COLS = 'id, shop_id, category, name, description, price, sizes, available, sort, updated_at, image IS NOT NULL AS has_image';
+const MAX_SIZES = 5;
+
+function readPrice(raw, msg = 'السعر مش صحيح') {
+  if (raw === null || raw === undefined || raw === '') return null;
+  const price = Number(raw);
+  if (!Number.isFinite(price) || price < 0 || price > 100000) fail(400, msg);
+  return Math.round(price * 1000) / 1000;
+}
+
+// الأحجام (صغير، وسط، كبير…): كل حجم إله سعر، والزبون بيختار بينهم بصفحة المنيو
+function readSizes(list) {
+  if (!Array.isArray(list)) fail(400, 'الأحجام مش صحيحة');
+  const sizes = [];
+  for (const x of list) {
+    const name = clean(x && x.name, 20);
+    const price = readPrice(x && x.price, `سعر الحجم «${name || '؟'}» مش صحيح`);
+    if (!name && price === null) continue;
+    if (!name) fail(400, 'اكتب اسم الحجم (مثلاً: صغير)');
+    if (price === null) fail(400, `اكتب سعر الحجم «${name}»`);
+    if (sizes.some((y) => y.name === name)) fail(400, `الحجم «${name}» مكرر`);
+    sizes.push({ name, price });
+  }
+  if (sizes.length > MAX_SIZES) fail(400, `لحد ${MAX_SIZES} أحجام للصنف`);
+  if (sizes.length === 1) fail(400, 'الأحجام لازم تكون اتنين أو أكتر. لحجم واحد اكتب السعر بس');
+  return sizes;
+}
 
 function readMenuItem(b, prev = {}) {
   const name = clean(b.name ?? prev.name, 60);
   if (name.length < 1) fail(400, 'اكتب اسم الصنف');
-  const priceRaw = b.price ?? prev.price;
-  let price = null;
-  if (priceRaw !== null && priceRaw !== undefined && priceRaw !== '') {
-    price = Number(priceRaw);
-    if (!Number.isFinite(price) || price < 0 || price > 100000) fail(400, 'السعر مش صحيح');
-    price = Math.round(price * 1000) / 1000;
-  }
+  const sizes = b.sizes !== undefined ? readSizes(b.sizes) : JSON.parse(prev.sizes || '[]');
+  // مع الأحجام، السعر الأساسي هو أرخص حجم (بيلزم للترتيب وللي بيعرض سعر واحد)
+  const price = sizes.length ? Math.min(...sizes.map((x) => x.price)) : readPrice(b.price !== undefined ? b.price : prev.price);
   return {
     category: clean(b.category ?? prev.category ?? '', 40),
     name,
     description: clean(b.description ?? prev.description ?? '', 200),
     price,
+    sizes: JSON.stringify(sizes),
     available: (b.available ?? prev.available ?? true) ? 1 : 0,
     sort: Number.isInteger(Number(b.sort)) ? Number(b.sort) : (prev.sort ?? 0),
   };
@@ -2322,8 +2352,8 @@ async function addMenuItem(c) {
   const it = readMenuItem(c.body);
   const image = c.body.image ? readMenuImage(c.body.image) : null;
   const now = Date.now();
-  await c.db.run('INSERT INTO menu_items (shop_id, category, name, description, price, image, available, sort, updated_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-    c.shop.id, it.category, it.name, it.description, it.price, image, it.available, it.sort, now, now);
+  await c.db.run('INSERT INTO menu_items (shop_id, category, name, description, price, sizes, image, available, sort, updated_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    c.shop.id, it.category, it.name, it.description, it.price, it.sizes, image, it.available, it.sort, now, now);
   return listMenu(c);
 }
 
@@ -2332,8 +2362,8 @@ async function updateMenuItem(c, id) {
   if (!prev) fail(404, 'ما لقينا الصنف');
   const it = readMenuItem(c.body, prev);
   const image = c.body.removeImage ? null : c.body.image ? readMenuImage(c.body.image) : prev.image;
-  await c.db.run('UPDATE menu_items SET category = ?, name = ?, description = ?, price = ?, image = ?, available = ?, sort = ?, updated_at = ? WHERE id = ?',
-    it.category, it.name, it.description, it.price, image, it.available, it.sort, Date.now(), prev.id);
+  await c.db.run('UPDATE menu_items SET category = ?, name = ?, description = ?, price = ?, sizes = ?, image = ?, available = ?, sort = ?, updated_at = ? WHERE id = ?',
+    it.category, it.name, it.description, it.price, it.sizes, image, it.available, it.sort, Date.now(), prev.id);
   return listMenu(c);
 }
 
@@ -2342,6 +2372,18 @@ async function deleteMenuItem(c, id) {
   if (!r.changes) fail(404, 'ما لقينا الصنف');
   return listMenu(c);
 }
+
+// لما يصير عند المحل منيو (أو ينشال كله): منحدّث رابط المنيو ببطاقات Google، وبطاقات Apple بتاخده أول ما تتحدّث
+const syncsMenu = (fn) => async (c, ...rest) => {
+  const before = await menuUrlOf(c, c.shop);
+  const res = await fn(c, ...rest);
+  if ((await menuUrlOf(c, c.shop)) !== before) {
+    c.shop.updated_at = Date.now();
+    await c.db.run('UPDATE shops SET updated_at = ? WHERE id = ?', c.shop.updated_at, c.shop.id);
+    if (c.shop.gw_synced_at) c.waitUntil(syncClass(c, c.shop));
+  }
+  return res;
+};
 
 // ─── ملف المنيو PDF ───
 // المتصفح بيبعته قطع (كل قطعة لحد 600 كيلو، base64)، وأول ما توصل آخر قطعة بيصير هو المنيو المنشور
@@ -2533,11 +2575,11 @@ const API = [
   ['GET', /^\/api\/shops\/([a-z0-9-]{3,40})\/public$/, publicShop],
   ['GET', /^\/api\/shops\/([a-z0-9-]{3,40})\/menu$/, publicMenu],
   ['GET', /^\/api\/menu$/, listMenu, 'owner'],
-  ['POST', /^\/api\/menu$/, addMenuItem, 'owner'],
-  ['PUT', /^\/api\/menu\/(\d+)$/, updateMenuItem, 'owner'],
-  ['DELETE', /^\/api\/menu\/(\d+)$/, deleteMenuItem, 'owner'],
-  ['POST', /^\/api\/menu\/pdf$/, uploadMenuPdf, 'owner'],
-  ['DELETE', /^\/api\/menu\/pdf$/, deleteMenuPdf, 'owner'],
+  ['POST', /^\/api\/menu$/, syncsMenu(addMenuItem), 'owner'],
+  ['PUT', /^\/api\/menu\/(\d+)$/, syncsMenu(updateMenuItem), 'owner'],
+  ['DELETE', /^\/api\/menu\/(\d+)$/, syncsMenu(deleteMenuItem), 'owner'],
+  ['POST', /^\/api\/menu\/pdf$/, syncsMenu(uploadMenuPdf), 'owner'],
+  ['DELETE', /^\/api\/menu\/pdf$/, syncsMenu(deleteMenuPdf), 'owner'],
   ['POST', /^\/api\/shops\/([a-z0-9-]{3,40})\/join$/, join],
   ['GET', /^\/api\/cards\/([a-z2-9]{20})$/, cardInfo],
   ['POST', /^\/api\/cards\/([a-z2-9]{20})\/delete$/, deleteCard],
@@ -2558,11 +2600,11 @@ const API = [
   ['GET', /^\/api\/admin\/shops$/, adminShops, 'staff'],
   ['POST', /^\/api\/admin\/shops\/(\d+)\/plan$/, adminShopPlan, 'staff'],
   ['GET', /^\/api\/admin\/shops\/(\d+)\/menu$/, forShop(listMenu), 'staff'],
-  ['POST', /^\/api\/admin\/shops\/(\d+)\/menu$/, forShop(addMenuItem), 'staff'],
-  ['POST', /^\/api\/admin\/shops\/(\d+)\/menu\/pdf$/, forShop(uploadMenuPdf), 'staff'],
-  ['DELETE', /^\/api\/admin\/shops\/(\d+)\/menu\/pdf$/, forShop(deleteMenuPdf), 'staff'],
-  ['PUT', /^\/api\/admin\/shops\/(\d+)\/menu\/(\d+)$/, forShop(updateMenuItem), 'staff'],
-  ['DELETE', /^\/api\/admin\/shops\/(\d+)\/menu\/(\d+)$/, forShop(deleteMenuItem), 'staff'],
+  ['POST', /^\/api\/admin\/shops\/(\d+)\/menu$/, forShop(syncsMenu(addMenuItem)), 'staff'],
+  ['POST', /^\/api\/admin\/shops\/(\d+)\/menu\/pdf$/, forShop(syncsMenu(uploadMenuPdf)), 'staff'],
+  ['DELETE', /^\/api\/admin\/shops\/(\d+)\/menu\/pdf$/, forShop(syncsMenu(deleteMenuPdf)), 'staff'],
+  ['PUT', /^\/api\/admin\/shops\/(\d+)\/menu\/(\d+)$/, forShop(syncsMenu(updateMenuItem)), 'staff'],
+  ['DELETE', /^\/api\/admin\/shops\/(\d+)\/menu\/(\d+)$/, forShop(syncsMenu(deleteMenuItem)), 'staff'],
   ['GET', /^\/api\/admin\/apple$/, adminApple, 'staff'],
   ['POST', /^\/api\/admin\/apple\/key$/, adminAppleKey, 'staff'],
   ['PUT', /^\/api\/admin\/apple\/cert$/, adminAppleCert, 'staff'],

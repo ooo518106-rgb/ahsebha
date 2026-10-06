@@ -7,7 +7,7 @@ import { DEMO_LOGO, DEMO_MENU_PDF, MENU_IMAGES } from './demo-assets.js';
 export const DEMO_SLUG = 'demo-cafe';
 export const DEMO_EMAIL = 'demo@nuqatak.demo';
 // زيد الرقم كل ما تضيف إشي جديد للعرض: الحساب بيتجدّد لحاله بعد النشر (بدل ما يستنى الساعة 4 الصبح)
-export const DEMO_VERSION = 3;
+export const DEMO_VERSION = 4;
 const DAY = 864e5;
 const AMMAN = 3 * 36e5; // الأردن UTC+3 طول السنة
 
@@ -236,20 +236,24 @@ export async function seedDemo(db, now = Date.now()) {
     }).filter(Boolean),
   );
   await addGifts(db, { s, now, members, ids });
-  // منيو بالصور والوصف (واحد مش متوفّر، عشان يبيّن كيف بيختفي من منيو الزبون)
+  // منيو بالصور والوصف والأحجام (واحد مش متوفّر، عشان يبيّن كيف بيختفي من منيو الزبون)
+  const sz = (...pairs) => pairs.map(([name, price]) => ({ name, price }));
   const menu = [
-    ['مشروبات ساخنة', 'إسبريسو', 1.5, 'شوت مركّز من حبوب محمّصة عنا', 'espresso'],
-    ['مشروبات ساخنة', 'كابتشينو', 2.5, 'إسبريسو مع حليب مرغّى ورسمة قلب', 'cappuccino'],
-    ['مشروبات ساخنة', 'لاتيه', 2.75, 'ناعم وخفيف، بحليب كامل الدسم', 'latte'],
-    ['مشروبات ساخنة', 'سبانش لاتيه', 3.25, 'بالحليب المكثّف المحلّى', 'spanish'],
-    ['مشروبات باردة', 'آيس لاتيه', 3, 'إسبريسو وحليب بارد وتلج', 'icedLatte'],
+    ['مشروبات ساخنة', 'إسبريسو', sz(['سنجل', 1.5], ['دبل', 2]), 'شوت مركّز من حبوب محمّصة عنا', 'espresso'],
+    ['مشروبات ساخنة', 'كابتشينو', sz(['صغير', 2.5], ['وسط', 2.75], ['كبير', 3]), 'إسبريسو مع حليب مرغّى ورسمة قلب', 'cappuccino'],
+    ['مشروبات ساخنة', 'لاتيه', sz(['صغير', 2.75], ['كبير', 3.25]), 'ناعم وخفيف، بحليب كامل الدسم', 'latte'],
+    ['مشروبات ساخنة', 'سبانش لاتيه', sz(['صغير', 3.25], ['كبير', 3.75]), 'بالحليب المكثّف المحلّى', 'spanish'],
+    ['مشروبات باردة', 'آيس لاتيه', sz(['وسط', 3], ['كبير', 3.5]), 'إسبريسو وحليب بارد وتلج', 'icedLatte'],
     ['مشروبات باردة', 'موهيتو', 2.5, 'نعنع وليمون وصودا', 'mojito'],
     ['مشروبات باردة', 'ماتشا مثلّجة', 3.5, 'خلصت اليوم، بترجع بكرا', null, 0],
     ['حلويات', 'تشيز كيك', 3.5, 'بصوص التوت الأحمر', 'cheesecake'],
     ['حلويات', 'كرواسون شوكولا', 1.75, 'طازة كل صبح', 'croissant'],
   ];
-  await insertRows('INSERT INTO menu_items (shop_id, category, name, price, description, image, available, sort, updated_at, created_at)', 10,
-    menu.map(([cat, name, price, desc, img, available = 1], i) => [s, cat, name, price, desc, img ? MENU_IMAGES[img] : null, available, i, now, now]));
+  await insertRows('INSERT INTO menu_items (shop_id, category, name, price, sizes, description, image, available, sort, updated_at, created_at)', 11,
+    menu.map(([cat, name, price, desc, img, available = 1], i) => {
+      const sizes = Array.isArray(price) ? price : [];
+      return [s, cat, name, sizes.length ? Math.min(...sizes.map((x) => x.price)) : price, JSON.stringify(sizes), desc, img ? MENU_IMAGES[img] : null, available, i, now, now];
+    }));
   // والمنيو نفسه كملف PDF (قطع 600 كيلو، نفس طريقة الرفع)
   const pdfSize = Math.floor((DEMO_MENU_PDF.length * 3) / 4) - (DEMO_MENU_PDF.endsWith('==') ? 2 : DEMO_MENU_PDF.endsWith('=') ? 1 : 0);
   const CHUNK = (600 * 1024 / 3) * 4;

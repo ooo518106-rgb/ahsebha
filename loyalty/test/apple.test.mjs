@@ -152,3 +152,14 @@ test('بدون إعداد Apple: الرابط بيرجع للبطاقة', async 
   assert.equal((await client().get(`/api/cards/${join.data.token}`)).data.apple, false);
   assert.equal((await client().get('/apple/v1/passes/x/y')).status, 404);
 });
+
+test('بطاقة Apple: رابط المنيو على ضهر البطاقة إذا في منيو', async () => {
+  const { buildPassJson } = await import('../src/apple.js');
+  const shop = { id: 1, name: 'موكا', color: '#3b2418', program_type: 'stamps', stamps_required: 8, reward_name: 'قهوة مجانية', locations: '[]' };
+  const member = { token: 'abcdefghijkmnpqrstuv', card_no: '12345678', name: 'سارة', balance: 3 };
+  const opts = { passTypeId: 'pass.x', teamId: 'T', origin: 'https://x.test', authToken: 'a'.repeat(32) };
+  assert.equal(buildPassJson(shop, member, opts).storeCard.backFields.some((f) => f.key === 'menu'), false);
+  const menu = buildPassJson(shop, member, { ...opts, menuUrl: 'https://x.test/m/mocha' }).storeCard.backFields.find((f) => f.key === 'menu');
+  assert.equal(menu.value, 'https://x.test/m/mocha');
+  assert.match(menu.attributedValue, /<a href="https:\/\/x\.test\/m\/mocha">/);
+});

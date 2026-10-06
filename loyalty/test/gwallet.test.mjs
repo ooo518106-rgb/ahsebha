@@ -142,3 +142,36 @@ test('لو Google رفضت: الخطأ بيبيّن بالإعدادات، ور�
   assert.equal(bc.status, 200);
   assert.match(bc.data.google, /Invalid logo/);
 });
+
+test('رابط المنيو بالمحفظة: بيطلع أول ما يصير في منيو، وبينشال لما يفضى', async () => {
+  const google = fakeGoogle({ 'POST /loyaltyClass': () => ({ status: 200 }) });
+  const { client } = await setup({ GOOGLE_ISSUER_ID: '3388', GOOGLE_SERVICE_ACCOUNT: serviceAccount, fetch: google.fetch });
+  const c = client();
+  const { shop } = await signup(c);
+  const classCalls = () => google.calls.filter((x) => x.method === 'POST' && x.url.endsWith('/loyaltyClass'));
+  await c.post('/api/shop/sync', {});
+  assert.deepEqual(classCalls().at(-1).body.linksModuleData, { uris: [] }, 'بدون منيو ما في رابط');
+  const join = await client().post(`/api/shops/${shop.slug}/join`, { name: 'ليلى', phone: '0791234569' });
+  assert.equal((await client().get(`/api/cards/${join.data.token}`)).data.menuUrl, null);
+
+  // أول صنف: الفئة بتتحدّث برابط المنيو، والصنف التاني ما بيعيدها
+  let r = await c.post('/api/menu', { name: 'لاتيه', price: 2.75 });
+  await c.flush();
+  assert.equal(classCalls().length, 2);
+  assert.deepEqual(classCalls().at(-1).body.linksModuleData.uris, [{ id: 'menu', uri: `https://loyalty.test/m/${shop.slug}`, description: 'المنيو' }]);
+  r = await c.post('/api/menu', { name: 'موكا', price: 3 });
+  await c.flush();
+  assert.equal(classCalls().length, 2);
+  assert.equal((await client().get(`/api/cards/${join.data.token}`)).data.menuUrl, `https://loyalty.test/m/${shop.slug}`);
+
+  // لما كل الأصناف تخلص (مش متوفرة) الرابط بينشال
+  for (const it of r.data.items) await c.put(`/api/menu/${it.id}`, { available: false });
+  await c.flush();
+  assert.equal(classCalls().length, 3);
+  assert.deepEqual(classCalls().at(-1).body.linksModuleData, { uris: [] });
+  assert.equal((await client().get(`/api/cards/${join.data.token}`)).data.menuUrl, null);
+
+  // ورابط الحفظ الكامل (لو الـ API فشل) بيحمل الرابط كمان
+  const cls = buildClass({ issuerId: '3388' }, { id: 7, name: 'x', color: '#000000', logo_version: 1, country: 'JO', program_type: 'points', points_per_unit: 1, reward_threshold: 100, reward_name: 'قهوة' }, 'https://x.test', { menuUrl: 'https://x.test/m/x' });
+  assert.equal(cls.linksModuleData.uris[0].uri, 'https://x.test/m/x');
+});
