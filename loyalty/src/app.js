@@ -2304,7 +2304,7 @@ function readMenuImage(dataUrl) {
 
 async function listMenu(c) {
   const items = await c.db.all(`SELECT ${MENU_COLS} FROM menu_items WHERE shop_id = ? ORDER BY category, sort, id`, c.shop.id);
-  return json({ items: items.map((it) => menuView(it, c.origin)), menuUrl: `${c.origin}/m/${c.shop.slug}` });
+  return json({ items: items.map((it) => menuView(it, c.origin)), menuUrl: `${c.origin}/m/${c.shop.slug}`, pdf: menuPdfView(c.shop, c.origin) });
 }
 
 async function addMenuItem(c) {
@@ -2334,6 +2334,80 @@ async function deleteMenuItem(c, id) {
   return listMenu(c);
 }
 
+// ─── ملف المنيو PDF ───
+// المتصفح بيبعته قطع (كل قطعة لحد 600 كيلو، base64)، وأول ما توصل آخر قطعة بيصير هو المنيو المنشور
+const MAX_MENU_PDF = 6 * 1024 * 1024;
+const PDF_PART = 600 * 1024;
+const B64_RE = /^[A-Za-z0-9+/]+=*$/;
+const b64Size = (b64) => Math.floor((b64.length * 3) / 4) - (b64.endsWith('==') ? 2 : b64.endsWith('=') ? 1 : 0);
+const menuPdfUrl = (shop, origin) => (shop.menu_pdf ? `${origin}/media/menu-pdf/${shop.id}/${shop.menu_pdf}.pdf` : null);
+const menuPdfView = (shop, origin) => (shop.menu_pdf ? { url: menuPdfUrl(shop, origin), size: shop.menu_pdf_size } : null);
+
+async function uploadMenuPdf(c) {
+  noDemo(c, 'رفع ملف المنيو');
+  const s = c.shop;
+  const size = Number(c.body.size);
+  const parts = Number(c.body.parts);
+  const part = Number(c.body.part);
+  const data = String(c.body.data || '');
+  if (!Number.isInteger(size) || size < 100 || size > MAX_MENU_PDF) fail(400, 'ملف المنيو لازم يكون أقل من 6 ميغا');
+  if (parts !== Math.ceil(size / PDF_PART) || !Number.isInteger(part) || part < 0 || part >= parts) fail(400, 'قطعة الملف مش صحيحة');
+  if (!data || data.length > Math.ceil(PDF_PART / 3) * 4 || !B64_RE.test(data)) fail(400, 'قطعة الملف مش صحيحة');
+  let ver = Number(c.body.ver);
+  if (part === 0) {
+    if (!data.startsWith('JVBERi0')) fail(400, 'الملف لازم يكون PDF'); // «%PDF-»
+    await rateLimit(c, `menupdf:${s.id}`, 10, 60 * MIN, 'رفعت ملفات كتير، استنى شوي');
+    ver = Date.now();
+    // رفعات قديمة ما كمّلت بتنمسح (المنيو المنشور بيضل لحد ما يكمل الجديد)
+    await c.db.run('DELETE FROM menu_files WHERE shop_id = ? AND ver <> ?', s.id, s.menu_pdf);
+  } else if (!Number.isInteger(ver) || ver <= 0) fail(400, 'قطعة الملف مش صحيحة');
+  await c.db.run('INSERT OR REPLACE INTO menu_files (shop_id, ver, part, data) VALUES (?, ?, ?, ?)', s.id, ver, part, data);
+  if (part < parts - 1) return json({ ver, next: part + 1 });
+  // آخر قطعة: بنتأكد إنه كل القطع وصلت وحجمها مزبوط، وبعدين بننشره ومنمسح القديم
+  const rows = await c.db.all('SELECT part, LENGTH(data) AS len, SUBSTR(data, -2) AS tail FROM menu_files WHERE shop_id = ? AND ver = ? ORDER BY part', s.id, ver);
+  const got = rows.reduce((n, r) => n + Math.floor((r.len * 3) / 4) - (r.tail === '==' ? 2 : r.tail.endsWith('=') ? 1 : 0), 0);
+  if (rows.length !== parts || rows.some((r, i) => r.part !== i) || got !== size) {
+    await c.db.run('DELETE FROM menu_files WHERE shop_id = ? AND ver = ?', s.id, ver);
+    fail(400, 'الملف ما وصل كامل، جرّب ترفعه كمان مرة');
+  }
+  await c.db.batch([
+    ['UPDATE shops SET menu_pdf = ?, menu_pdf_size = ?, menu_pdf_parts = ?, updated_at = ? WHERE id = ?', [ver, size, parts, Date.now(), s.id]],
+    ['DELETE FROM menu_files WHERE shop_id = ? AND ver <> ?', [s.id, ver]],
+  ]);
+  return json({ pdf: menuPdfView({ ...s, menu_pdf: ver, menu_pdf_size: size }, c.origin) });
+}
+
+async function deleteMenuPdf(c) {
+  noDemo(c, 'حذف ملف المنيو');
+  await c.db.batch([
+    ['UPDATE shops SET menu_pdf = 0, menu_pdf_size = 0, menu_pdf_parts = 0 WHERE id = ?', [c.shop.id]],
+    ['DELETE FROM menu_files WHERE shop_id = ?', [c.shop.id]],
+  ]);
+  return json({ pdf: null });
+}
+
+// بنبعت الملف قطعة قطعة (كل قطعة استعلام لحاله)، فما بنحمّل الملف كله بالذاكرة مرة وحدة
+async function menuPdf(c, shopId, ver) {
+  const shop = await c.db.get('SELECT id, menu_pdf, menu_pdf_size, menu_pdf_parts FROM shops WHERE id = ?', Number(shopId));
+  if (!shop || !shop.menu_pdf || String(shop.menu_pdf) !== ver) return notFound(c);
+  const fromB64 = Uint8Array.fromBase64 ? (x) => Uint8Array.fromBase64(x) : b64ToBytes;
+  let part = 0;
+  const stream = new ReadableStream({
+    async pull(ctrl) {
+      if (part >= shop.menu_pdf_parts) { ctrl.close(); return; }
+      const row = await c.db.get('SELECT data FROM menu_files WHERE shop_id = ? AND ver = ? AND part = ?', shop.id, shop.menu_pdf, part++);
+      if (!row) { ctrl.error(new Error('missing part')); return; }
+      ctrl.enqueue(fromB64(row.data));
+    },
+  });
+  return new Response(stream, {
+    headers: {
+      'content-type': 'application/pdf', 'content-length': String(shop.menu_pdf_size), 'content-disposition': 'inline; filename="menu.pdf"',
+      'cache-control': 'public, max-age=31536000, immutable', 'x-content-type-options': 'nosniff',
+    },
+  });
+}
+
 async function publicMenu(c, slug) {
   const shop = await shopBySlug(c.db, slug);
   const items = await c.db.all(`SELECT ${MENU_COLS} FROM menu_items WHERE shop_id = ? AND available = 1 ORDER BY sort, id`, shop.id);
@@ -2344,7 +2418,7 @@ async function publicMenu(c, slug) {
     if (!cat) { cat = { name: it.category, items: [] }; cats.push(cat); }
     cat.items.push(menuView(it, c.origin));
   }
-  return json({ shop: publicShopView(shop, c.origin), categories: cats });
+  return json({ shop: publicShopView(shop, c.origin), categories: cats, pdf: menuPdfView(shop, c.origin) });
 }
 
 async function menuImage(c, id) {
@@ -2453,6 +2527,8 @@ const API = [
   ['POST', /^\/api\/menu$/, addMenuItem, 'owner'],
   ['PUT', /^\/api\/menu\/(\d+)$/, updateMenuItem, 'owner'],
   ['DELETE', /^\/api\/menu\/(\d+)$/, deleteMenuItem, 'owner'],
+  ['POST', /^\/api\/menu\/pdf$/, uploadMenuPdf, 'owner'],
+  ['DELETE', /^\/api\/menu\/pdf$/, deleteMenuPdf, 'owner'],
   ['POST', /^\/api\/shops\/([a-z0-9-]{3,40})\/join$/, join],
   ['GET', /^\/api\/cards\/([a-z2-9]{20})$/, cardInfo],
   ['POST', /^\/api\/cards\/([a-z2-9]{20})\/delete$/, deleteCard],
@@ -2598,6 +2674,7 @@ export async function handle(req, ctx) {
     let m;
     if ((m = p.match(/^\/media\/logo\/(\d+)\.png$/))) return await logo(c, m[1]);
     if ((m = p.match(/^\/media\/menu\/(\d+)\.jpg$/))) return await menuImage(c, m[1]);
+    if ((m = p.match(/^\/media\/menu-pdf\/(\d+)\/(\d+)\.pdf$/))) return await menuPdf(c, m[1], m[2]);
     if (/^\/m\/[a-z0-9-]{3,40}\/?$/.test(p)) return await page(c, '/menu.html');
     if (/^\/print\/[a-z0-9-]{3,40}\/?$/.test(p)) return await page(c, '/print.html');
     if (/^\/g\/[a-z2-9]{20}\/?$/.test(p)) return await page(c, '/gift.html');

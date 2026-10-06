@@ -816,7 +816,9 @@ function joinView() {
         <button class="btn ghost grow" type="button" data-copy="${menuUrl}">نسخ الرابط</button>
         <a class="btn soft grow" data-print href="${printUrl('menu', 'table')}" target="_blank" rel="noopener">🖨️ كروت QR للطاولات</a>
       </div>
+      <div class="menu-pdf" id="menuPdf"></div>
       <form class="stack menu-form" id="menuForm">
+        <b>أو ضيف الأصناف وحدة وحدة</b>
         <div class="row">
           <input class="grow" name="category" placeholder="القسم: مشروبات ساخنة" maxlength="40" list="menuCats">
           <input class="grow" name="name" placeholder="اسم الصنف" maxlength="60" required>
@@ -837,6 +839,59 @@ function joinView() {
 }
 
 // صورة الصنف: بنصغّرها لـ 480 بكسل JPG قبل ما نرفعها
+// ─── ملف المنيو PDF: بينرفع قطع (كل قطعة 600 كيلو) عشان حجم الطلب ───
+const PDF_PART = 600 * 1024;
+const fmtSize = (n) => (n >= 1024 * 1024 ? `${(n / 1024 / 1024).toFixed(1)} ميغا` : `${Math.max(1, Math.round(n / 1024))} كيلو`);
+const blobB64 = (blob) => new Promise((ok, bad) => {
+  const r = new FileReader();
+  r.onload = () => ok(String(r.result).split(',')[1] || '');
+  r.onerror = () => bad(new Error('ما قدرنا نقرأ الملف'));
+  r.readAsDataURL(blob);
+});
+function drawMenuPdf(pdf) {
+  const box = $('#menuPdf');
+  if (!box) return;
+  render(box, html`<b>📄 عندك المنيو ملف PDF جاهز؟</b>
+    <p class="hint">ارفعه وبيطلع للزبون زر «افتح المنيو» فوق الأصناف. لحد 6 ميغا.</p>
+    ${pdf ? html`<div class="row"><a class="btn ghost grow" href="${pdf.url}" target="_blank" rel="noopener">📄 الملف الحالي (${fmtSize(pdf.size)})</a>
+      <button class="btn ghost" type="button" id="pdfDel">شيله</button></div>` : ''}
+    <label class="btn soft block" style="margin:0" id="pdfPick">${pdf ? '🔄 بدّل الملف' : '📤 ارفع ملف PDF'}<input type="file" id="pdfFile" accept="application/pdf,.pdf" class="hidden"></label>
+    <div class="bar hidden" id="pdfBar"><i style="width:0%"></i></div>`);
+  $('#pdfFile', box).onchange = async (e) => {
+    const file = e.target.files[0];
+    e.target.value = '';
+    if (!file) return;
+    if (file.size > 6 * 1024 * 1024) { toast('الملف أكبر من 6 ميغا. صغّره وجرّب كمان مرة', 'bad'); return; }
+    const pick = $('#pdfPick', box);
+    const bar = $('#pdfBar', box);
+    pick.classList.add('hidden');
+    bar.classList.remove('hidden');
+    const parts = Math.ceil(file.size / PDF_PART);
+    try {
+      let ver;
+      let res;
+      for (let part = 0; part < parts; part++) {
+        const data = await blobB64(file.slice(part * PDF_PART, (part + 1) * PDF_PART));
+        res = await api('/api/menu/pdf', { method: 'POST', body: { size: file.size, parts, part, ver, data } });
+        ver = res.ver;
+        $('i', bar).style.width = `${Math.round(((part + 1) / parts) * 100)}%`;
+      }
+      toast('انرفع المنيو ✅ الزبون بيشوفه هلق', 'ok');
+      drawMenuPdf(res.pdf);
+    } catch (err) {
+      toast(err.message, 'bad');
+      drawMenuPdf(pdf);
+    }
+  };
+  const del = $('#pdfDel', box);
+  if (del) {
+    del.onclick = async () => {
+      if (!confirm('تشيل ملف المنيو؟ الأصناف اللي ضايفها بتضل.')) return;
+      try { drawMenuPdf((await api('/api/menu/pdf', { method: 'DELETE' })).pdf); toast('انشال ✅', 'ok'); } catch (err) { toast(err.message, 'bad'); }
+    };
+  }
+}
+
 async function resizeMenuImage(file) {
   const img = await createImageBitmap(file);
   const scale = Math.min(1, 480 / Math.max(img.width, img.height));
@@ -857,6 +912,7 @@ async function loadMenu(data) {
   let r;
   try { r = data || await api('/api/menu'); } catch (e) { render(box, html`<p class="alert bad">${e.message}</p>`); return; }
   if (!box.isConnected) return; // تركوا التبويب قبل ما يوصل المنيو
+  drawMenuPdf(r.pdf);
   const cats = [...new Set(r.items.map((x) => x.category))];
   render($('#menuCats'), html`${cats.filter(Boolean).map((cat) => html`<option value="${cat}"></option>`)}`);
   render(box, r.items.length ? html`${cats.map((cat) => html`<h3 style="margin-top:10px">${cat || 'بدون قسم'}</h3>

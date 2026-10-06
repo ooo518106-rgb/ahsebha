@@ -18,7 +18,7 @@ async function main() {
     render(root, html`<div class="panel center" style="margin-top:90px"><h1>😕</h1><p>${e.message}</p></div>`);
     return;
   }
-  const { shop, categories } = r;
+  const { shop, categories, pdf } = r;
   setBrand(shop.color);
   document.title = `${t('menu')} — ${shop.name}`;
   const card = savedCard();
@@ -26,6 +26,7 @@ async function main() {
   render(root, html`
     <p class="lang-switch"><button type="button" class="linkish" id="langBtn">${t('langSwitch')}</button></p>
     <div class="brand-hero"><img src="${shop.logo}" alt=""><h1>${shop.name}</h1><p class="muted">${t('menu')}</p></div>
+    ${pdf ? html`<a class="panel menu-pdf-open" href="${pdf.url}" target="_blank" rel="noopener"><span class="pdf-ico" aria-hidden="true">📄</span><span class="grow"><b>${t('menuPdf')}</b><span class="small muted">${t('menuPdfHint')}</span></span><span aria-hidden="true">${LANG === 'en' ? '→' : '←'}</span></a>` : ''}
     ${categories.length > 1 ? html`<nav class="menu-cats">${categories.map((c, i) => html`<a href="#cat-${i}" class="chip">${c.name || t('menu')}</a>`)}</nav>` : ''}
     ${categories.length ? categories.map((c, i) => html`<section class="panel menu-sec" id="cat-${i}">
         ${c.name ? html`<h2>${c.name}</h2>` : ''}
@@ -33,7 +34,7 @@ async function main() {
           ${it.image ? html`<img src="${it.image}" alt="" loading="lazy">` : ''}
           <div class="grow"><b>${it.name}</b>${it.description ? html`<div class="small muted">${it.description}</div>` : ''}</div>
           ${it.price != null ? html`<span class="price num">${fmtPrice(it.price, shop.currency)}</span>` : ''}</li>`)}</ul>
-      </section>`) : html`<p class="panel center muted">${t('menuEmpty')}</p>`}
+      </section>`) : pdf ? '' : html`<p class="panel center muted">${t('menuEmpty')}</p>`}
     <section class="panel center stack menu-join">
       <b>${t('menuJoin', { reward: shop.rewardName })}</b>
       <a class="btn big block" href="${card ? `/c/${card}` : `/j/${shop.slug}`}">${card ? t('menuOpenCard') : t('menuJoinBtn')}</a>

@@ -246,6 +246,14 @@ export const SCHEMA = [
     created_at INTEGER NOT NULL
   )`,
   'CREATE INDEX IF NOT EXISTS menu_shop ON menu_items(shop_id, category, sort)',
+  // ملف المنيو PDF: بينحفظ قطع (base64) لأنه قاعدة البيانات ما بتقبل قيمة أكبر من 2 ميغا. ver = وقت الرفع
+  `CREATE TABLE IF NOT EXISTS menu_files (
+    shop_id INTEGER NOT NULL REFERENCES shops(id),
+    ver INTEGER NOT NULL,
+    part INTEGER NOT NULL,
+    data TEXT NOT NULL,
+    PRIMARY KEY (shop_id, ver, part)
+  )`,
   // إهداء رصيد لصاحب: الرصيد بينخصم فوراً، والصاحب بيستلمه برابط (وبيرجع لصاحبه بعد 30 يوم لو ما انستلم)
   `CREATE TABLE IF NOT EXISTS credit_gifts (
     id INTEGER PRIMARY KEY,
@@ -319,6 +327,9 @@ export const MIGRATIONS = [
   'ALTER TABLE shops ADD COLUMN demo INTEGER NOT NULL DEFAULT 0',
   "ALTER TABLE shops ADD COLUMN onboard TEXT NOT NULL DEFAULT '{}'",
   'ALTER TABLE shops ADD COLUMN reminder_key TEXT',
+  'ALTER TABLE shops ADD COLUMN menu_pdf INTEGER NOT NULL DEFAULT 0',
+  'ALTER TABLE shops ADD COLUMN menu_pdf_size INTEGER NOT NULL DEFAULT 0',
+  'ALTER TABLE shops ADD COLUMN menu_pdf_parts INTEGER NOT NULL DEFAULT 0',
   'ALTER TABLE credit_txns ADD COLUMN note TEXT',
   // فهارس على الأعمدة الجديدة (لازم تيجي بعد ما ينضاف العمود)
   'CREATE INDEX IF NOT EXISTS shops_reseller ON shops(reseller_id)',

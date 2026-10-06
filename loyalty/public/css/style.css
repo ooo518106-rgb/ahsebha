@@ -663,6 +663,12 @@ html[dir="ltr"] body, html[dir="ltr"] .stamps { direction: ltr; }
 .menu-items img { width: 70px; height: 70px; border-radius: 16px; object-fit: cover; flex: none; box-shadow: var(--shadow-sm); }
 .menu-items .price { font-weight: 700; white-space: nowrap; color: var(--brand-text); background: color-mix(in srgb, var(--brand) 9%, transparent); padding: 3px 10px; border-radius: 99px; font-size: .88rem; }
 .menu-items li .grow { flex: 1; min-width: 0; }
+.menu-pdf { display: grid; gap: 8px; padding: 14px; border-radius: 18px; border: 1.5px dashed var(--border-strong); background: var(--card-2); }
+.menu-pdf .bar { height: 8px; }
+.menu-pdf-open { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; text-decoration: none; color: inherit; transition: transform .2s var(--ease); }
+.menu-pdf-open:active { transform: scale(.98); }
+.menu-pdf-open .grow { flex: 1; min-width: 0; display: grid; }
+.menu-pdf-open .pdf-ico { width: 48px; height: 48px; border-radius: 14px; display: grid; place-items: center; font-size: 1.5rem; background: color-mix(in srgb, var(--brand) 12%, transparent); }
 .menu-join { margin-top: 14px; background: radial-gradient(120% 120% at 100% 0%, color-mix(in srgb, var(--brand) 16%, transparent), transparent 60%), var(--card); }
 
 /* صفحة الطباعة */

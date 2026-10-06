@@ -2,12 +2,12 @@
 // قاعدة: كل ميزة جديدة بالمنصة لازم تنضاف هون كمان، عشان اللي بيجرّب العرض يشوفها شغّالة.
 import { hashPassword } from './auth.js';
 import { randomDigits, randomToken } from './util.js';
-import { DEMO_LOGO, MENU_IMAGES } from './demo-assets.js';
+import { DEMO_LOGO, DEMO_MENU_PDF, MENU_IMAGES } from './demo-assets.js';
 
 export const DEMO_SLUG = 'demo-cafe';
 export const DEMO_EMAIL = 'demo@nuqatak.demo';
 // زيد الرقم كل ما تضيف إشي جديد للعرض: الحساب بيتجدّد لحاله بعد النشر (بدل ما يستنى الساعة 4 الصبح)
-export const DEMO_VERSION = 2;
+export const DEMO_VERSION = 3;
 const DAY = 864e5;
 const AMMAN = 3 * 36e5; // الأردن UTC+3 طول السنة
 
@@ -120,6 +120,7 @@ export async function seedDemo(db, now = Date.now()) {
     [`DELETE FROM coupons WHERE shop_id = ?`, [s]],
     [`DELETE FROM broadcasts WHERE shop_id = ?`, [s]],
     [`DELETE FROM menu_items WHERE shop_id = ?`, [s]],
+    [`DELETE FROM menu_files WHERE shop_id = ?`, [s]],
     [`DELETE FROM sessions WHERE user_id IN (SELECT id FROM users WHERE shop_id = ? AND id <> ?)`, [s, owner.id]],
     [`DELETE FROM user_push_subs WHERE user_id IN (SELECT id FROM users WHERE shop_id = ?)`, [s]],
     [`DELETE FROM users WHERE shop_id = ? AND id <> ?`, [s, owner.id]],
@@ -249,5 +250,11 @@ export async function seedDemo(db, now = Date.now()) {
   ];
   await insertRows('INSERT INTO menu_items (shop_id, category, name, price, description, image, available, sort, updated_at, created_at)', 10,
     menu.map(([cat, name, price, desc, img, available = 1], i) => [s, cat, name, price, desc, img ? MENU_IMAGES[img] : null, available, i, now, now]));
+  // والمنيو نفسه كملف PDF (قطع 600 كيلو، نفس طريقة الرفع)
+  const pdfSize = Math.floor((DEMO_MENU_PDF.length * 3) / 4) - (DEMO_MENU_PDF.endsWith('==') ? 2 : DEMO_MENU_PDF.endsWith('=') ? 1 : 0);
+  const CHUNK = (600 * 1024 / 3) * 4;
+  const pdfParts = Math.ceil(DEMO_MENU_PDF.length / CHUNK);
+  for (let i = 0; i < pdfParts; i++) await db.run('INSERT INTO menu_files (shop_id, ver, part, data) VALUES (?, ?, ?, ?)', s, now, i, DEMO_MENU_PDF.slice(i * CHUNK, (i + 1) * CHUNK));
+  await db.run('UPDATE shops SET menu_pdf = ?, menu_pdf_size = ?, menu_pdf_parts = ? WHERE id = ?', now, pdfSize, pdfParts, s);
   return { shopId: s, ownerId: owner.id, sampleToken: (await db.get('SELECT token FROM members WHERE shop_id = ? ORDER BY visits DESC LIMIT 1', s)).token };
 }

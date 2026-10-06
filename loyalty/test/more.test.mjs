@@ -364,6 +364,11 @@ test('حساب العرض: دخول بكبسة، بيانات جاهزة، إج�
   assert.equal((await v2.get('/api/me')).data.shop.customLogo, true);
   const menu = (await p.client().get('/api/shops/demo-cafe/menu')).data.categories.flatMap((c) => c.items);
   assert.ok(menu.length >= 8 && menu.every((i) => i.image && i.description));
+  const demoPdf = (await p.client().get('/api/shops/demo-cafe/menu')).data.pdf;
+  const pdfFile = await p.client().get(demoPdf.url.replace(/^https?:\/\/[^/]+/, ''));
+  assert.equal(pdfFile.status, 200);
+  assert.equal(new TextDecoder().decode(pdfFile.data.subarray(0, 5)), '%PDF-');
+  assert.equal(pdfFile.data.length, demoPdf.size);
   assert.equal((await v2.get('/api/staff')).data.users.filter((u) => u.role === 'staff').length, 2);
   assert.equal((await v2.get('/api/coupons')).data.coupons.length, 2);
   const count = async (sql) => (await p.db.get(sql)).n;
@@ -555,4 +560,59 @@ test('طلبين بنفس الملّي ثانية: الهدية والكوبون
   const bonus = 10; // عُشر الـ 100 نقطة
   assert.equal((await owner.get(`/api/members/${lina.id}`)).data.member.balance, 10 + bonus);
   assert.equal((await owner.get(`/api/members/${sara.id}`)).data.member.balance, before + bonus);
+});
+
+test('المنيو PDF: بينرفع قطع، بينزل نفس الملف، بيتبدّل وبينشال، ومحمي', async () => {
+  const p = await platform();
+  const { owner } = p;
+  const PART = 600 * 1024;
+  const makePdf = (n, seed) => { const b = new Uint8Array(n); b.set(new TextEncoder().encode('%PDF-1.4\n')); for (let i = 9; i < n; i++) b[i] = (i * seed) & 255; return b; };
+  const b64 = (u8) => Buffer.from(u8).toString('base64');
+  const upload = async (bytes, client = owner) => {
+    const parts = Math.ceil(bytes.length / PART);
+    let ver;
+    let r;
+    for (let part = 0; part < parts; part++) {
+      r = await client.post('/api/menu/pdf', { size: bytes.length, parts, part, ver, data: b64(bytes.subarray(part * PART, (part + 1) * PART)) });
+      if (r.status !== 200) return r;
+      ver = r.data.ver;
+    }
+    return r;
+  };
+  const pdf = makePdf(1_400_000, 7); // 3 قطع
+  let r = await upload(pdf);
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  const url = r.data.pdf.url.replace(/^https?:\/\/[^/]+/, '');
+  assert.equal(r.data.pdf.size, pdf.length);
+  const dl = await p.client().get(url);
+  assert.equal(dl.status, 200);
+  assert.equal(dl.headers.get('content-type'), 'application/pdf');
+  assert.deepEqual(Buffer.from(dl.data), Buffer.from(pdf), 'نفس الملف بالزبط');
+  const pub = (await p.client().get(`/api/shops/${p.shop.slug}/menu`)).data;
+  assert.equal(pub.pdf.url, r.data.pdf.url);
+  assert.equal((await owner.get('/api/menu')).data.pdf.size, pdf.length);
+  // تبديل: الرابط القديم بيبطّل، والقطع القديمة بتنمسح
+  const pdf2 = makePdf(5000, 3);
+  r = await upload(pdf2);
+  assert.equal(r.status, 200);
+  assert.equal((await p.client().get(url)).status, 404);
+  assert.deepEqual(Buffer.from((await p.client().get(r.data.pdf.url.replace(/^https?:\/\/[^/]+/, ''))).data), Buffer.from(pdf2));
+  assert.equal((await p.db.get('SELECT COUNT(*) AS n FROM menu_files')).n, 1);
+  // مش PDF، أكبر من 6 ميغا، قطعة ناقصة
+  assert.equal((await owner.post('/api/menu/pdf', { size: 5000, parts: 1, part: 0, data: b64(new Uint8Array(5000).fill(65)) })).status, 400);
+  assert.equal((await owner.post('/api/menu/pdf', { size: 7 * 1024 * 1024, parts: 12, part: 0, data: b64(pdf.subarray(0, PART)) })).status, 400);
+  const first = await owner.post('/api/menu/pdf', { size: pdf.length, parts: 3, part: 0, data: b64(pdf.subarray(0, PART)) });
+  r = await owner.post('/api/menu/pdf', { size: pdf.length, parts: 3, part: 2, ver: first.data.ver, data: b64(pdf.subarray(2 * PART)) });
+  assert.equal(r.status, 400, 'القطعة النص ناقصة');
+  assert.equal((await owner.get('/api/menu')).data.pdf.size, pdf2.length, 'المنشور ما تغيّر');
+  // الكاشير ما بيرفع، وحساب العرض ما بيرفع
+  const st = await p.staffClient();
+  assert.equal((await upload(pdf2, st)).status, 403);
+  const demo = p.client();
+  await demo.post('/api/demo/login', {});
+  assert.equal((await upload(pdf2, demo)).status, 403);
+  // الحذف
+  assert.equal((await owner.del('/api/menu/pdf')).data.pdf, null);
+  assert.equal((await p.client().get(`/api/shops/${p.shop.slug}/menu`)).data.pdf, null);
+  assert.equal((await p.db.get('SELECT COUNT(*) AS n FROM menu_files WHERE shop_id = ?', p.shop.id)).n, 0);
 });
