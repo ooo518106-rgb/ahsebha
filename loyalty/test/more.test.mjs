@@ -219,7 +219,9 @@ test('صلاحية النقاط: بتبلّش من يوم التفعيل، تذ�
   const dev = await device(sara.guest, `/api/cards/${sara.token}/push`, 'sara');
   const warnAt = amman(12, 175);
   assert.equal((await p.cron(warnAt)).expiryWarned, 1);
-  assert.match(to(dev)[0].body, /عندك 40 نقطة بتنتهي بعد 5 أيام/);
+  // عدد الأيام الباقية بيعتمد على ساعة تشغيل الاختبار (التفعيل صار هلأ والتذكير الضهر)
+  const left = Math.max(1, Math.round((m.expiresAt - warnAt) / DAY));
+  assert.match(to(dev)[0].body, new RegExp(`عندك 40 نقطة بتنتهي بعد ${left} أيام`));
   assert.equal((await p.cron(warnAt + HOUR)).expiryWarned, 0, 'مرة وحدة');
   // انتهت
   const r = await p.cron(amman(12, 181));
@@ -351,9 +353,9 @@ test('حساب العرض: دخول بكبسة، بيانات جاهزة، إج�
   assert.ok(!(await p.admin.get('/api/admin/shops')).data.shops.some((s) => s.name === 'كوفي العرض'));
   // زائر تاني بيدخل نفس الحساب، والتعديلات بترجع بالليل
   await v.put('/api/shop', { name: 'اسم غريب' });
-  const now = Date.now();
-  const t = new Date(now + 864e5); // بكرة الساعة 5 الصبح بتوقيت عمّان
-  const tomorrow5am = Date.UTC(t.getUTCFullYear(), t.getUTCMonth(), t.getUTCDate(), 2, 0);
+  // بكرة الساعة 5 الصبح بتوقيت عمّان (حسب تاريخ عمّان، مش UTC، عشان الاختبار يزبط بعد نص الليل كمان)
+  const t = new Date(Date.now() + 3 * 3600e3);
+  const tomorrow5am = Date.UTC(t.getUTCFullYear(), t.getUTCMonth(), t.getUTCDate() + 1, 2, 0);
   const r = await p.cron(tomorrow5am);
   assert.equal(r.demoReset, true);
   assert.equal((await p.cron(tomorrow5am + 3600e3)).demoReset, undefined, 'مرة باليوم');
