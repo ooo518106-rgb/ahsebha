@@ -1810,6 +1810,17 @@ const SUB_BADGE = {
 };
 const fmtDay = (ms) => new Intl.DateTimeFormat('ar-u-nu-latn', { dateStyle: 'medium' }).format(new Date(ms));
 
+// 🆕 سجل التحديثات: كل تحديث برقمه وتاريخه وشو انضاف فيه (الأحدث فوق)
+function updatesPanel({ version, changelog }) {
+  return html`<section class="panel updates">
+    <h2>🆕 التحديثات</h2>
+    <p class="hint">الموقع شغّال هلأ على <b class="num">الإصدار ${version}</b>. إذا انطلب تحديث وما طلع رقمه هون، يعني لسا ما انتشر.</p>
+    <ol class="updates-list">${changelog.map((u, i) => html`<li class="${i ? '' : 'current'}">
+      <div class="row"><b class="num">الإصدار ${u.v}</b>${i ? '' : html`<span class="badge ok">الحالي</span>`}<span class="small muted">${fmtDay(Date.parse(`${u.date}T12:00:00+03:00`))}</span></div>
+      <ul>${u.items.map((x) => html`<li>${x}</li>`)}</ul></li>`)}</ol>
+  </section>`;
+}
+
 async function admin() {
   render(view, html`<p class="center muted">جاري التحميل…</p>`);
   let leads;
@@ -1826,8 +1837,12 @@ async function admin() {
   if (nav !== state.nav) return;
   const fresh = leads.filter((l) => l.status === 'new').length;
   render(view, html`
-    ${subnav('admin', [['overview', '📊 الأرقام'], ['pay', `💳 الحوالات${pay.payments.some((p) => p.status === 'pending') ? ' •' : ''}`], ['shops', `🏪 المحلات والطلبات${fresh ? ` (${fresh})` : ''}`], ['partners', '🤝 المندوبين'], ['apple', '🍎 Apple Wallet']])}
+    ${subnav('admin', [['overview', '📊 الأرقام'], ['pay', `💳 الحوالات${pay.payments.some((p) => p.status === 'pending') ? ' •' : ''}`], ['shops', `🏪 المحلات والطلبات${fresh ? ` (${fresh})` : ''}`], ['partners', '🤝 المندوبين'], ['apple', '🍎 Apple Wallet'], ['updates', `🆕 التحديثات (${stats.version})`]])}
     <div class="group" data-group="overview">
+    <a class="panel version-chip" href="#admin/updates" data-goto-updates>
+      <span class="badge ok num">الإصدار ${stats.version}</span>
+      <span class="grow small"><b>شو الجديد:</b> ${stats.changelog[0].items[0]}</span>
+      <span aria-hidden="true">←</span></a>
     ${signupOpen
       ? html`<p class="alert ok">أي محل بيقدر يسجّل ويجرّب ${14} يوم مجاناً، وبعدها بيتوقف لحاله لحد ما تفعّله من هون بـ «+ شهر» أو «+ سنة».</p>`
       : html`<p class="alert ok">التسجيل مسكّر برمز. ابعت للمحل الجديد: <span dir="ltr" class="num">${location.origin}/?code=رمزك</span></p>`}
@@ -1886,8 +1901,10 @@ async function admin() {
     </div>
     <div class="group" data-group="apple">
     <section class="panel stack" id="applePanel">${applePanel(appleSt)}</section>
-    </div>`);
+    </div>
+    <div class="group" data-group="updates">${updatesPanel(stats)}</div>`);
   bindSubnav('admin', 'overview');
+  $('[data-goto-updates]').onclick = (e) => { e.preventDefault(); $('[data-subnav="admin"] [data-g="updates"]').click(); };
   bindApple();
   bindPayments();
   bindResellers();

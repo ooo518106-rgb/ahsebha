@@ -7,6 +7,7 @@ import * as gw from './gwallet.js';
 import * as webpush from './webpush.js';
 import * as perks from './perks.js';
 import { DEMO_EMAIL, DEMO_VERSION, seedDemo } from './demo.js';
+import { APP_VERSION, CHANGELOG } from './changelog.js';
 import { defaultLogoPng } from './png.js';
 import { earnFor, progress, rewardCost, rewardRule, stampsLine, unitLabel } from '../public/js/rules.js';
 import { b64ToBytes, bytesToB64, clean, fail, HttpError, isUniqueError, json, normPhone, randomDigits, randomToken } from './util.js';
@@ -1267,7 +1268,7 @@ async function adminStats(c) {
     if ((sub.state === 'trial' || sub.state === 'active') && sub.daysLeft <= 7) ending.push({ id: s.id, name: s.name, state: sub.state, daysLeft: sub.daysLeft, ownerEmail: s.ownerEmail });
   }
   ending.sort((a, b) => a.daysLeft - b.daysLeft);
-  return json({ revenueMonth: month.n, revenueTotal: total.n, mrr: Math.round(mrr * 100) / 100, counts, ending });
+  return json({ revenueMonth: month.n, revenueTotal: total.n, mrr: Math.round(mrr * 100) / 100, counts, ending, version: APP_VERSION, changelog: CHANGELOG });
 }
 
 // مدير المنصة بيفعّل اشتراك محل (+ شهر / + سنة) أو بيوقفه
@@ -2573,6 +2574,7 @@ async function removeStaff(c, id) {
 // ─── التوجيه ───
 const API = [
   ['GET', /^\/api\/shops\/([a-z0-9-]{3,40})\/public$/, publicShop],
+  ['GET', /^\/api\/version$/, () => json({ version: APP_VERSION, date: CHANGELOG[0].date })],
   ['GET', /^\/api\/shops\/([a-z0-9-]{3,40})\/menu$/, publicMenu],
   ['GET', /^\/api\/menu$/, listMenu, 'owner'],
   ['POST', /^\/api\/menu$/, syncsMenu(addMenuItem), 'owner'],

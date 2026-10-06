@@ -688,3 +688,26 @@ test('مدير المنصة بيرتّب منيو أي محل: أصناف وPDF�
   assert.equal((await admin.del(`${base}/${id}`)).data.items.length, 0);
   assert.equal((await admin.del(`${base}/pdf`)).data.pdf, null);
 });
+
+test('رقم التحديث وسجل التحديثات: مرتّب، والمدير بيشوفه، والرقم عام', async () => {
+  const { CHANGELOG, APP_VERSION } = await import('../src/changelog.js');
+  const num = (v) => v.split('.').map(Number);
+  const newer = (a, b) => { const [x, y] = [num(a), num(b)]; return x[0] !== y[0] ? x[0] > y[0] : x[1] > y[1]; };
+  assert.equal(APP_VERSION, CHANGELOG[0].v);
+  for (const [i, u] of CHANGELOG.entries()) {
+    assert.match(u.v, /^\d+\.\d+$/);
+    assert.match(u.date, /^\d{4}-\d{2}-\d{2}$/);
+    assert.ok(u.items.length && u.items.every((x) => typeof x === 'string' && x.length > 3));
+    if (i) {
+      assert.ok(newer(CHANGELOG[i - 1].v, u.v), `${CHANGELOG[i - 1].v} لازم يكون أحدث من ${u.v}`);
+      assert.ok(CHANGELOG[i - 1].date >= u.date);
+    }
+  }
+  const p = await platform();
+  const v = await p.client().get('/api/version');
+  assert.deepEqual(v.data, { version: APP_VERSION, date: CHANGELOG[0].date });
+  const st = (await p.admin.get('/api/admin/stats')).data;
+  assert.equal(st.version, APP_VERSION);
+  assert.equal(st.changelog.length, CHANGELOG.length);
+  assert.equal((await p.owner.get('/api/admin/stats')).status, 403);
+});
