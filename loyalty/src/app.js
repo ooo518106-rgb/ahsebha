@@ -1193,6 +1193,15 @@ async function requireAdmin(c) {
   if (!(await isPlatformAdmin(c))) fail(403, 'هاي الصفحة لمدير المنصة بس');
 }
 
+// مدير المنصة بيرتّب منيو أي محل (مثلاً المحل بعتله المنيو عالواتساب): نفس إجراءات المنيو بس على المحل المختار
+const forShop = (fn) => async (c, shopId, ...rest) => {
+  await requireAdmin(c);
+  const shop = await c.db.get('SELECT * FROM shops WHERE id = ?', Number(shopId));
+  if (!shop) fail(404, 'ما لقينا المحل');
+  c.shop = shop;
+  return fn(c, ...rest);
+};
+
 async function adminLeads(c) {
   await requireAdmin(c);
   const leads = await c.db.all(`SELECT l.id, l.shop_name AS shopName, l.name, l.phone, l.city, l.kind, l.note, l.status, l.created_at AS createdAt, r.name AS reseller
@@ -2548,6 +2557,12 @@ const API = [
   ['PUT', /^\/api\/admin\/leads\/(\d+)$/, adminLeadStatus, 'staff'],
   ['GET', /^\/api\/admin\/shops$/, adminShops, 'staff'],
   ['POST', /^\/api\/admin\/shops\/(\d+)\/plan$/, adminShopPlan, 'staff'],
+  ['GET', /^\/api\/admin\/shops\/(\d+)\/menu$/, forShop(listMenu), 'staff'],
+  ['POST', /^\/api\/admin\/shops\/(\d+)\/menu$/, forShop(addMenuItem), 'staff'],
+  ['POST', /^\/api\/admin\/shops\/(\d+)\/menu\/pdf$/, forShop(uploadMenuPdf), 'staff'],
+  ['DELETE', /^\/api\/admin\/shops\/(\d+)\/menu\/pdf$/, forShop(deleteMenuPdf), 'staff'],
+  ['PUT', /^\/api\/admin\/shops\/(\d+)\/menu\/(\d+)$/, forShop(updateMenuItem), 'staff'],
+  ['DELETE', /^\/api\/admin\/shops\/(\d+)\/menu\/(\d+)$/, forShop(deleteMenuItem), 'staff'],
   ['GET', /^\/api\/admin\/apple$/, adminApple, 'staff'],
   ['POST', /^\/api\/admin\/apple\/key$/, adminAppleKey, 'staff'],
   ['PUT', /^\/api\/admin\/apple\/cert$/, adminAppleCert, 'staff'],

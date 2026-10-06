@@ -774,8 +774,8 @@ function markPoster() {
 // ─── رابط الانضمام والملصق ───
 function joinView() {
   const s = state.shop;
+  menuBase = '/api/menu';
   const printUrl = (what, layout) => `/print/${s.slug}?for=${what}&layout=${layout}`;
-  const menuUrl = `${location.origin}/m/${s.slug}`;
   render(view, html`
     <div class="grid2" style="align-items:start">
       <div class="poster" id="poster">
@@ -808,15 +808,30 @@ function joinView() {
         <p class="hint">حط الرابط كمان بالانستغرام والواتساب بزنس.</p>
       </section>
     </div>
+    ${menuPanel(s.slug, s.currency, printUrl('menu', 'table'))}`);
+  bindMenuPanel(s.slug);
+}
+
+// صورة الصنف: بنصغّرها لـ 480 بكسل JPG قبل ما نرفعها
+// ─── لوحة المنيو: المالك على محله، أو مدير المنصة على أي محل (menuBase بيتغيّر) ───
+let menuBase = '/api/menu';
+function menuPanel(slug, currency, printLink) {
+  const menuUrl = `${location.origin}/m/${slug}`;
+  return html`
     <section class="panel stack" style="margin-top:14px" id="menuPanel">
       <h2>📋 المنيو الإلكتروني</h2>
       <p class="hint">الزبون بيمسح QR على الطاولة وبيشوف المنيو بجواله، وتحته زر «خذ بطاقة الولاء». ما في داعي تطبع منيو كل ما يتغيّر سعر.</p>
       <div class="row">
         <a class="btn ghost grow" href="${menuUrl}" target="_blank" rel="noopener">شوف المنيو</a>
         <button class="btn ghost grow" type="button" data-copy="${menuUrl}">نسخ الرابط</button>
-        <a class="btn soft grow" data-print href="${printUrl('menu', 'table')}" target="_blank" rel="noopener">🖨️ كروت QR للطاولات</a>
+        <a class="btn soft grow" data-print href="${printLink}" target="_blank" rel="noopener">🖨️ كروت QR للطاولات</a>
       </div>
       <div class="menu-pdf" id="menuPdf"></div>
+      <div class="row">
+        <label class="btn ghost grow" style="margin:0">📥 استيراد منيو جاهز<input type="file" id="menuImport" accept="application/json,.json" class="hidden"></label>
+        <button class="btn ghost grow" type="button" id="menuExport">📤 تصدير المنيو</button>
+      </div>
+      <div class="bar hidden" id="importBar"><i style="width:0%"></i></div>
       <form class="stack menu-form" id="menuForm">
         <b>أو ضيف الأصناف وحدة وحدة</b>
         <div class="row">
@@ -824,7 +839,7 @@ function joinView() {
           <input class="grow" name="name" placeholder="اسم الصنف" maxlength="60" required>
         </div>
         <div class="row">
-          <input class="grow num" name="price" type="number" inputmode="decimal" min="0" step="0.001" placeholder="السعر (${s.currency})">
+          <input class="grow num" name="price" type="number" inputmode="decimal" min="0" step="0.001" placeholder="${currency ? `السعر (${currency})` : 'السعر'}">
           <input class="grow" name="description" placeholder="وصف قصير (اختياري)" maxlength="200">
         </div>
         <label class="btn ghost" style="margin:0">📷 صورة (اختياري)<input type="file" name="imageFile" accept="image/*" class="hidden"></label>
@@ -832,13 +847,20 @@ function joinView() {
       </form>
       <datalist id="menuCats"></datalist>
       <div id="menuList"><p class="muted small">جاري التحميل…</p></div>
-    </section>`);
+    </section>`;
+}
+function bindMenuPanel(slug) {
   bindCopy(view);
-  $$('[data-print]').forEach((a) => { a.addEventListener('click', markPoster); });
+  if (menuBase === '/api/menu') $$('[data-print]').forEach((a) => { a.addEventListener('click', markPoster); });
+  $('#menuImport').onchange = async (e) => {
+    const file = e.target.files[0];
+    e.target.value = '';
+    if (file) await importMenu(file).catch((err) => toast(err.message, 'bad'));
+  };
+  $('#menuExport').onclick = (e) => exportMenu(slug, e.target).catch((err) => toast(err.message, 'bad'));
   loadMenu();
 }
 
-// صورة الصنف: بنصغّرها لـ 480 بكسل JPG قبل ما نرفعها
 // ─── ملف المنيو PDF: بينرفع قطع (كل قطعة 600 كيلو) عشان حجم الطلب ───
 const PDF_PART = 600 * 1024;
 const fmtSize = (n) => (n >= 1024 * 1024 ? `${(n / 1024 / 1024).toFixed(1)} ميغا` : `${Math.max(1, Math.round(n / 1024))} كيلو`);
@@ -848,6 +870,66 @@ const blobB64 = (blob) => new Promise((ok, bad) => {
   r.onerror = () => bad(new Error('ما قدرنا نقرأ الملف'));
   r.readAsDataURL(blob);
 });
+async function uploadPdf(file, onProgress = () => {}) {
+  const parts = Math.ceil(file.size / PDF_PART);
+  let ver;
+  let res;
+  for (let part = 0; part < parts; part++) {
+    const data = await blobB64(file.slice(part * PDF_PART, (part + 1) * PDF_PART));
+    res = await api(`${menuBase}/pdf`, { method: 'POST', body: { size: file.size, parts, part, ver, data } });
+    ver = res.ver;
+    onProgress((part + 1) / parts);
+  }
+  return res.pdf;
+}
+
+// 📥 استيراد «منيو جاهز» (ملف من نقاطك فيه الأصناف بالصور وملف الـ PDF): بنضيفهم وحدة وحدة بنفس طلبات المنيو
+async function importMenu(file) {
+  let b;
+  try { b = JSON.parse(await file.text()); } catch { b = null; }
+  if (!b || b.app !== 'nuqatak-menu' || !Array.isArray(b.items)) throw new Error('هاد مش ملف منيو من نقاطك');
+  if (!confirm(`رح ينضاف ${b.items.length} صنف${b.pdf ? ' وملف المنيو PDF' : ''}${b.name ? ` (${b.name})` : ''}. نكمّل؟`)) return;
+  const bar = $('#importBar');
+  const show = (f) => { bar.classList.remove('hidden'); $('i', bar).style.width = `${Math.round(f * 100)}%`; };
+  const steps = b.items.length + (b.pdf ? 1 : 0);
+  let done = 0;
+  if (b.pdf) {
+    try {
+      const bytes = Uint8Array.from(atob(b.pdf), (ch) => ch.charCodeAt(0));
+      drawMenuPdf(await uploadPdf(new Blob([bytes], { type: 'application/pdf' }), (f) => show((done + f) / steps)));
+    } catch (err) { toast(`ملف الـ PDF ما انرفع: ${err.message}`, 'bad'); }
+    done++;
+  }
+  let last = null;
+  let failed = 0;
+  for (const it of b.items) {
+    try {
+      last = await api(menuBase, { method: 'POST', body: { category: it.category, name: it.name, description: it.description, price: it.price, available: it.available ?? true, image: it.image || undefined } });
+    } catch { failed++; }
+    show(++done / steps);
+  }
+  bar.classList.add('hidden');
+  if (last) loadMenu(last);
+  toast(failed ? `انضاف ${b.items.length - failed} صنف، و${failed} ما انضافوا` : `انضاف المنيو كامل ✅ (${b.items.length} صنف)`, failed ? 'bad' : 'ok');
+}
+
+// 📤 تصدير المنيو لملف (نسخة احتياطية، أو لنقله لفرع أو محل تاني)
+async function exportMenu(slug, btn) {
+  btn.disabled = true;
+  try {
+    const r = await api(menuBase);
+    const asData = async (url) => {
+      const blob = await (await fetch(url)).blob();
+      return `data:${blob.type};base64,${await blobB64(blob)}`;
+    };
+    const items = [];
+    for (const it of r.items) items.push({ category: it.category, name: it.name, description: it.description, price: it.price, available: it.available, image: it.image ? await asData(it.image) : null });
+    const pdf = r.pdf ? await blobB64(await (await fetch(r.pdf.url)).blob()) : null;
+    downloadText(JSON.stringify({ app: 'nuqatak-menu', v: 1, name: slug, items, pdf }), `menu-${slug}.json`);
+    toast('انحفظ ملف المنيو ✅', 'ok');
+  } finally { btn.disabled = false; }
+}
+
 function drawMenuPdf(pdf) {
   const box = $('#menuPdf');
   if (!box) return;
@@ -866,18 +948,10 @@ function drawMenuPdf(pdf) {
     const bar = $('#pdfBar', box);
     pick.classList.add('hidden');
     bar.classList.remove('hidden');
-    const parts = Math.ceil(file.size / PDF_PART);
     try {
-      let ver;
-      let res;
-      for (let part = 0; part < parts; part++) {
-        const data = await blobB64(file.slice(part * PDF_PART, (part + 1) * PDF_PART));
-        res = await api('/api/menu/pdf', { method: 'POST', body: { size: file.size, parts, part, ver, data } });
-        ver = res.ver;
-        $('i', bar).style.width = `${Math.round(((part + 1) / parts) * 100)}%`;
-      }
+      const done = await uploadPdf(file, (f) => { $('i', bar).style.width = `${Math.round(f * 100)}%`; });
       toast('انرفع المنيو ✅ الزبون بيشوفه هلق', 'ok');
-      drawMenuPdf(res.pdf);
+      drawMenuPdf(done);
     } catch (err) {
       toast(err.message, 'bad');
       drawMenuPdf(pdf);
@@ -887,7 +961,7 @@ function drawMenuPdf(pdf) {
   if (del) {
     del.onclick = async () => {
       if (!confirm('تشيل ملف المنيو؟ الأصناف اللي ضايفها بتضل.')) return;
-      try { drawMenuPdf((await api('/api/menu/pdf', { method: 'DELETE' })).pdf); toast('انشال ✅', 'ok'); } catch (err) { toast(err.message, 'bad'); }
+      try { drawMenuPdf((await api(`${menuBase}/pdf`, { method: 'DELETE' })).pdf); toast('انشال ✅', 'ok'); } catch (err) { toast(err.message, 'bad'); }
     };
   }
 }
@@ -910,7 +984,7 @@ async function loadMenu(data) {
   const box = $('#menuList');
   if (!box) return;
   let r;
-  try { r = data || await api('/api/menu'); } catch (e) { render(box, html`<p class="alert bad">${e.message}</p>`); return; }
+  try { r = data || await api(menuBase); } catch (e) { render(box, html`<p class="alert bad">${e.message}</p>`); return; }
   if (!box.isConnected) return; // تركوا التبويب قبل ما يوصل المنيو
   drawMenuPdf(r.pdf);
   const cats = [...new Set(r.items.map((x) => x.category))];
@@ -925,12 +999,12 @@ async function loadMenu(data) {
     : html`<p class="muted small">المنيو فاضي. ضيف أول صنف من فوق 👆</p>`);
   const items = new Map(r.items.map((x) => [String(x.id), x]));
   $$('[data-avail]', box).forEach((cb) => {
-    cb.onchange = async () => { try { loadMenu(await api(`/api/menu/${cb.dataset.avail}`, { method: 'PUT', body: { available: cb.checked } })); } catch (e) { toast(e.message, 'bad'); } };
+    cb.onchange = async () => { try { loadMenu(await api(`${menuBase}/${cb.dataset.avail}`, { method: 'PUT', body: { available: cb.checked } })); } catch (e) { toast(e.message, 'bad'); } };
   });
   $$('[data-del]', box).forEach((b) => {
     b.onclick = async () => {
       if (!confirm(`تحذف «${items.get(b.dataset.del).name}» من المنيو؟`)) return;
-      try { loadMenu(await api(`/api/menu/${b.dataset.del}`, { method: 'DELETE' })); } catch (e) { toast(e.message, 'bad'); }
+      try { loadMenu(await api(`${menuBase}/${b.dataset.del}`, { method: 'DELETE' })); } catch (e) { toast(e.message, 'bad'); }
     };
   });
   $$('[data-edit]', box).forEach((b) => { b.onclick = () => editMenuItem(items.get(b.dataset.edit)); });
@@ -944,7 +1018,7 @@ async function loadMenu(data) {
       const file = f.get('imageFile');
       const body = { category: f.get('category'), name: f.get('name'), price: f.get('price'), description: f.get('description') };
       if (file && file.size) body.image = await resizeMenuImage(file);
-      loadMenu(await api('/api/menu', { method: 'POST', body }));
+      loadMenu(await api(menuBase, { method: 'POST', body }));
       form.reset();
       form.category.value = body.category;
       form.name.focus();
@@ -971,7 +1045,7 @@ function editMenuItem(it) {
       const file = f.get('imageFile');
       const payload = { category: f.get('category'), name: f.get('name'), price: f.get('price'), description: f.get('description'), removeImage: f.get('removeImage') === 'on' };
       if (file && file.size) payload.image = await resizeMenuImage(file);
-      const r = await api(`/api/menu/${it.id}`, { method: 'PUT', body: payload });
+      const r = await api(`${menuBase}/${it.id}`, { method: 'PUT', body: payload });
       $('#dlg').close();
       loadMenu(r);
       toast('انحفظ ✅', 'ok');
@@ -1714,11 +1788,12 @@ async function admin() {
         const [label, cls] = SUB_BADGE[s.subscription.state](s.subscription);
         return html`<li style="align-items:flex-start"><div class="main"><b>${s.name} <span class="badge ${cls}">${label}</span></b>
           <span class="small muted"><span dir="ltr">${s.ownerEmail || ''}</span> · ${fmt(s.members)} زبون · من ${fmtDate(s.createdAt)} · آخر حركة ${ago(s.lastActivity)}${s.reseller ? ` · 🤝 ${s.reseller}` : ''}</span>
-          ${s.subscription.state === 'owner' ? '' : html`<div class="row" style="margin-top:6px">
-            <button class="btn sm" type="button" data-plan="month" data-shop="${s.id}">+ شهر</button>
+          <div class="row" style="margin-top:6px">
+            ${s.subscription.state === 'owner' ? '' : html`<button class="btn sm" type="button" data-plan="month" data-shop="${s.id}">+ شهر</button>
             <button class="btn sm soft" type="button" data-plan="year" data-shop="${s.id}">+ سنة</button>
-            ${s.subscription.state === 'expired' ? '' : html`<button class="btn sm ghost" type="button" data-plan="stop" data-shop="${s.id}">إيقاف</button>`}
-          </div>`}</div></li>`;
+            ${s.subscription.state === 'expired' ? '' : html`<button class="btn sm ghost" type="button" data-plan="stop" data-shop="${s.id}">إيقاف</button>`}`}
+            <button class="btn sm ghost" type="button" data-shop-menu="${s.id}">📋 المنيو</button>
+          </div></div></li>`;
       })}</ul>` : html`<p class="muted">ما في محلات لسا.</p>`}
     </section>
     </div>
@@ -1732,6 +1807,10 @@ async function admin() {
   bindApple();
   bindPayments();
   bindResellers();
+  $$('[data-shop-menu]').forEach((b) => {
+    const shop = shops.find((x) => String(x.id) === b.dataset.shopMenu);
+    b.onclick = () => adminShopMenu(shop);
+  });
   $$('[data-plan]').forEach((b) => {
     b.onclick = async () => {
       const name = b.closest('li').querySelector('b').firstChild.textContent.trim();
@@ -1750,6 +1829,24 @@ async function admin() {
 
 
 // ─── المندوبين (لوحة مدير المنصة) ───
+// 📋 مدير المنصة بيرتّب منيو محل (بيرفع الـ PDF، بيستورد منيو جاهز، أو بيضيف أصناف) بدون كلمة سر المحل
+function adminShopMenu(shop) {
+  menuBase = `/api/admin/shops/${shop.id}/menu`;
+  render(view, html`
+    <div class="row" style="justify-content:space-between">
+      <button class="btn ghost sm" type="button" id="backAdmin">→ رجوع للمحلات</button>
+      <b>📋 منيو «${shop.name}»</b>
+    </div>
+    <p class="alert ok small" style="margin-top:10px">إنت هلق بترتّب منيو هالمحل من حساب المنصة. أي تعديل بيطلع لزبائنه فوراً.</p>
+    ${menuPanel(shop.slug, '', `/print/${shop.slug}?for=menu&layout=table`)}`);
+  $('#backAdmin').onclick = () => {
+    menuBase = '/api/menu';
+    if (location.hash === '#admin/shops') route(); else location.hash = '#admin/shops';
+  };
+  bindMenuPanel(shop.slug);
+  scrollTo({ top: 0 });
+}
+
 function resellersPanel(list) {
   return html`<section class="panel stack" id="resellersPanel">
     <h2>🤝 المندوبين</h2>

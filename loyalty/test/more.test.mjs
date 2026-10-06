@@ -616,3 +616,29 @@ test('المنيو PDF: بينرفع قطع، بينزل نفس الملف، ب�
   assert.equal((await p.client().get(`/api/shops/${p.shop.slug}/menu`)).data.pdf, null);
   assert.equal((await p.db.get('SELECT COUNT(*) AS n FROM menu_files WHERE shop_id = ?', p.shop.id)).n, 0);
 });
+
+test('مدير المنصة بيرتّب منيو أي محل: أصناف وPDF، والمالك العادي ما بيقدر', async () => {
+  const p = await platform();
+  const { admin, owner } = p;
+  const sid = (await admin.get('/api/admin/shops')).data.shops.find((s) => s.slug === p.shop.slug).id;
+  const base = `/api/admin/shops/${sid}/menu`;
+  let r = await admin.post(base, { category: 'مشروبات', name: 'سنو وايت', price: 1.5, description: 'Snow White — صغير 1.50 · كبير 2.00' });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.equal(r.data.items[0].name, 'سنو وايت');
+  const id = r.data.items[0].id;
+  assert.equal((await admin.put(`${base}/${id}`, { price: 1.75 })).data.items[0].price, 1.75);
+  const pdf = new TextEncoder().encode(`%PDF-1.4\n${'x'.repeat(2000)}`);
+  r = await admin.post(`${base}/pdf`, { size: pdf.length, parts: 1, part: 0, data: Buffer.from(pdf).toString('base64') });
+  assert.equal(r.status, 200);
+  // المحل نفسه بيشوف اللي انضاف
+  const mine = (await owner.get('/api/menu')).data;
+  assert.equal(mine.items.length, 1);
+  assert.equal(mine.pdf.size, pdf.length);
+  assert.equal((await p.client().get(`/api/shops/${p.shop.slug}/menu`)).data.categories[0].items[0].price, 1.75);
+  // صاحب محل عادي ما بيقدر يرتّب منيو محل تاني، ومحل مش موجود
+  const adminShopId = (await admin.get('/api/admin/shops')).data.shops.find((s) => s.slug !== p.shop.slug).id;
+  assert.equal((await owner.post(`/api/admin/shops/${adminShopId}/menu`, { name: 'x' })).status, 403);
+  assert.equal((await admin.get('/api/admin/shops/99999/menu')).status, 404);
+  assert.equal((await admin.del(`${base}/${id}`)).data.items.length, 0);
+  assert.equal((await admin.del(`${base}/pdf`)).data.pdf, null);
+});
