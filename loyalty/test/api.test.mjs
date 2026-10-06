@@ -512,3 +512,20 @@ test('الدفع بـ CliQ: المحل بيبلّغ عن الحوالة، ومد
   await admin.post(`/api/admin/payments/${p2.id}`, { action: 'reject' });
   assert.equal((await db.get('SELECT active_until FROM shops WHERE id = ?', shop.id)).active_until, after.active_until);
 });
+
+test('الدومين الرسمي: صفحات العنوان القديم بتتحوّل، والـ API وApple والصور بيضلوا شغّالين', async () => {
+  const { client } = await setup({ PUBLIC_URL: 'https://nuqatak.example' });
+  const c = client();
+  for (const [path, to] of [['/', '/'], ['/app', '/app'], ['/c/abcdefghijkmnpqrstuv', '/c/abcdefghijkmnpqrstuv'], ['/j/mocha?ref=x7', '/j/mocha?ref=x7'], ['/m/mocha', '/m/mocha'], ['/privacy', '/privacy']]) {
+    const r = await c.get(path);
+    assert.equal(r.status, 301, path);
+    assert.equal(r.headers.get('location'), `https://nuqatak.example${to}`);
+  }
+  assert.equal((await c.get('/api/version')).status, 200, 'الـ API ما بيتحوّل');
+  assert.notEqual((await c.get('/apple/v1/passes/x/y')).status, 301, 'خدمة Apple ما بتتحوّل');
+  assert.notEqual((await c.get('/media/logo/1.png')).status, 301);
+  assert.notEqual((await c.get('/c/abcdefghijkmnpqrstuv/google')).status, 301, 'رابط الحفظ بالمحفظة بيشتغل مباشرة');
+  // على الدومين الرسمي نفسه ما في تحويل
+  const { client: same } = await setup({ PUBLIC_URL: 'https://loyalty.test' });
+  assert.equal((await same().get('/')).status, 200);
+});

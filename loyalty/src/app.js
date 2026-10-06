@@ -2813,10 +2813,23 @@ async function page(c, file) {
   return out;
 }
 
+// 🌐 الدومين الرسمي (PUBLIC_URL، مثلاً https://nuqatak.com): صفحات العنوان القديم (workers.dev) و www بتتحوّل لحالها.
+// الـ API وخدمة Apple والصور و sw.js بيضلوا شغّالين على كل العناوين، عشان البطاقات اللي بالمحافظ والإشعارات اللي انبعتت قبل
+const PAGE_RE = /^\/(?:$|index\.html$|app\/?$|privacy\/?$|cards\/?$|(?:j|m|print)\/[a-z0-9-]{3,40}\/?$|(?:c|g|partner)\/[a-z2-9]{20}\/?$)/;
+function canonicalRedirect(c) {
+  if (!c.env.PUBLIC_URL || (c.req.method !== 'GET' && c.req.method !== 'HEAD')) return null;
+  let canon;
+  try { canon = new URL(c.env.PUBLIC_URL); } catch { return null; }
+  if (c.url.host === canon.host || !PAGE_RE.test(c.url.pathname)) return null;
+  return new Response(null, { status: 301, headers: { location: `${canon.origin}${c.url.pathname}${c.url.search}`, 'cache-control': 'public, max-age=86400' } });
+}
+
 export async function handle(req, ctx) {
   const url = new URL(req.url);
   const c = { ...ctx, req, url, origin: String(ctx.env.PUBLIC_URL || url.origin).replace(/\/+$/, ''), body: {}, ip: ctx.ip || 'unknown' };
   const p = url.pathname;
+  const canon = canonicalRedirect(c);
+  if (canon) return canon;
   try {
     if (p.startsWith('/api/')) return await api(c);
     if (p.startsWith('/apple/v1/')) return await appleService(c);
