@@ -826,6 +826,7 @@ function menuPanel(slug, currency, printLink) {
         <button class="btn ghost grow" type="button" data-copy="${menuUrl}">نسخ الرابط</button>
         <a class="btn soft grow" data-print href="${printLink}" target="_blank" rel="noopener">🖨️ كروت QR للطاولات</a>
       </div>
+      <div id="sizesFix"></div>
       <div class="menu-pdf" id="menuPdf"></div>
       <div class="row">
         <label class="btn ghost grow" style="margin:0">📥 استيراد منيو جاهز<input type="file" id="menuImport" accept="application/json,.json" class="hidden"></label>
@@ -885,6 +886,42 @@ const formSizes = (f) => {
   const prices = f.getAll('sizePrice');
   return f.getAll('sizeName').map((name, i) => ({ name: name.trim(), price: prices[i] })).filter((z) => z.name || z.price !== '');
 };
+// أحجام مكتوبة بالوصف («صغير 1.50 · كبير 2.00»، متل المنيو اللي انضافت قبل الأحجام): منحوّلها لأحجام حقيقية
+function sizesFromText(text) {
+  const parts = String(text || '').split(/\s*[·•|،,]\s*/).filter(Boolean);
+  if (parts.length < 2 || parts.length > SIZES_MAX) return null;
+  const sizes = [];
+  for (const part of parts) {
+    const m = /^(.{1,20}?)\s*[:：-]?\s*(\d+(?:\.\d+)?)$/.exec(part.trim());
+    if (!m || !m[1].trim()) return null;
+    sizes.push({ name: m[1].trim(), price: Number(m[2]) });
+  }
+  return new Set(sizes.map((z) => z.name)).size === sizes.length ? sizes : null;
+}
+function drawSizesFix(items) {
+  const box = $('#sizesFix');
+  if (!box) return;
+  const todo = items.filter((it) => !it.sizes.length).map((it) => ({ it, sizes: sizesFromText(it.description) })).filter((x) => x.sizes);
+  if (!todo.length) { render(box, ''); return; }
+  render(box, html`<div class="alert ok stack">
+      <span>✨ في <b class="num">${todo.length}</b> صنف أحجامهم مكتوبة بالوصف (متل «${todo[0].it.description}»). نحوّلهم لأزرار يختار منها الزبون، والسعر بيتغيّر لحاله؟</span>
+      <button class="btn" type="button" id="sizesFixBtn">📏 حوّلهم لأحجام</button>
+      <div class="bar hidden" id="sizesFixBar"><i style="width:0%"></i></div></div>`);
+  $('#sizesFixBtn', box).onclick = async (e) => {
+    e.target.disabled = true;
+    const bar = $('#sizesFixBar', box);
+    bar.classList.remove('hidden');
+    let last = null;
+    let failed = 0;
+    for (const [i, { it, sizes }] of todo.entries()) {
+      try { last = await api(`${menuBase}/${it.id}`, { method: 'PUT', body: { sizes, description: '' } }); } catch { failed++; }
+      $('i', bar).style.width = `${Math.round(((i + 1) / todo.length) * 100)}%`;
+    }
+    if (last) loadMenu(last);
+    toast(failed ? `تحوّل ${todo.length - failed} صنف، و${failed} ما زبطوا` : `تحوّلوا ${todo.length} صنف ✅ هلأ الزبون بيختار الحجم`, failed ? 'bad' : 'ok');
+  };
+}
+
 const sizesText = (it, currency) => (it.sizes.length
   ? `${it.sizes.map((z) => `${z.name} ${fmt(z.price)}`).join(' · ')} ${currency}`
   : it.price != null ? `${fmt(it.price)} ${currency}` : '');
@@ -1028,6 +1065,7 @@ async function loadMenu(data) {
   try { r = data || await api(menuBase); } catch (e) { render(box, html`<p class="alert bad">${e.message}</p>`); return; }
   if (!box.isConnected) return; // تركوا التبويب قبل ما يوصل المنيو
   drawMenuPdf(r.pdf);
+  drawSizesFix(r.items);
   const cats = [...new Set(r.items.map((x) => x.category))];
   render($('#menuCats'), html`${cats.filter(Boolean).map((cat) => html`<option value="${cat}"></option>`)}`);
   render(box, r.items.length ? html`${cats.map((cat) => html`<h3 style="margin-top:10px">${cat || 'بدون قسم'}</h3>
