@@ -183,3 +183,14 @@ test('من البطاقة للإشعار: اشتراك، إشعار نقاط، �
   assert.equal(mj.start_url, `/c/${t2}`);
   assert.equal(mj.display, 'standalone');
 });
+
+test('توقيع VAPID واحد لكل خدمة بالدفعة، حتى لو الأجهزة انبعتت سوا', async () => {
+  const vapid = await generateVapidKeys();
+  const auths = [];
+  const fetchImpl = async (url, init) => { auths.push(init.headers.authorization); return new Response(null, { status: 201 }); };
+  const cache = new Map();
+  const devices = await Promise.all(Array.from({ length: 5 }, () => fakeDevice()));
+  await Promise.all(devices.map((d, i) => sendPush({ endpoint: `https://web.push.apple.com/d${i}`, ...d }, { title: 'x' }, { vapid, subject: 's', fetchImpl, cache })));
+  assert.equal(auths.length, 5);
+  assert.equal(new Set(auths).size, 1, 'نفس التوقيع للخمسة (توقيع ECDSA عشوائي، فلو انعمل 5 مرات كانوا اختلفوا)');
+});

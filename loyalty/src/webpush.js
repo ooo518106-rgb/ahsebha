@@ -73,15 +73,16 @@ export async function sendPush(sub, message, { vapid, subject, fetchImpl = fetch
   try {
     const body = await encryptPayload(JSON.stringify(message), sub.p256dh, sub.auth);
     const aud = new URL(sub.endpoint).origin;
+    // بنخزّن الوعد نفسه (مش النتيجة): الأجهزة بتنبعت سوا، فكلهم بيستنوا نفس التوقيع بدل ما كل واحد يوقّع لحاله
     let authorization = cache && cache.get(aud);
     if (!authorization) {
-      authorization = await vapidAuth(sub.endpoint, vapid, subject);
+      authorization = vapidAuth(sub.endpoint, vapid, subject);
       if (cache) cache.set(aud, authorization);
     }
     const res = await fetchImpl(sub.endpoint, {
       method: 'POST',
       headers: {
-        authorization,
+        authorization: await authorization,
         'content-encoding': 'aes128gcm',
         'content-type': 'application/octet-stream',
         ttl: String(ttl),

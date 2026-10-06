@@ -206,6 +206,8 @@ test('الرصيد المدفوع مسبقاً: شحن مع هدية، دفع م
 test('صلاحية النقاط: بتبلّش من يوم التفعيل، تذكير قبل أسبوع، وبعدين بتنتهي', async () => {
   const p = await platform();
   const { owner, device, to } = p;
+  // الاختبار بيقفز 6 أشهر لقدّام، فلازم المحل يكون مشترك (مش بتجربة 14 يوم)
+  await p.admin.post(`/api/admin/shops/${p.shop.id}/plan`, { action: 'year' });
   const sara = await p.customer('سارة', '0791110007');
   await owner.post(`/api/members/${sara.id}/earn`, { amount: 40 });
   // زيارتها قديمة (قبل سنتين)، بس الميزة تفعّلت اليوم ← نقاطها ما بتنمسح فوراً
@@ -710,4 +712,102 @@ test('رقم التحديث وسجل التحديثات: مرتّب، والمد
   assert.equal(st.version, APP_VERSION);
   assert.equal(st.changelog.length, CHANGELOG.length);
   assert.equal((await p.owner.get('/api/admin/stats')).status, 403);
+});
+
+test('المهام الدورية: زبائن المحلات المتوقفة ما بيسدّوا الدور', async () => {
+  const p = await platform();
+  // محل متوقف فيه 205 زبون غايبين من زمان ومفعّلين الإشعارات (أقدم من كل الباقيين)
+  const { shop: dead } = await signup(p.client(), { shopName: 'Closed Cafe' });
+  await p.db.run('UPDATE shops SET active_until = ? WHERE id = ?', Date.now() - DAY, dead.id);
+  const old = Date.now() - 300 * DAY;
+  for (let i = 0; i < 205; i++) {
+    const r = await p.db.run('INSERT INTO members (shop_id, token, card_no, name, phone, last_visit, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)', dead.id, `tok${String(i).padStart(17, 'x')}`, String(10000000 + i), 'زبون', `0790${String(i).padStart(6, '0')}`, old, old);
+    await p.db.run('INSERT INTO push_subs (shop_id, member_id, endpoint, p256dh, auth, created_at) VALUES (?, ?, ?, ?, ?, ?)', dead.id, r.lastId, `https://web.push.apple.com/dead${i}`, 'x', 'y', old);
+  }
+  // زبونة بمحل شغّال غابت 60 يوم
+  const sara = await p.customer('سارة', '0791110099');
+  const dev = await p.device(sara.guest, `/api/cards/${sara.token}/push`, 'sara-wb');
+  await p.db.run('UPDATE members SET last_visit = ?, created_at = ? WHERE id = ?', Date.now() - 60 * DAY, Date.now() - 90 * DAY, sara.id);
+  const r = await p.cron(amman(15));
+  assert.equal(r.winback, 1, 'وصلها «اشتقنالك» رغم الزبائن القدام بالمحل المتوقف');
+  assert.match(p.to(dev)[0].body, /اشتقنالك يا سارة/);
+  assert.ok(!p.sent.some((x) => x.url.includes('/dead')), 'ولا إشعار لزبائن المحل المتوقف');
+});
+
+test('المهام الدورية: ما بنسجّل إنه الإشعار انبعت إذا الميزانية ما كفّت، وبنكمّل بالتشغيلة الجاية', async () => {
+  const p = await platform();
+  const T = amman(14);
+  const people = [];
+  for (let i = 0; i < 4; i++) {
+    const m = await p.customer(`زبون ${i}`, `079222000${i}`);
+    for (let d = 0; d < 3; d++) await p.device(m.guest, `/api/cards/${m.token}/push`, `rv${i}-${d}`);
+    await p.db.run('UPDATE members SET last_visit = ? WHERE id = ?', T - 2 * HOUR, m.id);
+    people.push(m);
+  }
+  // الميزانية 10 إشعارات: 3 زبائن × 3 أجهزة = 9، والرابع (3 أجهزة) ما بيكفّيه الباقي
+  assert.equal((await p.cron(T)).reviews, 3);
+  const asked = async () => (await p.db.all('SELECT review_ask_at FROM members WHERE id IN (?, ?, ?, ?)', ...people.map((m) => m.id))).filter((x) => x.review_ask_at).length;
+  assert.equal(await asked(), 3, 'الرابع ما انعلّم إنه انسأل');
+  assert.equal((await p.cron(T + 10 * 60e3)).reviews, 1, 'وانسأل بالتشغيلة الجاية');
+  assert.equal(await asked(), 4);
+});
+
+test('الأمان: حساب العرض ما بيصير مدير المنصة، وما بيبعت إشعارات، وما بيغيّر رابط الإشعارات', async () => {
+  // منصة جديدة فاضية: أول حدا بيفتح حساب العرض قبل ما صاحب المنصة يسجّل
+  const w = await setup();
+  const demo = w.client();
+  assert.equal((await demo.post('/api/demo/login', {})).status, 200);
+  const me = (await demo.get('/api/me')).data;
+  assert.equal(me.user.isAdmin, false, 'حساب العرض مش مدير');
+  assert.equal((await demo.get('/api/admin/shops')).status, 403);
+  // صاحب المنصة بيسجّل بعدها وبيصير هو المدير
+  const boss = w.client();
+  await signup(boss, { shopName: 'Platform' });
+  assert.equal((await boss.get('/api/me')).data.user.isAdmin, true);
+  assert.equal((await boss.get('/api/admin/shops')).status, 200);
+
+  // «كمّل الإرسال» من حساب العرض ما بيبعت لحدا
+  const p = await platform();
+  const v = p.client();
+  await v.post('/api/demo/login', {});
+  const card = (await v.get('/api/me')).data.demo.sampleCard;
+  await p.device(p.client(), `/api/cards/${card}/push`, 'demo-visitor');
+  const bc = await v.post('/api/broadcast', { body: 'رسالة مزيفة' });
+  const cont = await v.post(`/api/broadcast/${bc.data.id}/continue`, { cursor: 0 });
+  assert.equal(cont.data.push.sent, 0);
+  const cp = await v.post('/api/coupons', { title: 'كوبون مزيف', days: 3, segment: 'all' });
+  if (cp.status === 201) assert.equal((await v.post(`/api/coupons/${cp.data.id}/continue`, { cursor: 0 })).data.push.sent, 0);
+  await v.flush();
+  assert.ok(!p.sent.some((x) => x.url.endsWith('/demo-visitor')), 'ولا إشعار وصل');
+
+  // رابط الإشعارات بينحفظ من زيارة صاحب المنصة بس
+  await p.db.run("DELETE FROM platform_settings WHERE k = 'origin'");
+  await v.get('/api/me');
+  await p.owner.get('/api/me');
+  assert.equal(await p.db.get("SELECT v FROM platform_settings WHERE k = 'origin'"), null);
+  await p.admin.get('/api/me');
+  assert.ok((await p.db.get("SELECT v FROM platform_settings WHERE k = 'origin'")).v);
+});
+
+test('رقم الجوال بأي شكل (مع مفتاح الدولة أو بدونه) ما بيعمل بطاقتين لنفس الزبون', async () => {
+  const p = await platform();
+  const join = (phone) => p.client().post(`/api/shops/${p.shop.slug}/join`, { name: 'سارة', phone });
+  const r = await join('+962 79 123 4567');
+  assert.equal(r.status, 201);
+  assert.equal((await p.db.get('SELECT phone FROM members WHERE token = ?', r.data.token)).phone, '0791234567', 'بينحفظ بالشكل المحلي');
+  assert.equal((await join('0791234567')).status, 409);
+  assert.equal((await join('791234567')).status, 409);
+  assert.equal((await join('00962791234567')).status, 409);
+  assert.equal((await p.owner.post('/api/members', { name: 'سارة', phone: '962791234567' })).status, 409);
+  // رقم قديم انحفظ بمفتاح الدولة (قبل التصليح) بينلقى كمان
+  await p.db.run("UPDATE members SET phone = '962791234567' WHERE token = ?", r.data.token);
+  assert.equal((await join('0791234567')).status, 409);
+  const imp = await p.owner.post('/api/members/import', { rows: [{ name: 'سارة', phone: '0791234567' }] });
+  assert.equal(imp.data.added, 0);
+  assert.equal(imp.data.skipped[0].reason, 'الرقم مسجّل من قبل');
+  // الكاشير بيلاقيه بأي شكل
+  const st = await p.staffClient();
+  assert.equal((await st.get('/api/members/lookup?code=0791234567')).status, 200);
+  assert.equal((await st.get(`/api/members?q=${encodeURIComponent('+962791234567')}`)).data.total, 1);
+  assert.equal((await p.owner.get('/api/members?q=0791234')).data.total, 1);
 });

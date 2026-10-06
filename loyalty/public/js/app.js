@@ -775,6 +775,7 @@ function markPoster() {
 function joinView() {
   const s = state.shop;
   menuBase = '/api/menu';
+  menuCurrency = s.currency;
   const printUrl = (what, layout) => `/print/${s.slug}?for=${what}&layout=${layout}`;
   render(view, html`
     <div class="grid2" style="align-items:start">
@@ -815,6 +816,7 @@ function joinView() {
 // صورة الصنف: بنصغّرها لـ 480 بكسل JPG قبل ما نرفعها
 // ─── لوحة المنيو: المالك على محله، أو مدير المنصة على أي محل (menuBase بيتغيّر) ───
 let menuBase = '/api/menu';
+let menuCurrency = '';
 function menuPanel(slug, currency, printLink) {
   const menuUrl = `${location.origin}/m/${slug}`;
   return html`
@@ -905,20 +907,25 @@ function drawSizesFix(items) {
   if (!todo.length) { render(box, ''); return; }
   render(box, html`<div class="alert ok stack">
       <span>✨ في <b class="num">${todo.length}</b> صنف أحجامهم مكتوبة بالوصف (متل «${todo[0].it.description}»). نحوّلهم لأزرار يختار منها الزبون، والسعر بيتغيّر لحاله؟</span>
+      <details><summary class="small">شوف الأصناف وشيل الصح عن اللي مش أحجام</summary>
+        <ul class="fix-list">${todo.map((x, i) => html`<li><label class="check small"><input type="checkbox" data-fix="${i}" checked>
+          <span><b>${x.it.name}</b>: ${x.sizes.map((z) => `${z.name} ${fmt(z.price)}`).join(' · ')}</span></label></li>`)}</ul></details>
       <button class="btn" type="button" id="sizesFixBtn">📏 حوّلهم لأحجام</button>
       <div class="bar hidden" id="sizesFixBar"><i style="width:0%"></i></div></div>`);
   $('#sizesFixBtn', box).onclick = async (e) => {
+    const picked = todo.filter((_, i) => $(`[data-fix="${i}"]`, box).checked);
+    if (!picked.length) { toast('ما اخترت ولا صنف', 'bad'); return; }
     e.target.disabled = true;
     const bar = $('#sizesFixBar', box);
     bar.classList.remove('hidden');
     let last = null;
     let failed = 0;
-    for (const [i, { it, sizes }] of todo.entries()) {
+    for (const [i, { it, sizes }] of picked.entries()) {
       try { last = await api(`${menuBase}/${it.id}`, { method: 'PUT', body: { sizes, description: '' } }); } catch { failed++; }
-      $('i', bar).style.width = `${Math.round(((i + 1) / todo.length) * 100)}%`;
+      $('i', bar).style.width = `${Math.round(((i + 1) / picked.length) * 100)}%`;
     }
     if (last) loadMenu(last);
-    toast(failed ? `تحوّل ${todo.length - failed} صنف، و${failed} ما زبطوا` : `تحوّلوا ${todo.length} صنف ✅ هلأ الزبون بيختار الحجم`, failed ? 'bad' : 'ok');
+    toast(failed ? `تحوّل ${picked.length - failed} صنف، و${failed} ما زبطوا` : `تحوّلوا ${picked.length} صنف ✅ هلأ الزبون بيختار الحجم`, failed ? 'bad' : 'ok');
   };
 }
 
@@ -1071,7 +1078,7 @@ async function loadMenu(data) {
   render(box, r.items.length ? html`${cats.map((cat) => html`<h3 style="margin-top:10px">${cat || 'بدون قسم'}</h3>
       <ul class="list">${r.items.filter((x) => x.category === cat).map((it) => html`<li class="${it.available ? '' : 'off'}">
         ${it.image ? html`<img class="thumb" src="${it.image}" alt="">` : ''}
-        <div class="main"><b>${it.name}</b><span class="small muted">${[sizesText(it, state.shop.currency), it.description].filter(Boolean).join(' · ')}</span></div>
+        <div class="main"><b>${it.name}</b><span class="small muted">${[sizesText(it, menuCurrency), it.description].filter(Boolean).join(' · ')}</span></div>
         <label class="small check"><input type="checkbox" data-avail="${it.id}" ${it.available ? 'checked' : ''}> متوفّر</label>
         <button class="btn ghost sm" type="button" data-edit="${it.id}" aria-label="تعديل">✏️</button>
         <button class="btn ghost sm" type="button" data-del="${it.id}" aria-label="حذف">✕</button></li>`)}</ul>`)}`
@@ -1933,13 +1940,14 @@ async function admin() {
 // 📋 مدير المنصة بيرتّب منيو محل (بيرفع الـ PDF، بيستورد منيو جاهز، أو بيضيف أصناف) بدون كلمة سر المحل
 function adminShopMenu(shop) {
   menuBase = `/api/admin/shops/${shop.id}/menu`;
+  menuCurrency = shop.currency || '';
   render(view, html`
     <div class="row" style="justify-content:space-between">
       <button class="btn ghost sm" type="button" id="backAdmin">→ رجوع للمحلات</button>
       <b>📋 منيو «${shop.name}»</b>
     </div>
     <p class="alert ok small" style="margin-top:10px">إنت هلق بترتّب منيو هالمحل من حساب المنصة. أي تعديل بيطلع لزبائنه فوراً.</p>
-    ${menuPanel(shop.slug, '', `/print/${shop.slug}?for=menu&layout=table`)}`);
+    ${menuPanel(shop.slug, shop.currency, `/print/${shop.slug}?for=menu&layout=table`)}`);
   $('#backAdmin').onclick = () => {
     menuBase = '/api/menu';
     if (location.hash === '#admin/shops') route(); else location.hash = '#admin/shops';

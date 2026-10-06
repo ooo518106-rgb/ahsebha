@@ -663,6 +663,8 @@ html[dir="ltr"] body, html[dir="ltr"] .stamps { direction: ltr; }
 .menu-items img { width: 70px; height: 70px; border-radius: 16px; object-fit: cover; flex: none; box-shadow: var(--shadow-sm); }
 .menu-items .price { font-weight: 700; white-space: nowrap; color: var(--brand-text); background: color-mix(in srgb, var(--brand) 9%, transparent); padding: 3px 10px; border-radius: 99px; font-size: .88rem; }
 .menu-items li .grow { flex: 1; min-width: 0; }
+.fix-list { list-style: none; padding: 0; margin: 8px 0 0; display: grid; gap: 6px; max-height: 260px; overflow: auto; }
+.fix-list .check { align-items: flex-start; }
 .version-chip { display: flex; align-items: center; gap: 10px; text-decoration: none; color: inherit; margin-bottom: 12px; padding: 12px 16px; }
 .version-chip .badge { flex: none; }
 .version-chip .grow { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }

@@ -16,7 +16,7 @@ self.addEventListener('push', (event) => {
     });
     // لو البطاقة مفتوحة قدّام الزبون (الآيفون ما بيطلّع الإشعار فوقها): بتتحدّث فوراً وبتعرض الرسالة جوّاها
     const list = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
-    for (const c of list) c.postMessage({ type: 'push', title: data.title, body: data.body });
+    for (const c of list) c.postMessage({ type: 'push', title: data.title, body: data.body, url: data.url || '' });
   })());
 });
 

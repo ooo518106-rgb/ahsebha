@@ -116,6 +116,8 @@ function pushPanel() {
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.addEventListener('message', async (e) => {
     if (!e.data || e.data.type !== 'push') return;
+    // الإشعار لبطاقة تانية (أو تنبيه للوحة المحل): ما إله دخل بهالبطاقة
+    if (!String(e.data.url || '').includes(`/c/${token}`)) return;
     await load(false, true);
     if (e.data.body) toast(`🔔 ${e.data.body}`, 'ok');
   });

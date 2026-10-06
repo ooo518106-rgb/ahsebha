@@ -526,7 +526,7 @@ async function notifyOwners(c, shopId, message) {
 }
 
 async function notifyAdmin(c, message) {
-  const row = await c.db.get('SELECT MIN(id) AS id FROM users');
+  const row = await c.db.get(FIRST_USER);
   if (row && row.id) notifyUsers(c, [row.id], message);
 }
 
@@ -575,6 +575,7 @@ const PUSH_BATCH = 10;
 async function broadcastBatch(c, id, cursor) {
   const b = await c.db.get('SELECT * FROM broadcasts WHERE id = ? AND shop_id = ?', id, c.shop.id);
   if (!b) fail(404, 'ما لقينا الرسالة');
+  if (c.shop.demo) return { sent: 0, failed: 0, next: null }; // حساب العرض ما بيبعت إشعارات حقيقية
   const subs = await c.db.all(
     'SELECT p.*, m.token FROM push_subs p JOIN members m ON m.id = p.member_id WHERE p.shop_id = ? AND p.id > ? ORDER BY p.id LIMIT ?',
     c.shop.id, cursor, PUSH_BATCH,
@@ -599,8 +600,9 @@ const HOUR = 36e5;
 export async function runScheduled(ctx, now = Date.now()) {
   const origin = String(ctx.env.PUBLIC_URL || (await getSetting(ctx.db, 'origin')) || '').replace(/\/+$/, '');
   if (!origin) return { skipped: 'ما في رابط للموقع لسا (بينحفظ أول ما حدا يفتح اللوحة)' };
-  const c = { ...ctx, origin, budget: CRON_BUDGET };
-  const platformShop = await platformShopId(c.db);
+  const platformShop = await platformShopId(ctx.db);
+  // live: شرط «المحل شغّال» جوّا الاستعلامات، عشان زبائن المحلات المتوقفة ما يسدّوا الدور على الباقيين
+  const c = { ...ctx, origin, budget: CRON_BUDGET, live: { sql: `(s.demo = 1 OR s.id = ? OR COALESCE(s.active_until, s.created_at + ${TRIAL_DAYS * DAY}) > ?)`, args: [platformShop ?? 0, now] } };
   const shops = new Map();
   const shopOf = async (id) => {
     if (!shops.has(id)) {
@@ -630,21 +632,24 @@ export async function runScheduled(ctx, now = Date.now()) {
   return out;
 }
 
-// بيبعت إشعار لكل أجهزة الزبون ضمن الميزانية
-async function cronPush(c, shop, m, message) {
-  const subs = await c.db.all('SELECT * FROM push_subs WHERE member_id = ?', m.id);
-  if (!subs.length || c.budget < subs.length) return false;
+// أجهزة الزبون للإشعارات الدورية (لحد 5، الأحدث). كل مهمة بتتأكد إنه الميزانية بتكفي قبل ما تسجّل إنها بعتت،
+// وإذا ما كفّت بتوقف وبتكمّل بالتشغيلة الجاية (5 أجهزة أقل من الميزانية، فدايماً في زبون واحد على الأقل بيمشي)
+const cronSubs = (c, m) => c.db.all('SELECT * FROM push_subs WHERE member_id = ? ORDER BY id DESC LIMIT 5', m.id);
+async function cronSend(c, shop, m, subs, message) {
+  if (!subs.length) return;
   c.budget -= subs.length;
   await pushTo(c, subs, () => ({ icon: logoUrl(shop, c.origin), url: `${c.origin}/c/${m.token}`, title: shop.name, ...message }));
-  return true;
 }
 
 // 🎂 يوم عيد الميلاد (بتوقيت المحل، من 9 الصبح): الهدية بتنضاف للرصيد وبيوصله إشعار
 async function birthdayJob(c, shopOf, now) {
   const mds = [...new Set([-1, 0, 1].map((d) => new Date(now + d * DAY).toISOString().slice(5, 10)).concat('02-29'))];
+  // اللي أخدوا هديتهم هالسنة بيجوا آخر الدور، عشان ما ياخدوا مكان اللي لسا ما أخدوها
   const rows = await c.db.all(
-    `SELECT * FROM members WHERE birthday IN (${mds.map(() => '?').join(', ')}) AND bday_set_at <= ? ORDER BY id LIMIT 200`,
-    ...mds, now - perks.BDAY_MIN_AGE_DAYS * DAY,
+    `SELECT m.* FROM members m JOIN shops s ON s.id = m.shop_id
+     WHERE m.birthday IN (${mds.map(() => '?').join(', ')}) AND m.bday_set_at <= ? AND s.bday_on = 1 AND ${c.live.sql}
+     ORDER BY (m.bday_year IS NOT NULL AND m.bday_year >= ?), m.id LIMIT 200`,
+    ...mds, now - perks.BDAY_MIN_AGE_DAYS * DAY, ...c.live.args, new Date(now).getUTCFullYear(),
   );
   let n = 0;
   for (const m of rows) {
@@ -652,8 +657,10 @@ async function birthdayJob(c, shopOf, now) {
     if (!shop || !shop.bday_on) continue;
     const t = perks.localTime(shop.country, now);
     if (m.bday_year === t.year || !perks.isBirthdayToday(m.birthday, t) || t.hour < 9 || t.hour > 21) continue;
-    if (c.budget < 3) break;
     const gift = perks.bdayGift(shop);
+    const wallet = gift > 0 && m.gw_object && gw.googleConfig(c.env);
+    const subs = await cronSubs(c, m);
+    if (subs.length + (wallet ? 2 : 0) > c.budget) break;
     const due = 'id = ? AND (bday_year IS NULL OR bday_year <> ?)';
     const res = await c.db.batch([
       ...(gift > 0 ? [[`INSERT INTO txns (shop_id, member_id, kind, delta, note, created_at) SELECT shop_id, id, 'adjust', ?, '🎂 هدية عيد الميلاد', ? FROM members WHERE ${due}`, [gift, now, m.id, t.year]]] : []),
@@ -669,11 +676,11 @@ async function birthdayJob(c, shopOf, now) {
       : gift <= 0 ? `كل سنة وإنت سالم يا ${first}! 🎉 من كل فريق ${shop.name}`
         : gift === rewardCost(shop) ? `كل سنة وإنت سالم يا ${first}! 🎉 ${shop.reward_name} اليوم علينا، الهدية صارت بحسابك 🎁`
           : `كل سنة وإنت سالم يا ${first}! 🎉 انضافلك ${gift} ${unitLabel(shop)} هدية عيدك 🎁`;
-    if (gift > 0 && m.gw_object && gw.googleConfig(c.env)) {
+    if (wallet) {
       c.budget -= 2;
       pushMember(c, shop, await c.db.get('SELECT * FROM members WHERE id = ?', m.id));
     }
-    await cronPush(c, shop, m, { title: `${shop.name} 🎂`, body });
+    await cronSend(c, shop, m, subs, { title: `${shop.name} 🎂`, body });
   }
   return n;
 }
@@ -681,11 +688,12 @@ async function birthdayJob(c, shopOf, now) {
 // ⭐ بعد الزيارة بساعة لـ 6 ساعات: «كيف كانت زيارتك؟» (مرة كل شهر بالكتير، ومش بالليل)
 async function reviewAskJob(c, shopOf, now) {
   const rows = await c.db.all(
-    `SELECT m.* FROM members m WHERE m.last_visit BETWEEN ? AND ? AND (m.review_ask_at IS NULL OR m.review_ask_at < ?)
+    `SELECT m.* FROM members m JOIN shops s ON s.id = m.shop_id
+     WHERE m.last_visit BETWEEN ? AND ? AND (m.review_ask_at IS NULL OR m.review_ask_at < ?) AND s.review_on = 1 AND ${c.live.sql}
        AND EXISTS (SELECT 1 FROM push_subs p WHERE p.member_id = m.id)
        AND NOT EXISTS (SELECT 1 FROM reviews r WHERE r.member_id = m.id AND r.created_at > m.last_visit)
      ORDER BY m.last_visit LIMIT 200`,
-    now - 6 * HOUR, now - HOUR, now - 30 * DAY,
+    now - 6 * HOUR, now - HOUR, now - 30 * DAY, ...c.live.args,
   );
   let n = 0;
   for (const m of rows) {
@@ -693,11 +701,13 @@ async function reviewAskJob(c, shopOf, now) {
     if (!shop || !shop.review_on) continue;
     const t = perks.localTime(shop.country, now);
     if (t.hour < 9 || t.hour > 22) continue;
-    if (c.budget <= 0) break;
+    const subs = await cronSubs(c, m);
+    if (subs.length > c.budget) break;
     const r = await c.db.run('UPDATE members SET review_ask_at = ? WHERE id = ? AND (review_ask_at IS NULL OR review_ask_at < ?)', now, m.id, now - 30 * DAY);
-    if (!r.changes) continue;
+    if (!r.changes || !subs.length) continue;
     const body = isEn(m) ? `How was your visit to ${shop.name} today? Rate us in one tap ⭐` : `كيف كانت زيارتك لـ ${shop.name} اليوم؟ قيّمنا بكبسة ⭐`;
-    if (await cronPush(c, shop, m, { body, url: `${c.origin}/c/${m.token}?rate=1` })) n++;
+    await cronSend(c, shop, m, subs, { body, url: `${c.origin}/c/${m.token}?rate=1` });
+    n++;
   }
   return n;
 }
@@ -706,11 +716,11 @@ async function reviewAskJob(c, shopOf, now) {
 async function winbackJob(c, shopOf, now) {
   const rows = await c.db.all(
     `SELECT m.* FROM members m JOIN shops s ON s.id = m.shop_id
-     WHERE s.winback_days > 0 AND COALESCE(m.last_visit, m.created_at) < ? - s.winback_days * ${DAY}
+     WHERE s.winback_days > 0 AND COALESCE(m.last_visit, m.created_at) < ? - s.winback_days * ${DAY} AND ${c.live.sql}
        AND (m.nudged_at IS NULL OR m.nudged_at < COALESCE(m.last_visit, m.created_at))
        AND EXISTS (SELECT 1 FROM push_subs p WHERE p.member_id = m.id)
      ORDER BY COALESCE(m.last_visit, m.created_at) LIMIT 200`,
-    now,
+    now, ...c.live.args,
   );
   let n = 0;
   for (const m of rows) {
@@ -718,7 +728,9 @@ async function winbackJob(c, shopOf, now) {
     if (!shop) continue;
     const t = perks.localTime(shop.country, now);
     if (t.hour < 11 || t.hour > 20) continue;
-    if (c.budget <= 0) break;
+    const subs = await cronSubs(c, m);
+    if (subs.length > c.budget) break;
+    if (!subs.length) continue; // ما في جهاز: ما بنعطيه نقاط دبل ما رح يعرف عنها
     const boost = shop.winback_double ? now + 3 * DAY : m.boost_until;
     const r = await c.db.run('UPDATE members SET nudged_at = ?, boost_until = ? WHERE id = ? AND (nudged_at IS NULL OR nudged_at < COALESCE(last_visit, created_at))', now, boost, m.id);
     if (!r.changes) continue;
@@ -726,7 +738,8 @@ async function winbackJob(c, shopOf, now) {
     const en = isEn(m) && !shop.winback_text;
     const text = (shop.winback_text || (en ? 'We miss you, {الاسم} ☕ Come see us soon' : 'اشتقنالك يا {الاسم} ☕ مرّ علينا قريب')).replaceAll('{الاسم}', first);
     const body = shop.winback_double ? `${text}${en ? ' — double points for 3 days 🎁' : ' — نقاطك دبل لـ 3 أيام 🎁'}` : text;
-    if (await cronPush(c, shop, m, { body })) n++;
+    await cronSend(c, shop, m, subs, { body });
+    n++;
   }
   return n;
 }
@@ -737,10 +750,10 @@ async function expiryJob(c, shopOf, now) {
   const ends = `${activity} + s.expiry_months * ${MONTH}`;
   const warn = await c.db.all(
     `SELECT m.*, ${ends} AS ends FROM members m JOIN shops s ON s.id = m.shop_id
-     WHERE s.expiry_months > 0 AND m.balance > 0 AND ${ends} - ${7 * DAY} < ? AND ${ends} > ?
+     WHERE s.expiry_months > 0 AND m.balance > 0 AND ${ends} - ${7 * DAY} < ? AND ${ends} > ? AND ${c.live.sql}
        AND (m.expiry_warned_at IS NULL OR m.expiry_warned_at < ${activity})
        AND EXISTS (SELECT 1 FROM push_subs p WHERE p.member_id = m.id)
-     ORDER BY ends LIMIT 200`, now, now,
+     ORDER BY ends LIMIT 200`, now, now, ...c.live.args,
   );
   let warned = 0;
   for (const m of warn) {
@@ -748,15 +761,19 @@ async function expiryJob(c, shopOf, now) {
     if (!shop) continue;
     const t = perks.localTime(shop.country, now);
     if (t.hour < 11 || t.hour > 20) continue;
-    if (c.budget <= 0) break;
+    const subs = await cronSubs(c, m);
+    if (subs.length > c.budget) break;
     await c.db.run('UPDATE members SET expiry_warned_at = ? WHERE id = ?', now, m.id);
     const days = Math.max(1, Math.round((m.ends - now) / DAY));
     const body = isEn(m) ? `⏳ Your ${m.balance} ${unitEn(shop, m.balance)} expire in ${days} day${days === 1 ? '' : 's'}. Drop by and use them ☕`
       : `⏳ عندك ${m.balance} ${unitLabel(shop)} بتنتهي بعد ${days} ${days === 1 ? 'يوم' : 'أيام'}. مرّ علينا واستعملها ☕`;
-    if (await cronPush(c, shop, m, { body })) warned++;
+    if (!subs.length) continue;
+    await cronSend(c, shop, m, subs, { body });
+    warned++;
   }
   const due = await c.db.all(
-    `SELECT m.* FROM members m JOIN shops s ON s.id = m.shop_id WHERE s.expiry_months > 0 AND m.balance > 0 AND ${ends} <= ? LIMIT 100`, now,
+    `SELECT m.* FROM members m JOIN shops s ON s.id = m.shop_id WHERE s.expiry_months > 0 AND m.balance > 0 AND ${ends} <= ? AND ${c.live.sql}
+     ORDER BY ${ends} LIMIT 100`, now, ...c.live.args,
   );
   let expired = 0;
   for (const m of due) {
@@ -792,8 +809,9 @@ async function reminderJob(c, platformShop, now) {
     if (t.hour < 10 || t.hour > 20) continue;
     const key = `${sub.until}:${left}`;
     if (shop.reminder_key === key) continue;
+    const owners = await c.db.all("SELECT p.* FROM user_push_subs p JOIN users u ON u.id = p.user_id WHERE u.shop_id = ? AND u.role = 'owner' ORDER BY p.id DESC LIMIT 5", shop.id);
+    if (owners.length > c.budget) break;
     await c.db.run('UPDATE shops SET reminder_key = ? WHERE id = ?', key, shop.id);
-    const owners = await c.db.all("SELECT p.* FROM user_push_subs p JOIN users u ON u.id = p.user_id WHERE u.shop_id = ? AND u.role = 'owner'", shop.id);
     c.budget -= owners.length;
     const when = left === 1 ? 'بكرة' : 'بعد 3 أيام';
     const body = sub.state === 'trial'
@@ -834,7 +852,9 @@ async function summaryJob(c, now) {
   for (const shop of shops) {
     const t = perks.localTime(shop.country, now);
     const day = t.year * 10000 + t.month * 100 + t.day;
-    if (t.hour < 22 || shop.summary_day === day || c.budget <= 0) continue;
+    if (t.hour < 22 || shop.summary_day === day) continue;
+    const owners = await c.db.all("SELECT p.* FROM user_push_subs p JOIN users u ON u.id = p.user_id WHERE u.shop_id = ? AND u.role = 'owner' ORDER BY p.id DESC LIMIT 5", shop.id);
+    if (owners.length > c.budget) break;
     const r = await c.db.run('UPDATE shops SET summary_day = ? WHERE id = ? AND (summary_day IS NULL OR summary_day <> ?)', day, shop.id, day);
     if (!r.changes) continue;
     const start = now - (t.mins * 60 + new Date(now).getUTCSeconds()) * 1000;
@@ -843,8 +863,6 @@ async function summaryJob(c, now) {
       c.db.get('SELECT COUNT(*) AS n FROM members WHERE shop_id = ? AND created_at >= ?', shop.id, start),
       c.db.get("SELECT COUNT(*) AS n FROM txns WHERE shop_id = ? AND kind = 'redeem' AND created_at >= ?", shop.id, start),
     ]);
-    const owners = await c.db.all("SELECT p.* FROM user_push_subs p JOIN users u ON u.id = p.user_id WHERE u.shop_id = ? AND u.role = 'owner'", shop.id);
-    if (c.budget < owners.length) break;
     c.budget -= owners.length;
     await pushTo(c, owners, () => ({ title: `📊 ملخص اليوم · ${shop.name}`, body: `${v.n} زيارة · ${j.n} زبون جديد · ${rd.n} مكافأة`, url: `${c.origin}/app#activity` }), 'user_push_subs');
     n++;
@@ -888,8 +906,22 @@ function readPhone(v) {
 
 const DUPLICATE_PHONE = 'هالرقم مسجّل عنا من قبل. اطلب من الكاشير يبعتلك رابط بطاقتك.';
 
+// رقم الزبون بينحفظ بالشكل المحلي (0791234567)، والبحث بيقبل كل أشكاله (962791234567، 791234567…)
+// عشان نفس الزبون ما ياخد بطاقتين إذا كتب رقمه مرة بمفتاح الدولة ومرة بدونه
+const memberPhone = (v, shop) => localPhone(readPhone(v), shop.country);
+function phoneForms(phone, country) {
+  const local = localPhone(phone, country);
+  const code = CALLING[country];
+  return [...new Set([local, normPhone(phone), ...(code && local.startsWith('0') ? [code + local.slice(1)] : [])])];
+}
+function memberByPhone(db, shop, phone, cols = 'id') {
+  const forms = phoneForms(phone, shop.country);
+  return db.get(`SELECT ${cols} FROM members WHERE shop_id = ? AND phone IN (${forms.map(() => '?').join(', ')})`, shop.id, ...forms);
+}
+
 async function createMember(db, shop, name, phone, { birthday = null, referredBy = null, lang = 'ar' } = {}) {
   const now = Date.now();
+  if (await memberByPhone(db, shop, phone)) fail(409, DUPLICATE_PHONE);
   for (let i = 0; i < 6; i++) {
     try {
       const r = await db.run(
@@ -930,9 +962,12 @@ function int(v, min, max, msg) {
 export const TRIAL_DAYS = 14;
 const DAY = 864e5;
 
-// محل صاحب المنصة (أول حساب) ما بيخلص اشتراكه
+// صاحب المنصة = أول حساب حقيقي انعمل عليها. حساب العرض ما بينحسب، حتى لو حدا فتحه قبل ما صاحب المنصة يسجّل
+const FIRST_USER = 'SELECT u.id, u.shop_id FROM users u JOIN shops s ON s.id = u.shop_id WHERE s.demo = 0 ORDER BY u.id LIMIT 1';
+
+// محل صاحب المنصة ما بيخلص اشتراكه
 async function platformShopId(db) {
-  const row = await db.get('SELECT shop_id FROM users ORDER BY id LIMIT 1');
+  const row = await db.get(FIRST_USER);
   return row ? row.shop_id : null;
 }
 
@@ -1023,7 +1058,7 @@ async function join(c, slug) {
   const birthday = c.body.bdayDay || c.body.bdayMonth ? perks.readBirthday(c.body.bdayDay, c.body.bdayMonth) : null;
   if ((c.body.bdayDay || c.body.bdayMonth) && !birthday) fail(400, 'تاريخ الميلاد مش صحيح');
   const referrer = await referrerOf(c, shop, c.body.ref);
-  const m = await createMember(c.db, shop, readName(c.body.name), readPhone(c.body.phone), { birthday, referredBy: referrer ? referrer.id : null, lang: c.body.lang });
+  const m = await createMember(c.db, shop, readName(c.body.name), memberPhone(c.body.phone, shop), { birthday, referredBy: referrer ? referrer.id : null, lang: c.body.lang });
   return json({ token: m.token, url: `${c.origin}/c/${m.token}` }, 201);
 }
 
@@ -1035,16 +1070,23 @@ async function cardInfo(c, token) {
   delete v.phone;
   delete v.phoneHidden;
   delete v.id;
-  const code = perks.refBonus(shop) > 0 ? await refCodeFor(c, m) : null;
+  // البطاقة المفتوحة بتسأل كل 15 ثانية: الاستعلامات المستقلة بتمشي سوا
+  const [code, apple, coupons, rate, menuUrl] = await Promise.all([
+    perks.refBonus(shop) > 0 ? refCodeFor(c, m) : null,
+    appleConfig(c, { withKey: false }),
+    activeCoupons(c.db, m.id),
+    canRate(c, shop, m),
+    menuUrlOf(c, shop),
+  ]);
   return json({
     shop: publicShopView(shop, c.origin),
     member: v,
     google: !!gw.googleConfig(c.env),
-    apple: !!(await appleConfig(c)),
+    apple: !!apple,
     refUrl: code ? `${c.origin}/j/${shop.slug}?ref=${code}` : null,
-    coupons: await activeCoupons(c.db, m.id),
-    canRate: await canRate(c, shop, m),
-    menuUrl: await menuUrlOf(c, shop),
+    coupons,
+    canRate: rate,
+    menuUrl,
   });
 }
 
@@ -1191,9 +1233,9 @@ async function createLead(c) {
   return json({ ok: true }, 201);
 }
 
-// مدير المنصة = أول حساب انعمل عليها (صاحب المنصة)
+// مدير المنصة = أول حساب حقيقي انعمل عليها (صاحب المنصة)
 async function isPlatformAdmin(c) {
-  const first = await c.db.get('SELECT MIN(id) AS id FROM users');
+  const first = await c.db.get(FIRST_USER);
   return !!(c.user && first && first.id === c.user.id);
 }
 
@@ -1228,7 +1270,7 @@ async function adminLeadStatus(c, id) {
 async function adminShops(c) {
   await requireAdmin(c);
   const shops = await c.db.all(
-    `SELECT s.id, s.name, s.slug, s.created_at AS createdAt, s.active_until, s.paid, s.created_at,
+    `SELECT s.id, s.name, s.slug, s.currency, s.created_at AS createdAt, s.active_until, s.paid, s.created_at,
        (SELECT COUNT(*) FROM members m WHERE m.shop_id = s.id) AS members,
        (SELECT MAX(t.created_at) FROM txns t WHERE t.shop_id = s.id) AS lastActivity,
        (SELECT u.email FROM users u WHERE u.shop_id = s.id AND u.role = 'owner' ORDER BY u.id LIMIT 1) AS ownerEmail,
@@ -1450,10 +1492,11 @@ async function logout(c) {
 }
 
 async function me(c) {
-  // المهام الدورية ما إلها طلب، فبنحفظ رابط الموقع من هون
-  if (!c.env.PUBLIC_URL && (await getSetting(c.db, 'origin')) !== c.origin) await setSetting(c.db, 'origin', c.origin);
+  const isAdmin = await isPlatformAdmin(c);
+  // المهام الدورية ما إلها طلب، فبنحفظ رابط الموقع من زيارات صاحب المنصة بس (عشان ما حدا يغيّر روابط الإشعارات)
+  if (isAdmin && !c.env.PUBLIC_URL && (await getSetting(c.db, 'origin')) !== c.origin) await setSetting(c.db, 'origin', c.origin);
   return json({
-    user: { id: c.user.id, name: c.user.name, email: c.user.email, role: c.user.role, branchId: c.user.branch_id || null, isAdmin: await isPlatformAdmin(c) },
+    user: { id: c.user.id, name: c.user.name, email: c.user.email, role: c.user.role, branchId: c.user.branch_id || null, isAdmin },
     shop: shopView(c.shop, c.origin),
     google: googleStatus(c, c.shop),
     subscription: await subscription(c, c.shop),
@@ -1516,9 +1559,11 @@ async function listMembers(c) {
     // الموظف بيلاقي الزبون برقمه الكامل بس (ما بيقدر يدوّر بجزء من الرقم ويطلّع أرقام الناس)
     const staff = c.user.role === 'staff';
     const byPhone = staff ? digits.length >= 7 : digits.length >= 3;
-    where += " AND (name LIKE ? ESCAPE '\\' OR card_no = ?" + (byPhone ? (staff ? ' OR phone = ?' : ' OR phone LIKE ?') : '') + ')';
+    const forms = staff && byPhone ? phoneForms(digits, c.shop.country) : [];
+    where += " AND (name LIKE ? ESCAPE '\\' OR card_no = ?" + (byPhone ? (staff ? ` OR phone IN (${forms.map(() => '?').join(', ')})` : ' OR phone LIKE ?') : '') + ')';
     a.push(like, q);
-    if (byPhone) a.push(staff ? digits : `%${digits}%`);
+    // المالك بيدوّر بجزء من الرقم: بدون الصفر ومفتاح الدولة، فبيلاقي الرقم بأي شكل انحفظ
+    if (byPhone) a.push(...(staff ? forms : [`%${localPhone(digits, c.shop.country).replace(/^0/, '')}%`]));
   }
   const rows = await c.db.all(`SELECT * FROM members WHERE ${where} ORDER BY COALESCE(last_visit, created_at) DESC LIMIT 50 OFFSET ?`, ...a, offset);
   const total = await c.db.get(`SELECT COUNT(*) AS n FROM members WHERE ${where}`, ...a);
@@ -1549,7 +1594,7 @@ async function importMembers(c) {
     if (name.length < 2) { skipped.push({ line: at, reason: 'الاسم ناقص' }); continue; }
     const phone = localPhone(row.phone, c.shop.country);
     if (phone.length < 7 || phone.length > 15) { skipped.push({ line: at, reason: 'رقم الجوال مش صحيح' }); continue; }
-    if (await c.db.get('SELECT id FROM members WHERE shop_id = ? AND phone = ?', c.shop.id, phone)) { skipped.push({ line: at, reason: 'الرقم مسجّل من قبل' }); continue; }
+    if (await memberByPhone(c.db, c.shop, phone)) { skipped.push({ line: at, reason: 'الرقم مسجّل من قبل' }); continue; }
     const birthday = row.bdayDay && row.bdayMonth ? perks.readBirthday(row.bdayDay, row.bdayMonth) : null;
     const balance = Math.max(0, Math.min(1000000, Math.floor(Number(row.balance) || 0)));
     let m;
@@ -1575,8 +1620,8 @@ async function importMembers(c) {
 async function addMember(c) {
   await requireActive(c);
   const name = readName(c.body.name);
-  const phone = readPhone(c.body.phone);
-  const existing = await c.db.get('SELECT id FROM members WHERE shop_id = ? AND phone = ?', c.shop.id, phone);
+  const phone = memberPhone(c.body.phone, c.shop);
+  const existing = await memberByPhone(c.db, c.shop, phone);
   if (existing) return json({ error: 'هالرقم إله بطاقة من قبل', memberId: existing.id }, 409);
   const m = await createMember(c.db, c.shop, name, phone);
   return json({ member: viewFor(c, m), cardUrl: `${c.origin}/c/${m.token}` }, 201);
@@ -1592,7 +1637,7 @@ async function lookup(c) {
   if (!m) {
     const digits = normPhone(code);
     if (/^\d{8}$/.test(digits)) m = await c.db.get('SELECT * FROM members WHERE card_no = ? AND shop_id = ?', digits, c.shop.id);
-    if (!m && digits.length >= 7) m = await c.db.get('SELECT * FROM members WHERE phone = ? AND shop_id = ?', digits, c.shop.id);
+    if (!m && digits.length >= 7) m = await memberByPhone(c.db, c.shop, digits, '*');
   }
   if (!m) fail(404, 'ما لقينا هالبطاقة عندكم');
   return json({ member: viewFor(c, m) });
@@ -2106,6 +2151,7 @@ async function createCoupon(c) {
 async function couponBatch(c, id, cursor) {
   const cp = await c.db.get('SELECT * FROM coupons WHERE id = ? AND shop_id = ?', id, c.shop.id);
   if (!cp) fail(404, 'ما لقينا الكوبون');
+  if (c.shop.demo) return { sent: 0, failed: 0, next: null };
   const subs = await c.db.all(
     `SELECT p.*, m.token, m.lang FROM push_subs p JOIN members m ON m.id = p.member_id JOIN member_coupons mc ON mc.member_id = p.member_id AND mc.coupon_id = ?
      WHERE p.id > ? ORDER BY p.id LIMIT ?`, cp.id, cursor, PUSH_BATCH,
@@ -2169,15 +2215,6 @@ function readMoney(v) {
   return Math.round(n * 1000);
 }
 
-async function creditTxn(c, m, statements) {
-  try {
-    return await c.db.batch(statements);
-  } catch (e) {
-    if (isUniqueError(e) && /idem/.test(e.message)) return null;
-    throw e;
-  }
-}
-
 async function topup(c, id) {
   await requireActive(c);
   if (!c.shop.credit_on) fail(400, 'الرصيد المدفوع مش مفعّل بهالمحل');
@@ -2185,7 +2222,7 @@ async function topup(c, id) {
   const amount = readMoney(c.body.amount);
   const bonus = c.body.bonus === false ? 0 : Math.floor((amount * c.shop.credit_bonus) / 100);
   const now = Date.now();
-  const res = await creditTxn(c, m, [
+  const res = await applyTxn(c, [
     ["INSERT INTO credit_txns (shop_id, member_id, kind, amount, bonus, user_id, branch_id, idem, created_at) VALUES (?, ?, 'topup', ?, ?, ?, ?, ?, ?)", [c.shop.id, m.id, amount, bonus, c.user.id, branchFor(c), idemKey(c.body.key), now]],
     ['UPDATE members SET credit = credit + ?, updated_at = ? WHERE id = ? AND shop_id = ?', [amount + bonus, now, m.id, c.shop.id]],
   ]);
@@ -2206,7 +2243,7 @@ async function spend(c, id) {
   const m = await memberOf(c, id);
   const amount = readMoney(c.body.amount);
   const now = Date.now();
-  const res = await creditTxn(c, m, [
+  const res = await applyTxn(c, [
     [`INSERT INTO credit_txns (shop_id, member_id, kind, amount, user_id, branch_id, idem, created_at)
       SELECT ?, id, 'spend', ?, ?, ?, ?, ? FROM members WHERE id = ? AND shop_id = ? AND credit >= ?`, [c.shop.id, amount, c.user.id, branchFor(c), idemKey(c.body.key), now, m.id, c.shop.id, amount]],
     ['UPDATE members SET credit = credit - ?, updated_at = ? WHERE id = ? AND shop_id = ? AND credit >= ?', [amount, now, m.id, c.shop.id, amount]],
