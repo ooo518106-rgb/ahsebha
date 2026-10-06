@@ -298,13 +298,13 @@ test('المندوبين: رابط المندوب بيربط المحل فيه،
   assert.equal(shops.find((s) => s.name === 'Cafe Partner').reseller, 'خالد المندوب');
   assert.equal(shops.find((s) => s.name === 'Cafe Bad').reseller, null);
   assert.equal((await admin.get('/api/admin/leads')).data.leads[0].reseller, 'خالد المندوب');
-  // تفعيل يدوي بسنة (150) ← عمولة 30
+  // تفعيل يدوي بسنة على المميز (250) ← عمولة 50
   const cp = shops.find((s) => s.name === 'Cafe Partner');
-  await admin.post(`/api/admin/shops/${cp.id}/plan`, { action: 'year' });
+  await admin.post(`/api/admin/shops/${cp.id}/plan`, { action: 'year', tier: 'pro' });
   list = (await admin.get('/api/admin/resellers')).data.resellers;
-  assert.equal(list[0].sales, 150);
-  assert.equal(list[0].earned, 30);
-  assert.equal(list[0].due, 30);
+  assert.equal(list[0].sales, 250);
+  assert.equal(list[0].earned, 50);
+  assert.equal(list[0].due, 50);
   assert.equal(list[0].shops[0].state, 'active');
   await admin.post(`/api/admin/resellers/${r.id}/payout`, { amount: 20 });
   // صفحة المندوب
@@ -312,7 +312,7 @@ test('المندوبين: رابط المندوب بيربط المحل فيه،
   const pub = (await client().get(`/api/partner/${token}`)).data;
   assert.equal(pub.name, 'خالد المندوب');
   assert.equal(pub.paid, 20);
-  assert.equal(pub.due, 10);
+  assert.equal(pub.due, 30);
   assert.equal(pub.shops.length, 1);
   assert.equal((await client().get('/api/partner/aaaaaaaaaaaaaaaaaaaa')).status, 404);
   assert.equal((await client().get(`/partner/${token}`)).status, 200);
@@ -412,11 +412,12 @@ test('خطوات البداية، تذكير نهاية التجربة، وأر�
   assert.equal((await p.cron(now)).reminders, 1);
   assert.match(to(dev).at(-1).body, /بتخلص بكرة/);
   // أرقام المنصة
-  await admin.post(`/api/admin/shops/${p.shop.id}/plan`, { action: 'year' });
+  await admin.post(`/api/admin/shops/${p.shop.id}/plan`, { action: 'year', tier: 'basic' });
   const st = (await admin.get('/api/admin/stats')).data;
-  assert.equal(st.revenueMonth, 150);
+  assert.equal(st.revenueMonth, 120);
   assert.equal(st.counts.active, 1);
-  assert.equal(st.mrr, 12.5);
+  assert.equal(st.counts.basic, 1);
+  assert.equal(st.mrr, 10, 'الأساسي السنوي 120 ÷ 12');
   assert.equal((await owner.get('/api/admin/stats')).status, 403);
 });
 
@@ -810,4 +811,75 @@ test('رقم الجوال بأي شكل (مع مفتاح الدولة أو بد�
   assert.equal((await st.get('/api/members/lookup?code=0791234567')).status, 200);
   assert.equal((await st.get(`/api/members?q=${encodeURIComponent('+962791234567')}`)).data.total, 1);
   assert.equal((await p.owner.get('/api/members?q=0791234')).data.total, 1);
+});
+
+test('الباقات: الأساسي فيه البطاقة كاملة، والميزات المميزة مقفّلة، وبترجع لما يرقّي', async () => {
+  const p = await platform();
+  const { owner, admin } = p;
+  const today = localTime('JO').weekday;
+  // وهو بالتجربة (مميز): نقاط ×3 طول اليوم ورصيد مفعّل
+  assert.equal((await owner.get('/api/me')).data.plan.tier, 'pro');
+  await owner.put('/api/shop/perks', { boosts: [{ days: [today], from: '00:00', to: '23:59', mult: 3 }], creditOn: true });
+  const sara = await p.customer('سارة', '0791110300');
+  await owner.post(`/api/members/${sara.id}/credit/topup`, { amount: 5, bonus: false });
+  // اشترك بالأساسي
+  await admin.post(`/api/admin/shops/${p.shop.id}/plan`, { action: 'month', tier: 'basic' });
+  const me = (await owner.get('/api/me')).data;
+  assert.deepEqual([me.plan.tier, me.plan.limits.staff], ['basic', 2]);
+  const locked = async (r) => { const x = await r; assert.equal(x.status, 403, JSON.stringify(x.data)); assert.equal(x.data.upgrade, true); return x; };
+  await locked(owner.put('/api/shop/perks', { tiersOn: true }));
+  await locked(owner.post('/api/coupons', { title: 'خصم', days: 3, segment: 'all' }));
+  await locked(owner.post(`/api/members/${sara.id}/credit/topup`, { amount: 5 }));
+  await locked(owner.post('/api/members/import', { rows: [{ name: 'علي', phone: '0791110301' }] }));
+  await locked(owner.get('/api/reports/members.csv'));
+  // الرصيد الموجود بيضل الزبون يصرفه
+  assert.equal((await owner.post(`/api/members/${sara.id}/credit/spend`, { amount: 2 })).status, 200);
+  // النقاط بدون مضاعفة (الإعداد محفوظ بس ما بيشتغل)
+  const e = (await owner.post(`/api/members/${sara.id}/earn`, { amount: 10 })).data;
+  assert.equal(e.member.balance, 10);
+  assert.equal((await sara.guest.get(`/api/cards/${sara.token}`)).data.shop.boostNow, 1);
+  // الحدود: موظفين 2، فرع واحد، 4 رسائل بالشهر
+  for (const i of [1, 2]) assert.equal((await owner.post('/api/staff', { name: 'كاشير', email: `c${i}@t.com`, password: 'cashier-pass' })).status, 200);
+  await locked(owner.post('/api/staff', { name: 'كاشير', email: 'c3@t.com', password: 'cashier-pass' }));
+  const loc = (n) => Array.from({ length: n }, (_, i) => ({ name: `فرع ${i + 1}`, lat: 31.9 + i / 100, lng: 35.9 }));
+  assert.equal((await owner.put('/api/shop', { locations: loc(1) })).status, 200);
+  await locked(owner.put('/api/shop', { locations: loc(2) }));
+  for (let i = 0; i < 4; i++) assert.equal((await owner.post('/api/broadcast', { body: `رسالة ${i}` })).status, 200);
+  await locked(owner.post('/api/broadcast', { body: 'الخامسة' }));
+  const rep = (await owner.get('/api/reports')).data;
+  assert.equal(rep.locked, true);
+  assert.ok(rep.totals, 'الأرقام الأساسية موجودة');
+  // ترقية للمميز: كل شي رجع زي ما كان
+  await admin.post(`/api/admin/shops/${p.shop.id}/plan`, { action: 'pro' });
+  assert.equal((await owner.get('/api/me')).data.plan.tier, 'pro');
+  assert.equal((await owner.post(`/api/members/${sara.id}/earn`, { amount: 10, key: 'k-up-0001' })).data.member.balance, 40, 'رجعت ×3');
+  assert.equal((await owner.post('/api/broadcast', { body: 'بلا حد' })).status, 200);
+  assert.equal((await owner.put('/api/shop', { locations: loc(3) })).status, 200);
+});
+
+test('الباقات: المهام التلقائية ما بتشتغل لمحلات الأساسي، والدفع بيختار الباقة', async () => {
+  const p = await platform();
+  const { owner, admin } = p;
+  const sara = await p.customer('سارة', '0791110400');
+  await p.device(sara.guest, `/api/cards/${sara.token}/push`, 'sara-plan');
+  const t = localTime('JO', amman(12));
+  const md = `${String(t.month).padStart(2, '0')}-${String(t.day).padStart(2, '0')}`;
+  await p.db.run('UPDATE members SET birthday = ?, bday_set_at = 0 WHERE id = ?', md, sara.id);
+  await admin.post(`/api/admin/shops/${p.shop.id}/plan`, { action: 'month', tier: 'basic' });
+  assert.equal((await p.cron(amman(12))).birthdays, 0, 'الأساسي: ما في هدية عيد ميلاد تلقائية');
+  await admin.post(`/api/admin/shops/${p.shop.id}/plan`, { action: 'pro' });
+  assert.equal((await p.cron(amman(12) + 60e3)).birthdays, 1, 'المميز: في');
+  // الدفع بـ CliQ بالأساسي الشهري = 12 دينار، والتأكيد بيحوّل الباقة
+  await admin.put('/api/admin/settings', { cliqAlias: 'NUQATAK' });
+  const b = (await owner.post('/api/billing/claim', { plan: 'month', tier: 'basic', payer: 'أحمد' })).data;
+  assert.deepEqual([b.payments[0].amount, b.payments[0].tier], [12, 'basic']);
+  const pay = (await admin.get('/api/admin/payments')).data.payments.find((x) => x.status === 'pending');
+  await admin.post(`/api/admin/payments/${pay.id}`, { action: 'approve' });
+  assert.equal((await owner.get('/api/me')).data.plan.tier, 'basic');
+  const shopRow = (await admin.get('/api/admin/shops')).data.shops.find((s) => s.id === p.shop.id);
+  assert.equal(shopRow.plan.tier, 'basic');
+  // المحل التجريبي دايماً على المميز
+  const v = p.client();
+  await v.post('/api/demo/login', {});
+  assert.equal((await v.get('/api/me')).data.plan.tier, 'pro');
 });

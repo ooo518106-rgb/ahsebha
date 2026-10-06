@@ -1,9 +1,10 @@
 // لوحة المحل: الكاشير (مسح وإضافة نقاط)، الزبائن، النشاط، رابط الانضمام، والإعدادات
-import { $, $$, ago, api, cardHTML, fmt, fmtDate, html, newKey, qrSVG, render, setBrand, stampsHTML, toast } from './common.js';
+import { $, $$, ago, api, cardHTML, fmt, fmtDate, html, newKey, qrSVG, raw, render, setBrand, stampsHTML, toast } from './common.js';
 import { generateKeyAndCsr } from './csr.js';
 import { parseLatLng } from './rules.js';
 import { startCameraScan } from './scan.js';
 import { parseBirthday, readCsv, readXlsx } from './sheet.js';
+import { PLAN_BLURB, PLAN_DEFAULTS, compareHTML } from './plans.js';
 
 const state = { me: null, shop: null, google: null, member: null, key: newKey(), stopScan: null, branch: (() => { try { return localStorage.getItem('nq_branch') || ''; } catch { return ''; } })() };
 const branchName = (id) => (state.shop.locations.find((l) => l.id === id) || {}).name || '';
@@ -36,15 +37,15 @@ function renderSubBanner() {
   let tpl = null;
   if (state.me.demo) {
     // حساب العرض: بنوضّح إنه تجريبي، ومنعطي رابط بطاقة زبون وزر التجربة الحقيقية
-    tpl = html`<div class="alert ok sub-banner"><div>🎬 <b>هاد محل تجريبي</b> فيه زبائن وحركات جاهزة. جرّب كل إشي براحتك، والبيانات بترجع لحالها كل يوم.</div>
+    tpl = html`<div class="alert ok sub-banner"><div>🎬 <b>هاد محل تجريبي</b> على الباقة المميزة 💎 فيه زبائن وحركات جاهزة. الميزات اللي عليها 💎 بالمميزة بس. جرّب كل إشي براحتك، والبيانات بترجع لحالها كل يوم.</div>
       <div class="row">${state.me.demo.sampleCard ? html`<a class="btn sm ghost" href="/c/${state.me.demo.sampleCard}" target="_blank" rel="noopener">شوف بطاقة زبون</a>` : ''}
       <button class="btn sm" type="button" id="demoStart">ابدأ تجربتك المجانية</button></div></div>`;
   } else if (sub.state === 'expired') {
     tpl = html`<div class="alert bad sub-banner"><div><b>خلصت فترة ${sub.paid ? 'الاشتراك' : 'التجربة'} ⏳</b> الكاشير متوقف لحد ما تفعّل الاشتراك. زبائنك ونقاطهم محفوظين.</div>
       ${link(ask) ? html`<a class="btn sm wa" href="${link(ask)}" target="_blank" rel="noopener">فعّل الاشتراك</a>` : ''}</div>`;
   } else if (sub.state === 'trial' && isOwner()) {
-    tpl = html`<div class="alert warn sub-banner"><div>🎁 <b>تجربة مجانية:</b> باقي <b class="num">${sub.daysLeft}</b> ${sub.daysLeft === 1 ? 'يوم' : 'يوم'}. الاشتراك 15 دينار بالشهر أو 150 بالسنة.</div>
-      ${link(ask) ? html`<a class="btn sm wa" href="${link(ask)}" target="_blank" rel="noopener">اشترك</a>` : ''}</div>`;
+    tpl = html`<div class="alert warn sub-banner"><div>🎁 <b>تجربة مجانية:</b> باقي <b class="num">${sub.daysLeft}</b> ${sub.daysLeft === 1 ? 'يوم' : 'يوم'}. إنت على الباقة المميزة بكل ميزاتها، والباقات من ${PLAN_DEFAULTS.basic.month} دينار بالشهر.</div>
+      <a class="btn sm" href="#settings/billing">اختار باقتك</a></div>`;
   } else if (sub.state === 'active' && sub.daysLeft <= 5 && isOwner()) {
     tpl = html`<div class="alert warn sub-banner"><div>اشتراكك بيخلص بعد <b class="num">${sub.daysLeft}</b> يوم.</div>
       ${link(`مرحبا، بدي أجدد اشتراك نقاطك لمحل ${state.shop.name}`) ? html`<a class="btn sm wa" href="${link(`مرحبا، بدي أجدد اشتراك نقاطك لمحل ${state.shop.name}`)}" target="_blank" rel="noopener">جدّد</a>` : ''}</div>`;
@@ -121,6 +122,20 @@ function bindSubnav(key, first) {
   const on = $('.on', nav);
   if (on && nav.scrollWidth > nav.clientWidth) on.scrollIntoView({ inline: 'center', block: 'nearest' });
   return show;
+}
+
+// 💎 الباقة الأساسية: الميزات المميزة بتبيّن مقفّلة مع زر الترقية (والإعدادات بتضل محفوظة)
+const isBasic = () => !!(state.me && state.me.plan && state.me.plan.tier === 'basic');
+const proLock = (what) => html`<a class="pro-lock" href="#settings/billing"><b>💎 ${what} بالباقة المميزة</b><span>رقّي باقتك وبتشتغل فوراً، وإعداداتك محفوظة ←</span></a>`;
+function lockForms(root, what) {
+  if (!root) return;
+  root.insertAdjacentHTML('afterbegin', String(proLock(what)));
+  $$('form', root).forEach((f) => { f.classList.add('locked'); $$('input, select, textarea, button', f).forEach((el) => { el.disabled = true; }); });
+}
+function upsell(what) {
+  const body = openDialog(`💎 ${what}`, html`<div class="stack"><p>${what} من ميزات الباقة المميزة. وبالمميزة كمان: العروض التلقائية، والكوبونات، والرصيد المدفوع، والتقييم، والتقارير الكاملة، وفروع وموظفين بلا حد.</p>
+    <a class="btn block" href="#settings/billing" id="upsellGo">شوف الباقات</a></div>`);
+  $('#upsellGo', body).onclick = () => $('#dlg').close();
 }
 
 function openDialog(title, tpl) {
@@ -661,7 +676,7 @@ function members() {
   $('#more').onclick = () => { offset += 50; load(true); };
   $('#addM').onclick = () => newMemberDialog();
   const im = $('#importM');
-  if (im) im.onclick = () => importDialog(() => { offset = 0; load(); });
+  if (im) im.onclick = () => (isBasic() ? upsell('استيراد الزبائن القدام') : importDialog(() => { offset = 0; load(); }));
   $('#mlist').onclick = (e) => { const li = e.target.closest('[data-member]'); if (li) memberDialog(li.dataset.member); };
   $('#dlg').onclose = () => { offset = 0; load(); };
   load();
@@ -725,12 +740,12 @@ async function loadReports() {
   render(box, html`
     <div class="row" style="margin-top:22px;justify-content:space-between">
       <h2 style="margin:0">📊 التقارير <span class="small muted">(آخر 30 يوم)</span></h2>
-      <a class="btn ghost sm" href="/api/reports/members.csv" download>⬇️ ملف Excel بكل الزبائن</a>
+      ${r.locked ? html`<button class="btn ghost sm" type="button" id="csvLocked">⬇️ ملف Excel 💎</button>` : html`<a class="btn ghost sm" href="/api/reports/members.csv" download>⬇️ ملف Excel بكل الزبائن</a>`}
     </div>
     <div class="stats" style="margin-top:10px">
       <div class="stat"><b class="num">${t.returnRate == null ? '—' : `${t.returnRate}%`}</b><span class="small muted">رجعوا أكتر من مرة</span></div>
       <div class="stat"><b class="num">${fmt(t.active || 0)}</b><span class="small muted">زاروا آخر 30 يوم</span></div>
-      <div class="stat"><b class="num">${g.avg == null ? '—' : `${g.avg} ⭐`}</b><span class="small muted">متوسط التقييم (${fmt(g.total)})</span></div>
+      ${r.locked ? '' : html`<div class="stat"><b class="num">${g.avg == null ? '—' : `${g.avg} ⭐`}</b><span class="small muted">متوسط التقييم (${fmt(g.total)})</span></div>`}
       <div class="stat"><b class="num">${fmt(t.pushDevices || 0)}</b><span class="small muted">جهاز مفعّل الإشعارات</span></div>
       <div class="stat"><b class="num">${fmt(t.referred || 0)}</b><span class="small muted">إجوا بدعوة صاحب</span></div>
       <div class="stat"><b class="num">${fmt(t.birthdays || 0)}</b><span class="small muted">سجّلوا عيد ميلادهم</span></div>
@@ -746,11 +761,11 @@ async function loadReports() {
         return html`<div class="hbars">${rows.map((x) => html`<div class="hbar wide"><span>${x.name}</span><div class="track"><i style="width:${Math.round((x.n / max) * 100)}%"></i></div><b class="num">${fmt(x.n)}</b></div>`)}</div>`;
       })()}</section>` : ''}
       <section class="panel stack"><h3>زبائن جدد كل أسبوع</h3>${columns(r.newByWeek, weeks, { tick: (i) => i === 0 || i === 7 || i === 4, unit: ' زبون' })}</section>
-      <section class="panel stack"><h3>التقييمات</h3>
+      ${r.locked ? proLock('التقارير الكاملة (الموظفين، الفروع، التقييمات، الرصيد) وملف Excel') : html`<section class="panel stack"><h3>التقييمات</h3>
         ${g.total ? html`<div class="hbars">${[5, 4, 3, 2, 1].map((n) => html`<div class="hbar"><span>${n} ★</span><div class="track"><i style="width:${Math.round((g.counts[n - 1] / Math.max(...g.counts)) * 100)}%"></i></div><b class="num">${fmt(g.counts[n - 1])}</b></div>`)}</div>`
           : html`<p class="muted small">لسا ما في تقييمات. بتوصل لحالها بعد الزيارات (من 🎁 العروض).</p>`}
         ${g.comments.length ? html`<h3 style="margin-top:8px">آخر الملاحظات (بتوصلك إنت بس)</h3><ul class="list" id="rcomments">${g.comments.map((c) => html`<li class="click" data-member="${c.memberId}"><div class="main"><b>${'★'.repeat(c.stars)} ${c.name}</b><span class="small muted">${c.comment || 'بدون تعليق'} · ${ago(c.at)}</span></div></li>`)}</ul>` : ''}
-      </section>
+      </section>`}
     </div>
     ${r.staff.length ? html`<section class="panel" style="margin-top:14px"><h3>👥 شغل الموظفين</h3>
       <ul class="list">${r.staff.map((u) => html`<li><div class="main"><b>${u.name}${u.role === 'owner' ? ' (المالك)' : ''}</b>
@@ -758,6 +773,8 @@ async function loadReports() {
     <section class="panel" style="margin-top:14px"><h3>أحسن 10 زبائن</h3>
       ${r.top.length ? html`<ul class="list" id="rtop">${r.top.map((m, i) => html`<li class="click" data-member="${m.id}"><div class="main"><b>${i + 1}. ${m.name}</b><span class="small muted">${fmt(m.visits)} زيارة · ${fmt(m.lifetime)} ${state.shop.unit} · آخر زيارة ${ago(m.lastVisit)}</span></div></li>`)}</ul>` : html`<p class="muted small">لسا ما في زيارات.</p>`}
     </section>`);
+  const csvL = $('#csvLocked', box);
+  if (csvL) csvL.onclick = () => upsell('تنزيل الزبائن Excel');
   for (const id of ['#rtop', '#rcomments']) {
     const el = $(id, box);
     if (el) el.onclick = (e) => { const li = e.target.closest('[data-member]'); if (li) memberDialog(li.dataset.member); };
@@ -1191,6 +1208,7 @@ function googlePanel() {
 function broadcastPanel() {
   const n = state.me.pushCount || 0;
   return html`<h2>رسالة لكل الزبائن 🔔</h2>
+    ${isBasic() ? html`<p class="hint">بالباقة الأساسية ${state.me.plan.limits.broadcasts} رسائل بالشهر. 💎 بالمميزة بلا حد.</p>` : ''}
     <form class="stack" id="bc">
       <input name="header" placeholder="العنوان (اختياري): ${state.shop.name}" maxlength="40">
       <textarea name="body" rows="2" placeholder="مثلاً: خصم 20% على كل المشروبات اليوم ☕" maxlength="300" required></textarea>
@@ -1299,6 +1317,12 @@ async function settings() {
       <section class="panel stack" id="billing"><h2>💳 الاشتراك</h2><p class="muted small">جاري التحميل…</p></section>
     </div>` : ''}`);
   bindSubnav('settings', 'shop');
+  if (isBasic()) {
+    const g = $('#guardForm');
+    g.insertAdjacentHTML('beforebegin', String(proLock('الحماية من تلاعب الكاشير')));
+    g.classList.add('locked');
+    $$('input, button', g).forEach((el) => { el.disabled = true; });
+  }
 
   const form = $('#shopForm');
   let ptype = s.programType;
@@ -1470,7 +1494,7 @@ function offers() {
   const unit = s.unit;
   let boosts = p.boosts.map((b) => ({ ...b, days: [...b.days] }));
   render(view, html`
-    ${subnav('offers', [['msgs', '📣 رسائل وكوبونات'], ['points', '⭐ النقاط والمستويات'], ['auto', '🤖 تلقائي'], ['credit', '💳 رصيد ودعوات']])}
+    ${subnav('offers', [['msgs', '📣 رسائل وكوبونات'], ['points', '⭐ النقاط والمستويات 💎'], ['auto', '🤖 تلقائي 💎'], ['credit', '💳 رصيد ودعوات 💎']])}
     <div class="grid2 group" data-group="msgs">
       <section class="panel stack">${broadcastPanel()}</section>
       <section class="panel stack" id="couponsPanel"><h2>🎟️ كوبونات</h2><p class="muted small">جاري التحميل…</p></section>
@@ -1548,6 +1572,11 @@ function offers() {
       </form>
     </div>`);
   bindSubnav('offers', 'msgs');
+  if (isBasic()) {
+    lockForms($('[data-group="points"]', view), 'النقاط الدبل والمستويات وصلاحية النقاط');
+    lockForms($('[data-group="auto"]', view), 'هدية عيد الميلاد و«اشتقنالك» والتقييم');
+    lockForms($('[data-group="credit"]', view), 'الرصيد المدفوع وادعُ صاحبك');
+  }
   bindBroadcast();
   loadCoupons();
 
@@ -1618,46 +1647,65 @@ async function loadBilling() {
   let b;
   try { b = await api('/api/billing'); } catch (e) { render(box, html`<h2>💳 الاشتراك</h2><p class="alert bad">${e.message}</p>`); return; }
   const sub = b.subscription;
-  const status = sub.state === 'trial' ? html`<p class="alert warn small">🎁 تجربة مجانية: باقي <b class="num">${sub.daysLeft}</b> يوم.</p>`
-    : sub.state === 'active' ? html`<p class="alert ok small">✅ مشترك لحد <b>${fmtDay(sub.until)}</b> (باقي <span class="num">${sub.daysLeft}</span> يوم).</p>`
+  const mine = sub.state === 'active' ? b.plan.chosen : null;
+  const status = sub.state === 'trial' ? html`<p class="alert warn small">🎁 تجربة مجانية على الباقة المميزة بكل ميزاتها: باقي <b class="num">${sub.daysLeft}</b> يوم. اختار باقتك قبل ما تخلص.</p>`
+    : sub.state === 'active' ? html`<p class="alert ok small">✅ مشترك بالباقة <b>${tierThe(mine)}</b> لحد <b>${fmtDay(sub.until)}</b> (باقي <span class="num">${sub.daysLeft}</span> يوم).</p>`
       : html`<p class="alert bad small">⏳ الاشتراك خالص. الكاشير متوقف لحد ما تجدّد، وزبائنك ونقاطهم محفوظين.</p>`;
+  let tier = mine || 'pro';
+  let period = 'month';
   const wa = b.whatsapp ? `https://wa.me/${b.whatsapp}?text=${encodeURIComponent(`مرحبا، بدي أشترك بنقاطك لمحل ${state.shop.name}`)}` : null;
+  const tierName = (t) => b.plans[t === 'basic' ? 'basic' : 'pro'].name;
+  const tierThe = (t) => (t === 'basic' ? 'الأساسية' : 'المميزة');
   render(box, html`<h2>💳 الاشتراك</h2>${status}
+    <div class="tier-pick" id="tierPick" role="radiogroup" aria-label="الباقة">${['basic', 'pro'].map((t) => html`<div class="tier-card ${t === tier ? 'on' : ''}" role="radio" tabindex="0" aria-checked="${t === tier}" data-tier="${t}">
+        <b>${t === 'pro' ? '💎' : '⭐'} ${b.plans[t].name} ${mine === t ? html`<span class="badge ok">باقتك</span>` : ''}</b>
+        <span class="price"><span class="num">${b.plans[t].month}</span> <span class="small muted">دينار بالشهر</span></span>
+        <span class="small muted">أو <span class="num">${b.plans[t].year}</span> بالسنة (وفّر <span class="num">${b.plans[t].month * 12 - b.plans[t].year}</span>)</span>
+        <span class="small">${PLAN_BLURB[t]}</span>
+      </div>`)}</div>
+    <details><summary class="small">قارن الباقتين ميزة ميزة</summary>${raw(compareHTML())}</details>
     ${b.cliq ? html`<form class="stack" id="payForm">
         <div class="seg" id="planSeg">
-          <button type="button" data-plan="month" class="on">شهر · <span class="num">${b.prices.month}</span> دينار</button>
-          <button type="button" data-plan="year">سنة · <span class="num">${b.prices.year}</span> دينار <span class="small">(وفّر شهرين)</span></button>
+          <button type="button" data-period="month" class="on">شهر · <span class="num" data-amt="month"></span> دينار</button>
+          <button type="button" data-period="year">سنة · <span class="num" data-amt="year"></span> دينار <span class="small">(وفّر شهرين)</span></button>
         </div>
         <ol class="small" style="padding-inline-start:20px;display:grid;gap:6px">
-          <li>افتح تطبيق البنك ← <b>CliQ</b> ← حوّل <b class="num" id="payAmount">${b.prices.month}</b> دينار على الاسم المستعار:
+          <li>افتح تطبيق البنك ← <b>CliQ</b> ← حوّل <b class="num" id="payAmount"></b> دينار على الاسم المستعار:
             <div class="row" style="margin-top:4px"><code class="alias" dir="ltr">${b.cliq.alias}</code><button class="btn ghost sm" type="button" data-copy="${b.cliq.alias}">نسخ</button></div>
             ${b.cliq.name ? html`<span class="muted">باسم: ${b.cliq.name}${b.cliq.bank ? ` · ${b.cliq.bank}` : ''}</span>` : ''}</li>
           <li>بعد ما تحوّل، اكتب اسمك متل ما بيطلع بالحوالة واكبس «حوّلت».</li>
         </ol>
         <input name="payer" placeholder="اسم اللي حوّل" maxlength="60" required>
         <input name="ref" placeholder="رقم الحوالة (اختياري)" maxlength="60" dir="ltr">
-        <button class="btn" type="submit">حوّلت ✅</button>
-        <p class="hint">منتأكد من الحوالة ومنفعّل اشتراكك عادةً بنفس اليوم.</p>
+        <button class="btn" type="submit" id="paySubmit">حوّلت ✅</button>
+        <p class="hint">منتأكد من الحوالة ومنفعّل اشتراكك عادةً بنفس اليوم. إذا رقّيت من الأساسي للمميز، الباقة بتتحوّل أول ما نأكد.</p>
       </form>` : ''}
     ${wa ? html`<a class="btn ${b.cliq ? 'ghost' : ''} block wa" href="${wa}" target="_blank" rel="noopener">${b.cliq ? 'سؤال؟ احكي معنا عالواتساب' : 'اشترك عالواتساب'}</a>` : ''}
-    ${b.payments.length ? html`<h3 style="margin-top:6px">حوالاتك</h3><ul class="list">${b.payments.map((p) => html`<li><div class="main"><b>${p.plan === 'year' ? 'سنة' : 'شهر'} · <span class="num">${p.amount}</span> دينار</b>
+    ${b.payments.length ? html`<h3 style="margin-top:6px">حوالاتك</h3><ul class="list">${b.payments.map((p) => html`<li><div class="main"><b>${tierName(p.tier)} · ${p.plan === 'year' ? 'سنة' : 'شهر'} · <span class="num">${p.amount}</span> دينار</b>
         <span class="small muted">${p.payer}${p.ref ? ` · ${p.ref}` : ''} · ${ago(p.createdAt)}</span></div><span class="badge ${PAY_STATUS[p.status][1]}">${PAY_STATUS[p.status][0]}</span></li>`)}</ul>` : ''}`);
   bindCopy(box);
   const form = $('#payForm', box);
-  if (!form) return;
-  let plan = 'month';
-  $$('#planSeg button', box).forEach((btn) => {
-    btn.onclick = () => {
-      plan = btn.dataset.plan;
-      $$('#planSeg button', box).forEach((x) => x.classList.toggle('on', x === btn));
-      $('#payAmount', box).textContent = b.prices[plan];
-    };
+  const draw = () => {
+    $$('.tier-card', box).forEach((c) => { const on = c.dataset.tier === tier; c.classList.toggle('on', on); c.setAttribute('aria-checked', String(on)); });
+    if (!form) return;
+    $$('[data-amt]', form).forEach((el) => { el.textContent = b.plans[tier][el.dataset.amt]; });
+    $$('#planSeg button', form).forEach((x) => x.classList.toggle('on', x.dataset.period === period));
+    $('#payAmount', form).textContent = b.plans[tier][period];
+    $('#paySubmit', form).textContent = `حوّلت ${b.plans[tier][period]} دينار للباقة ${tierThe(tier)} ✅`;
+  };
+  $$('.tier-card', box).forEach((c) => {
+    const pick = () => { tier = c.dataset.tier; draw(); };
+    c.onclick = pick;
+    c.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(); } };
   });
+  draw();
+  if (!form) return;
+  $$('#planSeg button', form).forEach((btn) => { btn.onclick = () => { period = btn.dataset.period; draw(); }; });
   form.onsubmit = async (e) => {
     e.preventDefault();
     const f = new FormData(form);
     try {
-      await api('/api/billing/claim', { method: 'POST', body: { plan, payer: f.get('payer'), ref: f.get('ref') } });
+      await api('/api/billing/claim', { method: 'POST', body: { plan: period, tier, payer: f.get('payer'), ref: f.get('ref') } });
       toast('وصلنا تبليغك ✅ منتأكد ومنفعّل', 'ok');
       loadBilling();
     } catch (err) { toast(err.message, 'bad'); }
@@ -1723,6 +1771,7 @@ async function drawAlerts(note = null) {
 async function loadCoupons() {
   const box = $('#couponsPanel');
   if (!box) return;
+  if (isBasic()) { render(box, html`<h2>🎟️ كوبونات 💎</h2>${proLock('الكوبونات الموجّهة')}`); return; }
   let r;
   try { r = await api('/api/coupons'); } catch (e) { render(box, html`<h2>🎟️ كوبونات</h2><p class="alert bad">${e.message}</p>`); return; }
   const now = Date.now();
@@ -1782,6 +1831,7 @@ async function loadStaff(data) {
         <option value="">كل الفروع</option>${state.shop.locations.map((l) => html`<option value="${l.id}" ${l.id === u.branchId ? 'selected' : ''}>${l.name}</option>`)}</select>` : ''}
       <span class="badge ${u.role === 'owner' ? 'ok' : ''}">${u.role === 'owner' ? 'المالك' : 'كاشير'}</span>
       ${u.role === 'staff' ? html`<button class="btn ghost sm" type="button" data-rm="${u.id}" aria-label="حذف">✕</button>` : ''}</li>`)}</ul>
+    ${isBasic() ? html`<p class="hint">بالباقة الأساسية لحد ${state.me.plan.limits.staff} كاشير. 💎 بالمميزة بلا حد.</p>` : ''}
     <details><summary class="btn soft block">+ أضف كاشير</summary>
       <form class="stack" id="staffForm" style="margin-top:10px">
         <input name="name" placeholder="الاسم" required maxlength="60">
@@ -1859,6 +1909,8 @@ async function admin() {
       <div class="stat"><b class="num">${fmt(stats.counts.active || 0)}</b><span class="small muted">محلات مشتركة</span></div>
       <div class="stat"><b class="num">${fmt(stats.counts.trial || 0)}</b><span class="small muted">بالتجربة</span></div>
       <div class="stat"><b class="num">${fmt(stats.counts.expired || 0)}</b><span class="small muted">متوقفة</span></div>
+      <div class="stat"><b class="num">${fmt(stats.counts.pro || 0)}</b><span class="small muted">💎 مميز</span></div>
+      <div class="stat"><b class="num">${fmt(stats.counts.basic || 0)}</b><span class="small muted">⭐ أساسي</span></div>
       <div class="stat"><b class="num">${fmt(stats.counts.newMonth)}</b><span class="small muted">سجّلوا هالشهر</span></div>
     </div>
     ${stats.ending.length ? html`<section class="panel" style="margin-top:14px"><h2>⏳ بتخلص خلال 7 أيام</h2>
@@ -1892,11 +1944,15 @@ async function admin() {
       <h2>المحلات</h2>
       ${shops.length ? html`<ul class="list" id="shopList">${shops.map((s) => {
         const [label, cls] = SUB_BADGE[s.subscription.state](s.subscription);
-        return html`<li style="align-items:flex-start"><div class="main"><b>${s.name} <span class="badge ${cls}">${label}</span></b>
+        const tierBadge = s.subscription.state === 'active' ? html` <span class="badge">${s.plan.tier === 'basic' ? '⭐ أساسي' : '💎 مميز'}</span>` : '';
+        return html`<li style="align-items:flex-start"><div class="main"><b>${s.name} <span class="badge ${cls}">${label}</span>${tierBadge}</b>
           <span class="small muted"><span dir="ltr">${s.ownerEmail || ''}</span> · ${fmt(s.members)} زبون · من ${fmtDate(s.createdAt)} · آخر حركة ${ago(s.lastActivity)}${s.reseller ? ` · 🤝 ${s.reseller}` : ''}</span>
           <div class="row" style="margin-top:6px">
-            ${s.subscription.state === 'owner' ? '' : html`<button class="btn sm" type="button" data-plan="month" data-shop="${s.id}">+ شهر</button>
+            ${s.subscription.state === 'owner' ? '' : html`<select class="tier-sel" data-tier-for="${s.id}" aria-label="الباقة" style="width:auto;min-height:34px;padding:4px 8px">
+              <option value="pro" ${s.plan.chosen === 'pro' ? 'selected' : ''}>💎 مميز</option><option value="basic" ${s.plan.chosen === 'basic' ? 'selected' : ''}>⭐ أساسي</option></select>
+            <button class="btn sm" type="button" data-plan="month" data-shop="${s.id}">+ شهر</button>
             <button class="btn sm soft" type="button" data-plan="year" data-shop="${s.id}">+ سنة</button>
+            ${s.subscription.state === 'active' ? html`<button class="btn sm ghost" type="button" data-plan="${s.plan.chosen === 'basic' ? 'pro' : 'basic'}" data-shop="${s.id}">⇄ ${s.plan.chosen === 'basic' ? 'رقّي للمميز' : 'نزّل للأساسي'}</button>` : ''}
             ${s.subscription.state === 'expired' ? '' : html`<button class="btn sm ghost" type="button" data-plan="stop" data-shop="${s.id}">إيقاف</button>`}`}
             <button class="btn sm ghost" type="button" data-shop-menu="${s.id}">📋 المنيو</button>
           </div></div></li>`;
@@ -1922,9 +1978,16 @@ async function admin() {
   $$('[data-plan]').forEach((b) => {
     b.onclick = async () => {
       const name = b.closest('li').querySelector('b').firstChild.textContent.trim();
-      const msg = { month: `تفعيل ${name} شهر إضافي؟`, year: `تفعيل ${name} سنة إضافية؟`, stop: `إيقاف ${name} هلأ؟ الكاشير عندهم رح يتوقف.` }[b.dataset.plan];
+      const sel = $(`[data-tier-for="${b.dataset.shop}"]`);
+      const tier = sel ? sel.value : 'pro';
+      const tname = tier === 'basic' ? 'الأساسي' : 'المميز';
+      const msg = {
+        month: `تفعيل ${name} شهر إضافي على ${tname}؟`, year: `تفعيل ${name} سنة إضافية على ${tname}؟`,
+        basic: `تنزيل ${name} للباقة الأساسية (بدون دفعة)؟`, pro: `ترقية ${name} للباقة المميزة (بدون دفعة)؟`,
+        stop: `إيقاف ${name} هلأ؟ الكاشير عندهم رح يتوقف.`,
+      }[b.dataset.plan];
       if (!confirm(msg)) return;
-      try { await api(`/api/admin/shops/${b.dataset.shop}/plan`, { method: 'POST', body: { action: b.dataset.plan } }); toast('انحفظ ✅', 'ok'); admin(); } catch (e) { toast(e.message, 'bad'); }
+      try { await api(`/api/admin/shops/${b.dataset.shop}/plan`, { method: 'POST', body: { action: b.dataset.plan, tier } }); toast('انحفظ ✅', 'ok'); admin(); } catch (e) { toast(e.message, 'bad'); }
     };
   });
   $$('.lead-status').forEach((sel) => {
@@ -2003,7 +2066,7 @@ function paymentsPanel(pay) {
     <h2>💳 حوالات الاشتراك</h2>
     ${pay.payments.length ? html`<ul class="list">${pay.payments.map((p) => html`<li style="align-items:flex-start"><div class="main">
         <b>${p.shopName} <span class="badge ${PAY_STATUS[p.status][1]}">${PAY_STATUS[p.status][0]}</span></b>
-        <span class="small">${p.plan === 'year' ? 'سنة' : 'شهر'} · <span class="num">${p.amount}</span> دينار</span>
+        <span class="small">${p.tier === 'basic' ? '⭐ أساسي' : '💎 مميز'} · ${p.plan === 'year' ? 'سنة' : 'شهر'} · <span class="num">${p.amount}</span> دينار</span>
         <span class="small muted">من: ${p.payer}${p.ref ? html` · رقم: <span dir="ltr">${p.ref}</span>` : ''} · ${ago(p.createdAt)}</span>
         ${p.status === 'pending' ? html`<div class="row" style="margin-top:6px">
           <button class="btn sm" type="button" data-pay="${p.id}" data-act="approve">✅ وصلت، فعّل</button>

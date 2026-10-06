@@ -1,5 +1,6 @@
 // صفحة البيع: بطاقة تجريبية، طلب اشتراك (فورم أو واتساب)، ودخول المحلات
 import { $, $$, api, cardHTML, render } from './common.js';
+import { PLAN_DEFAULTS, featuresHTML } from './plans.js';
 
 const params = new URLSearchParams(location.search);
 const code = params.get('code');
@@ -65,7 +66,28 @@ function showWhatsApp(text = 'مرحبا، بدي أعرف أكتر عن نقا�
   $$('[data-wa]').forEach((a) => { a.href = waLink(text); a.classList.remove('hidden'); });
 }
 
+// 💎 الباقتين بميزاتهم (بتنرسم فوراً، وبتتحدّث بأسعار السيرفر)
+function drawPlans(plans = PLAN_DEFAULTS) {
+  const box = $('#planCards');
+  if (!box) return;
+  const card = (tier, best) => {
+    const p = plans[tier];
+    const save = p.month * 12 - p.year;
+    return `<div class="plan${best ? ' best' : ''}">
+      ${best ? '<span class="badge ok">الأكثر طلباً</span>' : ''}
+      <h3>${tier === 'pro' ? '💎' : '⭐'} ${p.name}</h3>
+      <div class="price"><b class="num">${p.month}</b><span>دينار / بالشهر</span></div>
+      <p class="small muted">أو <b class="num">${p.year}</b> دينار بالسنة${save > 0 ? ` (وفّر ${save})` : ''}</p>
+      <a class="btn block${best ? '' : ' ghost'}" href="#contact" data-start>ابدأ التجربة المجانية</a>
+      ${featuresHTML(tier)}
+    </div>`;
+  };
+  box.innerHTML = card('basic', false) + card('pro', true);
+}
+drawPlans();
+
 api('/api/site').then((s) => {
+  if (s.plans) drawPlans(s.plans);
   whatsapp = s.whatsapp;
   signupOpen = s.signupOpen;
   if (s.apple) $('#faqIphone').textContent = 'بتنحفظ البطاقة بـ Apple Wallet، وبتفتح بكبستين على الزر الجانبي، ولما يقرّب الزبون من محلك بتطلعله على شاشة القفل برسالة الترحيب تبعتك.';

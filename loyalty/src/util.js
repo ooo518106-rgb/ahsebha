@@ -1,9 +1,9 @@
 // أدوات مشتركة بين السيرفر والاختبارات — بتشتغل على Cloudflare Workers و Node (Web Crypto + Response)
 
 export class HttpError extends Error {
-  constructor(status, message) { super(message); this.status = status; }
+  constructor(status, message, extra = null) { super(message); this.status = status; this.extra = extra; }
 }
-export function fail(status, message) { throw new HttpError(status, message); }
+export function fail(status, message, extra = null) { throw new HttpError(status, message, extra); }
 
 export function json(data, status = 200, headers = {}) {
   return new Response(JSON.stringify(data), {

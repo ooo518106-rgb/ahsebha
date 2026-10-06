@@ -354,9 +354,13 @@ test('صفحة الخصوصية وإيميل التواصل', async () => {
   const r = await c.get('/privacy');
   assert.equal(r.status, 200);
   assert.equal(r.data, '<html>/privacy.html</html>');
-  assert.deepEqual((await c.get('/api/site')).data, { contactEmail: 'privacy@example.com', whatsapp: null, signupOpen: true, apple: false });
+  const { PLANS } = await import('../src/app.js');
+  const { PLAN_DEFAULTS, FEATURES } = await import('../public/js/plans.js');
+  assert.deepEqual(PLAN_DEFAULTS, PLANS, 'أسعار صفحة البيع نفس أسعار السيرفر');
+  assert.equal(FEATURES.length, 15);
+  assert.deepEqual((await c.get('/api/site')).data, { contactEmail: 'privacy@example.com', whatsapp: null, signupOpen: true, apple: false, plans: PLANS });
   const { client: client2 } = await setup({ WHATSAPP_NUMBER: '962798900911', SIGNUP_CODE: 'x' });
-  assert.deepEqual((await client2().get('/api/site')).data, { contactEmail: null, whatsapp: '962798900911', signupOpen: false, apple: false });
+  assert.deepEqual((await client2().get('/api/site')).data, { contactEmail: null, whatsapp: '962798900911', signupOpen: false, apple: false, plans: PLANS });
 });
 
 test('طلبات الاشتراك: من صفحة البيع، وبيشوفها مدير المنصة بس', async () => {
@@ -481,12 +485,14 @@ test('الدفع بـ CliQ: المحل بيبلّغ عن الحوالة، ومد
   assert.equal((await admin.put('/api/admin/settings', { cliqAlias: 'NUQATAK', cliqName: 'نقاطك', cliqBank: 'البنك العربي' })).status, 200);
   let b = (await owner.get('/api/billing')).data;
   assert.deepEqual(b.cliq, { alias: 'NUQATAK', name: 'نقاطك', bank: 'البنك العربي' });
-  assert.deepEqual(b.prices, { month: 15, year: 150 });
+  assert.deepEqual(b.plans, { basic: { name: 'أساسي', month: 12, year: 120 }, pro: { name: 'مميز', month: 25, year: 250 } });
+  assert.equal(b.plan.tier, 'pro', 'التجربة على المميز');
   assert.equal((await owner.post('/api/billing/claim', { plan: 'week', payer: 'أحمد' })).status, 400);
   assert.equal((await owner.post('/api/billing/claim', { plan: 'year', payer: '' })).status, 400);
   b = (await owner.post('/api/billing/claim', { plan: 'year', payer: 'أحمد محمد', ref: 'TX123' })).data;
   assert.equal(b.payments[0].status, 'pending');
-  assert.equal(b.payments[0].amount, 150);
+  assert.equal(b.payments[0].amount, 250, 'المميز بالسنة (الافتراضي)');
+  assert.equal(b.payments[0].tier, 'pro');
   const before = (await db.get('SELECT active_until FROM shops WHERE id = ?', shop.id)).active_until;
   const list = (await admin.get('/api/admin/payments')).data.payments;
   assert.equal(list[0].shopName, 'Cafe');

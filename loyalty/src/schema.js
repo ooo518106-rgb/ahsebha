@@ -331,6 +331,9 @@ export const MIGRATIONS = [
   'ALTER TABLE shops ADD COLUMN menu_pdf_size INTEGER NOT NULL DEFAULT 0',
   'ALTER TABLE shops ADD COLUMN menu_pdf_parts INTEGER NOT NULL DEFAULT 0',
   "ALTER TABLE menu_items ADD COLUMN sizes TEXT NOT NULL DEFAULT '[]'",
+  // الباقات: أساسي أو مميز (المحلات الموجودة والتجارب على المميز)
+  "ALTER TABLE shops ADD COLUMN plan TEXT NOT NULL DEFAULT 'pro'",
+  "ALTER TABLE payments ADD COLUMN tier TEXT NOT NULL DEFAULT 'pro'",
   'ALTER TABLE credit_txns ADD COLUMN note TEXT',
   // فهارس على الأعمدة الجديدة (لازم تيجي بعد ما ينضاف العمود)
   'CREATE INDEX IF NOT EXISTS shops_reseller ON shops(reseller_id)',
