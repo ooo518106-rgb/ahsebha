@@ -29,6 +29,8 @@ PUBLIC_URL = "https://nuqatak.com"
 GOOGLE_ISSUER_ID = "3388000000023212673"
 # رقم واتساب للتواصل بصفحة البيع والخصوصية (مع مفتاح الدولة، بدون + أو صفر)
 WHATSAPP_NUMBER = "962798900911"
+# رقم تعريف رقم واتساب الإيجنت عند Meta (Phone number ID، مش سري). التوكن سري وبينحط بلوحة Cloudflare
+WHATSAPP_PHONE_ID = "1330836546787669"
 # الأسرار بتنحط من لوحة Cloudflare (Settings ← Variables and Secrets ← Secret)، مش هون:
 #   GOOGLE_SERVICE_ACCOUNT = محتوى ملف JSON تبع حساب الخدمة
 #   SIGNUP_CODE (اختياري) = رمز بتعطيه للمحلات عشان تقدر تسجّل؛ بدونه التسجيل مفتوح للكل
