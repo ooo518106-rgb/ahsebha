@@ -2049,7 +2049,7 @@ function salesPanel(st) {
   return html`
   <section class="panel stack">
     <h2>🎯 وكيل المبيعات</h2>
-    <p class="hint">بيدوّر بالإنترنت على محلات، وبيكتب لكل محل رسالة خاصة فيه مع رابطه. إنت بتكبس «📲 ابعت من واتسابك»، ولما صاحب المحل يفتح الرابط، الوكيل بيكمّل معه وبيفاوض بدون ما ينزّل السعر (تجربة مجانية لحد 30 يوم، والاشتراك السنوي، والباقة الأساسية). إذا حدا بده يحكي معك بيوصلك إشعار.</p>
+    <p class="hint">بيدوّر بالإنترنت على محلات، وبيبعتلهم أول رسالة على واتساب من رقم الوكيل (لحاله، أو لما تكبس «🤖 ابعت من رقم الوكيل»). لما صاحب المحل يرد، الوكيل بيكمّل معه وبيفاوض بدون ما ينزّل السعر (تجربة مجانية لحد 30 يوم، والاشتراك السنوي، والباقة الأساسية). إذا حدا بده يحكي معك بيوصلك إشعار.</p>
     <details ${salesReady(st) && st.whatsapp.verified ? '' : 'open'}><summary><b>خطوات التشغيل</b></summary>
       <ol class="steps-list" style="margin-top:8px">
         <li>${st.ai ? '✅' : '⬜'} مفتاح الذكاء الاصطناعي كـ Secret بـ Cloudflare: <code>GEMINI_API_KEY</code> (Gemini، أرخص) أو <code>ANTHROPIC_API_KEY</code> (Claude)${st.aiProvider ? html` · شغّال على <b>${st.aiProvider === 'gemini' ? 'Gemini' : 'Claude'}</b>` : ''}</li>
