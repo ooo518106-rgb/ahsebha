@@ -198,7 +198,7 @@ test('واتساب: الإرسال التلقائي بأوقات الدوام و
   assert.equal((await cron(SUNDAY_NOON)).outreach, 2);
   assert.equal((await cron(SUNDAY_NOON + 300e3)).outreach, 0, 'الحد باليوم');
   const t = f.graph[0];
-  assert.equal(t.url, 'https://graph.facebook.com/v22.0/1234567890/messages');
+  assert.equal(t.url, 'https://graph.facebook.com/v26.0/1234567890/messages');
   assert.equal(t.headers.get('authorization'), 'Bearer wa-token');
   assert.equal(t.body.to, '962791000001');
   assert.equal(t.body.template.name, 'nuqatak_intro');
@@ -367,7 +367,7 @@ test('رقم الإيجنت عند Meta: الحالة، الكود، التأك�
   assert.equal((await off.admin.get('/api/admin/wa/number')).status, 400);
   assert.equal((await p.client().get('/api/admin/wa/number')).status, 401);
   assert.equal((await p.admin.get('/api/admin/wa/number')).status, 200);
-  assert.match(f.graph.at(-1).url, /\/v22\.0\/1234567890\?fields=.*code_verification_status/);
+  assert.match(f.graph.at(-1).url, /\/v26\.0\/1234567890\?fields=.*code_verification_status/);
   await p.admin.post('/api/admin/wa/number', { action: 'code', method: 'VOICE' });
   assert.match(f.graph.at(-2).url, /1234567890\/request_code$/);
   assert.deepEqual(f.graph.at(-2).body, { code_method: 'VOICE', language: 'ar' });

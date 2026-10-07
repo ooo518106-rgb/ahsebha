@@ -15,7 +15,7 @@ export function waConfig(env) {
     verifyToken: String(env.WHATSAPP_VERIFY_TOKEN || '').trim(),
     template: String(env.WHATSAPP_TEMPLATE || 'nuqatak_intro').trim(),
     lang: String(env.WHATSAPP_TEMPLATE_LANG || 'ar').trim(),
-    version: /^v\d+\.\d+$/.test(String(env.WHATSAPP_API_VERSION || '')) ? env.WHATSAPP_API_VERSION : 'v22.0',
+    version: /^v\d+\.\d+$/.test(String(env.WHATSAPP_API_VERSION || '')) ? env.WHATSAPP_API_VERSION : 'v26.0',
     fetch: env.fetch || ((...a) => fetch(...a)),
   };
 }

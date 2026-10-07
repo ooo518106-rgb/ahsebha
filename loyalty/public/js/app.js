@@ -2107,7 +2107,7 @@ function salesPanel(st) {
 const WA_LABELS = {
   codeStatus: { VERIFIED: '✅ مؤكّد', NOT_VERIFIED: '❌ مش مؤكّد (ابعت كود)', EXPIRED: '⏳ التأكيد انتهى (ابعت كود جديد)' },
   platform: { CLOUD_API: '✅ مسجّل وجاهز', NOT_APPLICABLE: '❌ مش مسجّل لسا', ON_PREMISE: '⚠️ مسجّل على نظام قديم' },
-  nameStatus: { APPROVED: '✅ موافق عليه', AVAILABLE_WITHOUT_REVIEW: '✅ موافق عليه', PENDING_REVIEW: '⏳ Meta عم تراجعه', DECLINED: '❌ مرفوض', NONE: '—' },
+  nameStatus: { APPROVED: '✅ موافق عليه', AVAILABLE_WITHOUT_REVIEW: '✅ موافق عليه', PENDING_REVIEW: '⏳ Meta عم تراجعه', DECLINED: '❌ مرفوض', NONE: '—', NON_EXISTS: '⏳ لسا ما انراجع (الإرسال شغّال)' },
   status: { CONNECTED: '✅ متصل', PENDING: '⏳ بيستنى', DISCONNECTED: '❌ مفصول', FLAGGED: '⚠️ عليه تحذير', RESTRICTED: '⚠️ مقيّد', BANNED: '⛔ محظور' },
 };
 function waNumberHTML(d, err) {

@@ -2951,7 +2951,7 @@ async function salesState(c) {
     whatsapp: {
       ready: !!wcfg,
       verified: !!(wcfg && wcfg.appSecret && wcfg.verifyToken),
-      webhookUrl: `${c.origin}/api/wa/webhook`,
+      webhookUrl: `${String(c.env.WEBHOOK_ORIGIN || 'https://loyalty.ooo518106.workers.dev').replace(/\/+$/, '')}/api/wa/webhook`, // Meta ما بتعدّي حماية البوتات على الدومين، فالرابط على عنوان workers.dev
       template: wcfg ? wcfg.template : String(c.env.WHATSAPP_TEMPLATE || 'nuqatak_intro'),
       templateText: sales.TEMPLATE_TEXT,
     },
