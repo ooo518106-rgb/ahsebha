@@ -350,8 +350,9 @@ test('بعد ربط Meta: رسالتك بتفتح واتساب الوكيل، و
   assert.match(decodeURIComponent(pr.message), new RegExp(`#${code}`));
   await p.admin.post(`/api/admin/prospects/${pr.id}/sent`);
   // صاحب المخبز راسل الوكيل من رقم تاني
-  await hook(p.client(), incomingMsg('962795555555', `مرحبا، بدي أعرف أكتر عن نقاطك #${code}`, 'wamid.x'));
-  await p.client().flush();
+  const meta = p.client();
+  await hook(meta, incomingMsg('962795555555', `مرحبا، بدي أعرف أكتر عن نقاطك #${code}`, 'wamid.x'));
+  await meta.flush();
   const st = (await p.admin.get('/api/admin/sales')).data;
   assert.equal(st.prospects.length, 1, 'ما انعمل محل جديد');
   assert.equal(st.prospects[0].wa, '962795555555');
