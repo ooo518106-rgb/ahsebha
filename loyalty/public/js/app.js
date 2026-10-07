@@ -2118,6 +2118,7 @@ function waNumberHTML(d, err) {
       <li><span class="muted">الاسم</span> <b>${d.name || '—'}</b></li>
       ${row('nameStatus', 'موافقة الاسم')}${row('codeStatus', 'تأكيد الرقم')}${row('platform', 'التسجيل')}${row('status', 'الحالة')}
       ${d.subscribed == null ? '' : html`<li><span class="muted">استلام الردود (Webhooks)</span> <b>${d.subscribed ? '✅ مشترك' : '❌ مش مشترك'}</b></li>`}
+      <li><span class="muted">آخر إشعار من Meta</span> <b>${!d.lastHook ? 'لسا ما وصل ولا إشي' : html`${ago(d.lastHook.at)} · ${d.lastHook.signed ? '✅ موقّع' : '❌ التوقيع غلط (تأكد من WHATSAPP_APP_SECRET)'}${d.lastHook.fields && d.lastHook.fields.length ? ` · ${d.lastHook.fields.join('، ')}` : ''}${d.lastHook.ours ? ` · ${d.lastHook.ours} رسالة لرقم الإيجنت` : ''}${d.lastHook.other ? ` · ${d.lastHook.other} رسالة لرقم تاني` : ''}`}</b></li>
     </ul>` : ''}
     <div class="row" style="margin-top:8px">
       <button class="btn sm ghost" type="button" data-wa-check>🔄 افحص</button>

@@ -2842,9 +2842,13 @@ async function waWebhook(c) {
   if (c.req.method !== 'POST' || !wcfg) return new Response('not found', { status: 404 });
   const raw = await c.req.text();
   if (raw.length > MAX_BODY) return new Response('too large', { status: 413 });
-  if (!(await wa.verifySignature(wcfg.appSecret, raw, c.req.headers.get('x-hub-signature-256')))) return new Response('bad signature', { status: 401 });
+  const signed = await wa.verifySignature(wcfg.appSecret, raw, c.req.headers.get('x-hub-signature-256'));
   let payload;
-  try { payload = JSON.parse(raw); } catch { return new Response('bad json', { status: 400 }); }
+  try { payload = JSON.parse(raw); } catch { payload = null; }
+  // للتشخيص بصفحة المبيعات: آخر إشعار وصل من Meta (بدون نص الرسائل)
+  await setSetting(c.db, 'wa_last_hook', JSON.stringify({ at: Date.now(), signed, ...wa.hookSummary(payload, wcfg.phoneId) }));
+  if (!signed) return new Response('bad signature', { status: 401 });
+  if (!payload) return new Response('bad json', { status: 400 });
   for (const m of wa.incoming(payload, wcfg.phoneId)) await waIncoming(c, wcfg, m);
   return new Response('ok');
 }
@@ -3129,11 +3133,14 @@ async function adminWaNumber(c) {
       } else fail(400, 'إجراء مش معروف');
     }
     const st = await wa.numberStatus(wcfg);
+    let lastHook = null;
+    try { lastHook = JSON.parse((await getSetting(c.db, 'wa_last_hook')) || 'null'); } catch { lastHook = null; }
     let subscribed = null;
     if (wcfg.wabaId) {
       try { subscribed = ((await wa.subscribedApps(wcfg)).data || []).length > 0; } catch { subscribed = null; }
     }
     return json({
+      lastHook,
       subscribed,
       ok: true,
       number: st.display_phone_number || null,

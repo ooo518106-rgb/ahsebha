@@ -236,6 +236,10 @@ test('واتساب: الـ webhook موقّع، الوكيل بيرد ويفاو
   // بدون توقيع صحيح ما بنقبل
   const raw = JSON.stringify(incomingMsg('962791000001', 'مرحبا'));
   assert.equal((await meta.req('POST', '/api/wa/webhook', raw, { 'x-hub-signature-256': sign(raw, 'wrong') })).status, 401);
+  const diag = (await p.admin.get('/api/admin/wa/number')).data.lastHook;
+  assert.equal(diag.signed, false);
+  assert.deepEqual(diag.fields, ['messages']);
+  assert.equal(diag.ours, 1, 'رسالة وحدة لرقم الإيجنت');
 
   await p.admin.post('/api/admin/prospects', { name: 'كوفي الورد', phone: '0791000001', kind: 'كوفي شوب' });
   await p.admin.put('/api/admin/sales/settings', { auto: true, daily: 20 });

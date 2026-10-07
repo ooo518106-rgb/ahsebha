@@ -108,5 +108,21 @@ export function incoming(payload, phoneId) {
   return out;
 }
 
+// ملخص إشعار للتشخيص: شو الحقول، وكم رسالة لرقمنا ولأرقام تانية
+export function hookSummary(payload, phoneId) {
+  const fields = new Set();
+  let ours = 0;
+  let other = 0;
+  for (const entry of (payload && payload.entry) || []) {
+    for (const ch of entry.changes || []) {
+      if (ch.field) fields.add(String(ch.field).slice(0, 40));
+      const n = ((ch.value && ch.value.messages) || []).length;
+      const pid = ch.value && ch.value.metadata && ch.value.metadata.phone_number_id;
+      if (pid && pid === phoneId) ours += n; else other += n;
+    }
+  }
+  return { fields: [...fields].slice(0, 5), ours, other };
+}
+
 // «لا» أو «وقف» أو «stop»: ما منرجع نبعتله
 export const isOptOut = (text) => /^\s*(لا|لأ|لا شكرا|لا شكراً|لا، شكراً|لا شكرًا|مش مهتم|مو مهتم|وقف|توقف|الغاء|إلغاء|stop|unsubscribe|no thanks?)\s*[.!🙏]*\s*$/i.test(String(text || ''));
