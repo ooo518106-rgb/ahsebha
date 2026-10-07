@@ -3119,6 +3119,9 @@ async function adminWaNumber(c) {
         const code = String(b.code || '').replace(/\D/g, '');
         if (!/^\d{6}$/.test(code)) fail(400, 'الكود 6 أرقام');
         await wa.verifyCode(wcfg, code);
+      } else if (b.action === 'subscribe') {
+        if (!wcfg.wabaId) fail(400, 'ناقص WHATSAPP_WABA_ID');
+        await wa.subscribeApp(wcfg);
       } else if (b.action === 'register') {
         const pin = String(b.pin || '').replace(/\D/g, '');
         if (!/^\d{6}$/.test(pin)) fail(400, 'الـ PIN لازم يكون 6 أرقام');
@@ -3126,7 +3129,12 @@ async function adminWaNumber(c) {
       } else fail(400, 'إجراء مش معروف');
     }
     const st = await wa.numberStatus(wcfg);
+    let subscribed = null;
+    if (wcfg.wabaId) {
+      try { subscribed = ((await wa.subscribedApps(wcfg)).data || []).length > 0; } catch { subscribed = null; }
+    }
     return json({
+      subscribed,
       ok: true,
       number: st.display_phone_number || null,
       name: st.verified_name || null,

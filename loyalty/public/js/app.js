@@ -2117,9 +2117,11 @@ function waNumberHTML(d, err) {
       <li><span class="muted">الرقم</span> <b dir="ltr">${d.number || '—'}</b></li>
       <li><span class="muted">الاسم</span> <b>${d.name || '—'}</b></li>
       ${row('nameStatus', 'موافقة الاسم')}${row('codeStatus', 'تأكيد الرقم')}${row('platform', 'التسجيل')}${row('status', 'الحالة')}
+      ${d.subscribed == null ? '' : html`<li><span class="muted">استلام الردود (Webhooks)</span> <b>${d.subscribed ? '✅ مشترك' : '❌ مش مشترك'}</b></li>`}
     </ul>` : ''}
     <div class="row" style="margin-top:8px">
       <button class="btn sm ghost" type="button" data-wa-check>🔄 افحص</button>
+      ${d && d.subscribed === false ? html`<button class="btn sm" type="button" data-wa-sub>🔔 فعّل استلام الردود</button>` : ''}
       ${!d || d.codeStatus !== 'VERIFIED' ? html`<button class="btn sm" type="button" data-wa-code="SMS">✉️ ابعت كود برسالة</button><button class="btn sm soft" type="button" data-wa-code="VOICE">📞 كود بمكالمة</button>` : ''}
     </div>
     ${!d || d.codeStatus !== 'VERIFIED' ? html`<form class="row" data-wa-verify style="margin-top:8px"><input name="code" inputmode="numeric" maxlength="6" placeholder="الكود (6 أرقام)" dir="ltr" style="max-width:180px"><button class="btn sm" type="submit">✅ أكّد الكود</button></form>` : ''}
@@ -2139,6 +2141,7 @@ function bindWaNumber() {
   };
   const bind = () => {
     box.querySelectorAll('[data-wa-check]').forEach((b) => { b.onclick = () => run('GET', null, b); });
+    box.querySelectorAll('[data-wa-sub]').forEach((b) => { b.onclick = () => run('POST', { action: 'subscribe' }, b); });
     box.querySelectorAll('[data-wa-code]').forEach((b) => { b.onclick = () => run('POST', { action: 'code', method: b.dataset.waCode }, b); });
     const v = box.querySelector('[data-wa-verify]');
     if (v) v.onsubmit = (e) => { e.preventDefault(); run('POST', { action: 'verify', code: v.code.value }, v.querySelector('button')); };

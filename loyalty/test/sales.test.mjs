@@ -377,6 +377,11 @@ test('رقم الإيجنت عند Meta: الحالة، الكود، التأك�
   await p.admin.post('/api/admin/wa/number', { action: 'register', pin: '246810' });
   assert.match(f.graph.at(-2).url, /1234567890\/register$/);
   assert.deepEqual(f.graph.at(-2).body, { messaging_product: 'whatsapp', pin: '246810' });
+  // الاشتراك باستلام الردود (بيحتاج WHATSAPP_WABA_ID)
+  const w = await platform({ ANTHROPIC_API_KEY: 'sk-test', fetch: f.fetch, ...WA_ENV, WHATSAPP_WABA_ID: '5550001' });
+  await w.admin.post('/api/admin/wa/number', { action: 'subscribe' });
+  assert.ok(f.graph.some((g) => /v26\.0\/5550001\/subscribed_apps$/.test(g.url)), 'subscribed_apps');
+  assert.equal((await p.admin.post('/api/admin/wa/number', { action: 'subscribe' })).status, 400, 'بدون WABA ID');
   const bad = await p.admin.post('/api/admin/wa/number', { action: 'register', pin: '000000' });
   assert.equal(bad.status, 502);
   assert.match(bad.data.error, /PIN Mismatch.*133005/);

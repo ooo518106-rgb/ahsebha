@@ -13,6 +13,7 @@ export function waConfig(env) {
     phoneId,
     appSecret: String(env.WHATSAPP_APP_SECRET || '').trim(),
     verifyToken: String(env.WHATSAPP_VERIFY_TOKEN || '').trim(),
+    wabaId: /^\d{5,20}$/.test(String(env.WHATSAPP_WABA_ID || '')) ? String(env.WHATSAPP_WABA_ID) : null,
     template: String(env.WHATSAPP_TEMPLATE || 'nuqatak_intro').trim(),
     lang: String(env.WHATSAPP_TEMPLATE_LANG || 'ar').trim(),
     version: /^v\d+\.\d+$/.test(String(env.WHATSAPP_API_VERSION || '')) ? env.WHATSAPP_API_VERSION : 'v26.0',
@@ -60,6 +61,9 @@ export const numberStatus = (cfg) => call(cfg, `${cfg.phoneId}?fields=display_ph
 export const requestCode = (cfg, method) => call(cfg, `${cfg.phoneId}/request_code`, { body: { code_method: method === 'VOICE' ? 'VOICE' : 'SMS', language: 'ar' } });
 export const verifyCode = (cfg, code) => call(cfg, `${cfg.phoneId}/verify_code`, { body: { code } });
 export const registerNumber = (cfg, pin) => call(cfg, `${cfg.phoneId}/register`, { body: { messaging_product: 'whatsapp', pin } });
+// اشتراك التطبيق بحساب الواتساب (زر «الاشتراك في Webhooks» بصفحة Meta): بدونه ردود المحلات ما بتوصل
+export const subscribedApps = (cfg) => call(cfg, `${cfg.wabaId}/subscribed_apps`, { method: 'GET' });
+export const subscribeApp = (cfg) => call(cfg, `${cfg.wabaId}/subscribed_apps`, {});
 
 // أول رسالة: القالب، والمتغير {{1}} = اسم المحل
 export const sendTemplate = (cfg, to, shopName) => graph(cfg, {
