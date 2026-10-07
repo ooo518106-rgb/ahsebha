@@ -2013,6 +2013,8 @@ const PROSPECT_ST = {
 };
 const salesReady = (st) => st.ai && st.whatsapp.ready;
 const CHANNEL_ICON = { web: '🌐', wa: '💬', manual: '📲' };
+// أرقام الأردن بنفس الشكل دايماً (07…)، سواء انكتبت 07 أو جات من واتساب +962
+const localPhone = (v) => { const d = String(v || '').replace(/\D/g, ''); return /^9627\d{8}$/.test(d) ? `0${d.slice(3)}` : v; };
 
 function prospectCard(p, st) {
   const [label, cls] = PROSPECT_ST[p.status] || [p.status, ''];
@@ -2021,7 +2023,7 @@ function prospectCard(p, st) {
   return html`<div class="prospect" data-pid="${p.id}">
     <div class="prospect-top"><div class="grow">
       <b>${p.name}</b> <span class="st ${cls}">${label}</span>${p.paused ? html` <span class="st">✋ إنت بترد</span>` : ''}${p.offer ? html` <span class="st">🎁 ${p.offer.trialDays} يوم${p.offer.used ? ' ✓' : ''}</span>` : ''}${p.source === 'inbound' ? html` <span class="st">📥 راسلنا</span>` : ''}${p.openedAt ? html` <span class="st">👀 فتح رابطه</span>` : ''}
-      <div class="small muted">${[p.ownerName, p.kind, p.area].filter(Boolean).join(' · ')}${p.phone ? html` · <span class="num" dir="ltr">${p.phone}</span>` : ''} · ${ago(p.lastInAt || p.lastOutAt || p.createdAt)}</div>
+      <div class="small muted">${[p.ownerName, p.kind, p.area].filter(Boolean).join(' · ')}${p.phone ? html` · <span class="num" dir="ltr">${localPhone(p.phone)}</span>` : ''} · ${ago(p.lastInAt || p.lastOutAt || p.createdAt)}</div>
       ${p.why ? html`<div class="small" style="margin-top:4px">${p.why}</div>` : ''}
       ${p.note ? html`<div class="small" style="margin-top:4px">📝 ${p.note}</div>` : ''}
       ${p.error ? html`<div class="small" style="margin-top:4px;color:var(--bad)">⚠️ ${waHint(p.error) ? html`${waHint(p.error)} <span class="muted" dir="ltr">${p.error}</span>` : p.error}</div>` : ''}
@@ -2089,7 +2091,7 @@ function salesPanel(st) {
     <button class="btn" type="submit">حفظ</button>
   </form>
   <section class="panel stack">
-    <div class="row" style="justify-content:space-between"><h2 style="margin:0">المحلات (${st.prospects.length})</h2>
+    <div class="row" style="justify-content:space-between"><h2 style="margin:0">المحلات (<span id="salesCount">${st.prospects.length}</span>)</h2>
       <select id="salesFilter" aria-label="فلتر" style="width:auto;min-height:34px;padding:4px 8px">
         <option value="">الكل</option><option value="talking,hot">عم يحكوا</option><option value="new,failed">بالدور</option><option value="sent">انبعتلهم</option><option value="won">سجّلوا</option><option value="manual">بدون واتساب</option>
       </select></div>
@@ -2248,10 +2250,14 @@ function bindSales(st) {
   const filter = $('#salesFilter');
   filter.onchange = () => {
     const want = filter.value ? filter.value.split(',') : null;
+    let shown = 0;
     $$('#salesList .prospect').forEach((el) => {
       const p = st.prospects.find((x) => String(x.id) === el.dataset.pid);
       el.hidden = !!want && !want.includes(p.status);
+      if (!el.hidden) shown++;
     });
+    // العدد فوق حسب الفلتر: «2 من 35»
+    $('#salesCount').textContent = want ? `${shown} من ${st.prospects.length}` : String(st.prospects.length);
   };
   $$('#salesList .prospect').forEach((card) => {
     const id = card.dataset.pid;
