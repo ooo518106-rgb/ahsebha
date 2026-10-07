@@ -10,6 +10,15 @@ const COUNTRIES_AR = { JO: 'الأردن', PS: 'فلسطين', SA: 'السعود
 export const TEMPLATE_TEXT = 'مرحبا {{1}} 👋 معك مساعد «نقاطك». عنا بطاقة ولاء لمحلك بتنحفظ بمحفظة جوال الزبون، بدون تطبيق وبدون كروت ورق، وبتذكّره فيك لما يقرّب من المحل. بتحب أحكيلك كيف ممكن ترجّع زبائنك أكتر؟ وفي تجربة 14 يوم ببلاش.';
 export const templateFor = (shopName) => TEMPLATE_TEXT.replace('{{1}}', shopName);
 
+// الرسالة اللي بتبعتها إنت من واتسابك: أول جملة كتبها الوكيل لهالمحل، ورابطه الخاص (بالموقع، أو لواتساب الوكيل بعد ربط Meta)
+export const openerFor = (p) => p.opener || `مرحبا ${p.name} 👋 معك «نقاطك»: بطاقة ولاء لمحلك بتنحفظ بمحفظة جوال الزبون، بدون تطبيق وبدون كروت ورق، وبتذكّره فيك لما يقرّب من المحل.`;
+export function outreachText(p, { origin, agentWa }) {
+  const link = agentWa
+    ? `احكي مع مساعدنا على واتساب، بيجاوبك على أي سؤال 👇\nhttps://wa.me/${agentWa}?text=${encodeURIComponent(`مرحبا، بدي أعرف أكتر عن نقاطك #${p.code}`)}`
+    : `جهزتلك صفحة فيها كل التفاصيل، ومساعدنا بيجاوبك فيها على أي سؤال 👇\n${origin}/?p=${p.code}`;
+  return `${openerFor(p)}\n\n${link}\n\nوفي تجربة ${BASE_TRIAL} يوم ببلاش 🎁`;
+}
+
 const money = (n) => `${Number(n).toLocaleString('en-US', { maximumFractionDigits: 2 })} دينار`;
 
 // الجزء الثابت (بيتخزّن بالكاش): مين إحنا، كيف بنبيع، وشو المسموح بالتفاوض، والمعلومات عن نقاطك
@@ -66,11 +75,14 @@ export function salesRules({ plans, features, apple, signupOpen, origin, ownerWh
 }
 
 // الجزء اللي بيتغيّر: القناة، ومين المحل، والعرض إذا في
-export function salesContext({ channel, today, prospect, offer, offerLink }) {
+export function salesContext({ channel, today, prospect, firstMessage, offer, offerLink }) {
   const lines = [`اليوم: ${today}`];
   if (channel === 'wa') {
     lines.push('القناة: واتساب. ردودك بتنبعت رسالة واتساب، فخليها قصيرة كتير (جملة أو تنتين).');
     lines.push('إذا بعتلك صورة أو رسالة صوتية، قله بلطف إنك بتقرأ الرسائل المكتوبة بس لهلأ.');
+  } else if (prospect) {
+    lines.push('القناة: المحادثة على موقع نقاطك. هاد صاحب المحل اللي بعتناله رسالة على الواتساب، وفتح رابطه الخاص.');
+    lines.push('رقمه محفوظ عنا، فما تطلبه. إذا بده حدا يحكي معه، استعمل call_owner.');
   } else {
     lines.push('القناة: المحادثة على موقع نقاطك. الزائر صاحب محل أو حدا بيستكشف.');
     lines.push('إذا بده نتواصل معه أو بده عرض، خذ اسم المحل واسمه ورقمه (save_contact).');
@@ -83,7 +95,7 @@ export function salesContext({ channel, today, prospect, offer, offerLink }) {
     if (prospect.area) lines.push(`- المنطقة: ${prospect.area}`);
     if (prospect.why) lines.push(`- ملاحظات من البحث عنه: ${prospect.why}`);
     if (prospect.note) lines.push(`- ملاحظات من المحادثة: ${prospect.note}`);
-    if (prospect.sent_at) lines.push(`- أول رسالة بعتناله (قالب واتساب): «${templateFor(prospect.name)}»`);
+    if (firstMessage) lines.push(`- أول رسالة بعتناله: «${firstMessage}»`);
     if (prospect.status === 'won') lines.push('- هالمحل سجّل بنقاطك ✓. ساعده بأسئلته.');
   }
   if (offer) lines.push('', `عرضه الحالي: تجربة ${offer.trial_days} يوم برابط ${offerLink}. إذا بده يبلّش ابعتله الرابط.`);
@@ -175,8 +187,9 @@ export const SAVE_SHOPS = {
             instagram: str('رابط أو اسم حساب انستغرام، أو فاضي'),
             website: str('موقع أو صفحة (خرائط Google، طلبات…)، أو فاضي'),
             why: str('جملة عن المحل بتفيد بالحديث معه (شو بيميّزه، فروع، تقييمات)'),
+            opener: str('أول رسالة واتساب لصاحب المحل: جملتين بلهجة أردنية ودودة، فيها اسم المحل وإشي محدد عنه، بدون رابط وبدون أسعار'),
           },
-          required: ['name', 'area', 'kind', 'phone', 'instagram', 'website', 'why'],
+          required: ['name', 'area', 'kind', 'phone', 'instagram', 'website', 'why', 'opener'],
           additionalProperties: false,
         },
       },
@@ -192,6 +205,7 @@ export function searchSystem(count) {
     `- لاقي لحد ${count} محل بيطابقوا الطلب. فضّل المحلات المستقلة، وتجنّب السلاسل الكبيرة اللي عندها تطبيقها (متل ستاربكس).`,
     '- خذ معلومات التواصل المنشورة للمحل بس (رقم الواتساب أو الجوال، الانستغرام، صفحته على الخرائط). ما تخترع أرقام ولا حسابات: إذا ما لقيت، اتركها فاضية.',
     '- أرقام الموبايل بالأردن بتبلّش بـ 077 أو 078 أو 079 (أو +9627). الأرقام الأرضية (06…) حطها كمان بس ما عليها واتساب.',
+    '- لكل محل اكتب opener: أول رسالة واتساب قصيرة وشخصية (متلاً بتمدح إشي حقيقي عنه)، وبتقول إنه نقاطك بطاقة ولاء بمحفظة الجوال بدون تطبيق، وبتنتهي بسؤال خفيف. الرابط منضيفه إحنا بعدها.',
     '- لما تخلّص، استدعي save_shops مرة وحدة بكل المحلات.',
   ].join('\n');
 }

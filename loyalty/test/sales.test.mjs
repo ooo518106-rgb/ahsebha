@@ -146,7 +146,7 @@ test('مساعد المبيعات: الرفض والأخطاء بيرجعوا ر
 
 test('البحث عن محلات: بالإنترنت (web search)، وبيحفظ اللي إلهم موبايل بالدور والباقي يدوي، وبدون تكرار', async () => {
   const shops = [
-    { name: 'كوفي الياسمين', area: 'عبدون، عمّان', kind: 'كوفي شوب', phone: '0791112223', instagram: '@yasmine.cafe', website: 'https://maps.google.com/x', why: 'تقييم 4.7' },
+    { name: 'كوفي الياسمين', area: 'عبدون، عمّان', kind: 'كوفي شوب', phone: '0791112223', instagram: '@yasmine.cafe', website: 'https://maps.google.com/x', why: 'تقييم 4.7', opener: 'مرحبا كوفي الياسمين 👋 شفت تقييماتكم الحلوة بعبدون!' },
     { name: 'مخبز الشام', area: 'الصويفية', kind: 'مخبز', phone: '06 5551234', instagram: '', website: 'javascript:alert(1)', why: '' },
     { name: 'كوفي الياسمين', area: 'عبدون', kind: 'كوفي شوب', phone: '0791112223', instagram: '', website: '', why: '' },
   ];
@@ -170,6 +170,12 @@ test('البحث عن محلات: بالإنترنت (web search)، وبيحفظ
   assert.equal(bakery.wa, null);
   assert.equal(bakery.status, 'manual');
   assert.equal(bakery.website, null, 'روابط غير http بتنشال');
+  // رسالة لكل محل: أول جملة كتبها الوكيل، ورابطه الخاص بالموقع
+  assert.match(cafe.message, /^مرحبا كوفي الياسمين 👋 شفت تقييماتكم الحلوة بعبدون!/);
+  assert.match(cafe.message, /https:\/\/nuqatak\.test\/\?p=[a-z2-9]{8}/);
+  assert.ok(cafe.waLink.startsWith('https://wa.me/962791112223?text='));
+  assert.equal(decodeURIComponent(cafe.waLink.split('text=')[1]), cafe.message);
+  assert.match(bakery.message, /مرحبا مخبز الشام/, 'بدون رسالة من الوكيل: رسالة عامة');
   // بالبحث الجاي بيقله شو عنا من قبل
   await p.admin.post('/api/admin/sales/search', { query: 'كوفي بعبدون' });
   assert.match(f.claude[1].body.messages[0].content, /كوفي الياسمين/);
@@ -291,4 +297,64 @@ test('أرقام واتساب ورسائل الإيقاف', () => {
   assert.ok(isOptOut('لا شكراً'));
   assert.ok(isOptOut('STOP'));
   assert.ok(!isOptOut('لا بدي أعرف السعر'));
+});
+
+test('رابط المحل الخاص: إنت بتبعت من واتسابك، وهو بيفتح الرابط، والوكيل بيكمّل معه بالموقع وبتنحفظ المحادثة', async () => {
+  let step = 0;
+  const f = fakes(() => {
+    step++;
+    if (step === 1) return { text: 'أهلا كوفي الورد! كم فرع عندكم؟' };
+    if (step === 2) return { tool: 'call_owner', input: { reason: 'بده حدا يتصل فيه' } };
+    return { text: 'تمام، صاحب المنصة رح يتصل فيك اليوم 🙏' };
+  });
+  const p = await platform({ ANTHROPIC_API_KEY: 'sk-test', fetch: f.fetch });
+  await p.admin.post('/api/admin/prospects', { name: 'كوفي الورد', phone: '0791000001', kind: 'كوفي شوب' });
+  let pr = (await p.admin.get('/api/admin/sales')).data.prospects[0];
+  const code = pr.link.split('?p=')[1];
+  // إنت بعتت الرسالة من واتسابك
+  const d = (await p.admin.post(`/api/admin/prospects/${pr.id}/sent`)).data;
+  assert.equal(d.prospect.status, 'sent');
+  assert.ok(d.prospect.sentAt);
+  assert.equal(d.messages[0].channel, 'manual');
+  assert.match(d.messages[0].text, new RegExp(code));
+  // صاحب المحل فتح الرابط
+  const shop = p.client();
+  assert.deepEqual((await shop.get(`/api/p/${code}`)).data, { name: 'كوفي الورد' });
+  assert.equal((await p.client().get('/api/p/zzzzzzzz')).status, 404);
+  pr = (await p.admin.get('/api/admin/sales')).data.prospects[0];
+  assert.ok(pr.openedAt);
+  // بيحكي مع الوكيل: الوكيل بيعرفه، وعنده أدوات المحل المعروف
+  const r1 = await shop.post('/api/sales', { prospect: code, messages: [{ role: 'user', content: 'مرحبا، شو هاد؟' }] });
+  assert.equal(r1.data.reply, 'أهلا كوفي الورد! كم فرع عندكم؟');
+  const b = f.claude[0].body;
+  assert.match(b.system[1].text, /فتح رابطه الخاص/);
+  assert.match(b.system[1].text, /الاسم: كوفي الورد/);
+  assert.match(b.system[1].text, /أول رسالة بعتناله: «مرحبا كوفي الورد/);
+  assert.deepEqual(b.tools.map((t) => t.name), ['make_offer', 'save_contact', 'call_owner', 'set_status']);
+  await shop.post('/api/sales', { prospect: code, messages: [{ role: 'user', content: 'مرحبا، شو هاد؟' }, { role: 'assistant', content: r1.data.reply }, { role: 'user', content: 'فرعين، بدي حدا يتصل فيني' }] });
+  const chatLog = (await p.admin.get(`/api/admin/prospects/${pr.id}`)).data;
+  assert.equal(chatLog.prospect.status, 'hot');
+  assert.deepEqual(chatLog.messages.map((m) => `${m.role}:${m.channel}`), ['owner:manual', 'in:web', 'agent:web', 'in:web', 'agent:web']);
+  assert.equal(chatLog.messages[3].text, 'فرعين، بدي حدا يتصل فيني');
+  assert.equal(chatLog.canReply, false, 'محادثة الموقع: بترد من واتسابك');
+});
+
+test('بعد ربط Meta: رسالتك بتفتح واتساب الوكيل، وهو بيعرف المحل من الرمز حتى لو من رقم تاني', async () => {
+  const f = fakes(() => ({ text: 'أهلا! أنا مساعد نقاطك، كيف بقدر أساعدك؟' }));
+  const p = await platform({ ANTHROPIC_API_KEY: 'sk-test', fetch: f.fetch, ...WA_ENV });
+  await p.admin.post('/api/admin/prospects', { name: 'مخبز الشام', phone: '0791000005' });
+  assert.equal((await p.admin.put('/api/admin/sales/settings', { auto: false, daily: 20, agentWa: '0790000099' })).status, 200);
+  const pr = (await p.admin.get('/api/admin/sales')).data.prospects[0];
+  const code = pr.link.split('?p=')[1];
+  assert.match(pr.message, /https:\/\/wa\.me\/962790000099\?text=/);
+  assert.match(decodeURIComponent(pr.message), new RegExp(`#${code}`));
+  await p.admin.post(`/api/admin/prospects/${pr.id}/sent`);
+  // صاحب المخبز راسل الوكيل من رقم تاني
+  await hook(p.client(), incomingMsg('962795555555', `مرحبا، بدي أعرف أكتر عن نقاطك #${code}`, 'wamid.x'));
+  await p.client().flush();
+  const st = (await p.admin.get('/api/admin/sales')).data;
+  assert.equal(st.prospects.length, 1, 'ما انعمل محل جديد');
+  assert.equal(st.prospects[0].wa, '962795555555');
+  assert.equal(st.prospects[0].status, 'talking');
+  assert.match(f.claude[0].body.system[1].text, /الاسم: مخبز الشام/);
 });

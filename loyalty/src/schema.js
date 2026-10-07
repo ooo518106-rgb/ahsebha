@@ -400,9 +400,15 @@ export const MIGRATIONS = [
   "ALTER TABLE shops ADD COLUMN plan TEXT NOT NULL DEFAULT 'pro'",
   "ALTER TABLE payments ADD COLUMN tier TEXT NOT NULL DEFAULT 'pro'",
   'ALTER TABLE leads ADD COLUMN source TEXT',
+  // 🎯 رابط خاص لكل محل (/?p=…)، ورسالة أولى كتبها الوكيل، ووقت فتح الرابط؛ والمحادثة من وين (wa، web، manual)
+  'ALTER TABLE prospects ADD COLUMN code TEXT',
+  'ALTER TABLE prospects ADD COLUMN opener TEXT',
+  'ALTER TABLE prospects ADD COLUMN opened_at INTEGER',
+  "ALTER TABLE sales_msgs ADD COLUMN channel TEXT NOT NULL DEFAULT 'wa'",
   'ALTER TABLE credit_txns ADD COLUMN note TEXT',
   // فهارس على الأعمدة الجديدة (لازم تيجي بعد ما ينضاف العمود)
   'CREATE INDEX IF NOT EXISTS shops_reseller ON shops(reseller_id)',
+  'CREATE UNIQUE INDEX IF NOT EXISTS prospects_code ON prospects(code) WHERE code IS NOT NULL',
   'CREATE UNIQUE INDEX IF NOT EXISTS members_ref ON members(shop_id, ref_code)',
   'CREATE INDEX IF NOT EXISTS members_referrer ON members(referred_by)',
   'CREATE INDEX IF NOT EXISTS members_visit ON members(shop_id, last_visit)',

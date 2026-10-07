@@ -7,8 +7,9 @@ const load = () => {
 };
 const save = (h) => { try { sessionStorage.setItem(KEY, JSON.stringify(h.slice(-16))); } catch { /* اختياري */ } };
 
-// onStart: بيفتح التسجيل، onOffer: لما الوكيل يعمل عرض، extra(): معلومات بتنبعت مع كل رسالة (المندوب، العرض)
-export function mountSales({ onStart, onOffer, extra = () => ({}) }) {
+// onStart: بيفتح التسجيل، onOffer: لما الوكيل يعمل عرض، extra(): معلومات بتنبعت مع كل رسالة (المندوب، العرض، رابط المحل)
+// shopName: إذا جاي من رابطه الخاص، الترحيب باسم محله
+export function mountSales({ onStart, onOffer, extra = () => ({}), shopName = null }) {
   const history = load(); // [{ role, content }]
   document.body.classList.add('has-ai');
 
@@ -48,7 +49,9 @@ export function mountSales({ onStart, onOffer, extra = () => ({}) }) {
     log.scrollTop = log.scrollHeight;
     return el;
   };
-  bubble('bot', 'أهلا! 👋 أنا مساعد نقاطك. بحكيلك كيف بطاقة الولاء بترجّعلك زبائنك، وأي باقة بتناسب محلك. شو نوع محلك؟');
+  bubble('bot', shopName
+    ? `أهلا ${shopName}! 👋 أنا مساعد نقاطك. بحكيلك كيف بطاقة الولاء بتخلّي زبائنك يرجعوا أكتر، وبجاوبك على أي سؤال عن الأسعار والتجربة. شو بتحب تعرف؟`
+    : 'أهلا! 👋 أنا مساعد نقاطك. بحكيلك كيف بطاقة الولاء بترجّعلك زبائنك، وأي باقة بتناسب محلك. شو نوع محلك؟');
   for (const m of history) bubble(m.role === 'user' ? 'user' : 'bot', m.content);
   sugg.hidden = history.length > 0;
   for (const q of ['شو الفرق بين الباقتين؟', 'كيف بتشتغل مع زبائني؟', 'عندي كوفي بفرعين، شو بناسبني؟', 'بدي حدا يتواصل معي']) {

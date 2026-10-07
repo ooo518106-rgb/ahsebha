@@ -28,6 +28,16 @@ const offerCode = () => {
   } catch { return undefined; }
 };
 let offerDays = null;
+// 🔗 رابط المحل الخاص من رسالة واتساب (?p=…): الوكيل بيعرف مين هو وبيكمّل معه
+const PROSPECT_KEY = 'nq_p';
+(() => { const v = (params.get('p') || '').toLowerCase(); if (/^[a-z2-9]{8}$/.test(v)) { try { localStorage.setItem(PROSPECT_KEY, JSON.stringify({ code: v, at: Date.now() })); } catch { /* اختياري */ } } })();
+const prospectCode = () => {
+  try {
+    const v = JSON.parse(localStorage.getItem(PROSPECT_KEY) || 'null');
+    return v && Date.now() - v.at < 60 * 864e5 ? v.code : undefined;
+  } catch { return undefined; }
+};
+const prospectInfo = prospectCode() ? api(`/api/p/${prospectCode()}`).catch(() => { try { localStorage.removeItem(PROSPECT_KEY); } catch { /* اختياري */ } return null; }) : Promise.resolve(null);
 function showOffer(o) {
   offerDays = o.trialDays;
   let el = $('#offerBanner');
@@ -43,6 +53,15 @@ function showOffer(o) {
   if (mode === 'signup') setMode('signup');
 }
 if (offerCode()) api(`/api/offers/${offerCode()}`).then(showOffer).catch(() => { try { localStorage.removeItem(OFFER_KEY); } catch { /* اختياري */ } });
+
+// ترحيب باسم المحل فوق الصفحة
+function welcome(pr, canChat) {
+  const el = document.createElement('div');
+  el.className = 'offer-banner';
+  el.innerHTML = `<span></span>${canChat ? '<button type="button" class="btn sm" id="welcomeChat">💬 اسألني</button>' : ''}`;
+  el.querySelector('span').textContent = `👋 أهلا ${pr.name}! جهزنالك هالصفحة: شوف كيف بتشتغل نقاطك، واسألني أي سؤال.`;
+  $('.hero-copy').prepend(el);
+}
 
 let mode = 'login';
 let signupOpen = false;
@@ -114,19 +133,28 @@ function drawPlans(plans = PLAN_DEFAULTS) {
 }
 drawPlans();
 
-api('/api/site').then((s) => {
+api('/api/site').then(async (s) => {
   if (s.plans) drawPlans(s.plans);
   whatsapp = s.whatsapp;
   signupOpen = s.signupOpen;
   if (s.apple) $('#faqIphone').textContent = 'بتنحفظ البطاقة بـ Apple Wallet، وبتفتح بكبستين على الزر الجانبي، ولما يقرّب الزبون من محلك بتطلعله على شاشة القفل برسالة الترحيب تبعتك.';
   showWhatsApp();
   setupAuth();
+  const pr = await prospectInfo;
+  if (pr) welcome(pr, s.sales);
   if (s.sales) {
-    mountSales({
+    const chat = mountSales({
       onStart: () => startSignup(),
       onOffer: (o) => { keepOffer(o.code); showOffer(o); },
-      extra: () => ({ partner: partner(), offer: offerCode() }),
+      extra: () => ({ partner: partner(), offer: offerCode(), prospect: prospectCode() }),
+      shopName: pr && pr.name,
     });
+    // أول مرة بيفتح رابطه: المحادثة بتفتح لحالها بعد ثانية
+    let opened = false;
+    try { opened = sessionStorage.getItem('nq_p_open') === '1'; sessionStorage.setItem('nq_p_open', '1'); } catch { /* اختياري */ }
+    if (pr && params.get('p') && !opened) setTimeout(() => chat.open(), 1200);
+    const btn = $('#welcomeChat');
+    if (btn) btn.onclick = () => chat.open();
   }
 }).catch(() => setupAuth());
 

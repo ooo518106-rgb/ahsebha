@@ -2011,13 +2011,14 @@ const PROSPECT_ST = {
   lost: ['مش مهتم', 'lost'], optout: ['🚫 ما بده رسائل', 'optout'], failed: ['ما انبعتت', 'failed'], manual: ['بدون واتساب', ''],
 };
 const salesReady = (st) => st.ai && st.whatsapp.ready;
+const CHANNEL_ICON = { web: '🌐', wa: '💬', manual: '📲' };
 
 function prospectCard(p, st) {
   const [label, cls] = PROSPECT_ST[p.status] || [p.status, ''];
   const queued = p.status === 'new' || p.status === 'failed';
   return html`<div class="prospect" data-pid="${p.id}">
     <div class="prospect-top"><div class="grow">
-      <b>${p.name}</b> <span class="st ${cls}">${label}</span>${p.paused ? html` <span class="st">✋ إنت بترد</span>` : ''}${p.offer ? html` <span class="st">🎁 ${p.offer.trialDays} يوم${p.offer.used ? ' ✓' : ''}</span>` : ''}${p.source === 'inbound' ? html` <span class="st">📥 راسلنا</span>` : ''}
+      <b>${p.name}</b> <span class="st ${cls}">${label}</span>${p.paused ? html` <span class="st">✋ إنت بترد</span>` : ''}${p.offer ? html` <span class="st">🎁 ${p.offer.trialDays} يوم${p.offer.used ? ' ✓' : ''}</span>` : ''}${p.source === 'inbound' ? html` <span class="st">📥 راسلنا</span>` : ''}${p.openedAt ? html` <span class="st">👀 فتح رابطه</span>` : ''}
       <div class="small muted">${[p.ownerName, p.kind, p.area].filter(Boolean).join(' · ')}${p.phone ? html` · <span class="num" dir="ltr">${p.phone}</span>` : ''} · ${ago(p.lastInAt || p.lastOutAt || p.createdAt)}</div>
       ${p.why ? html`<div class="small" style="margin-top:4px">${p.why}</div>` : ''}
       ${p.note ? html`<div class="small" style="margin-top:4px">📝 ${p.note}</div>` : ''}
@@ -2025,8 +2026,9 @@ function prospectCard(p, st) {
     </div></div>
     <div class="acts">
       ${p.sentAt || p.lastInAt ? html`<button class="btn sm" type="button" data-chat>💬 المحادثة</button>` : ''}
-      ${salesReady(st) && p.wa && queued ? html`<button class="btn sm" type="button" data-send>📲 ابعت هلأ</button>` : ''}
-      ${!st.whatsapp.ready && p.waLink && (queued || p.status === 'manual') ? html`<a class="btn sm wa" href="${p.waLink}" target="_blank" rel="noopener" data-manual>واتساب</a>` : ''}
+      ${p.waLink && !p.sentAt ? html`<a class="btn sm wa" href="${p.waLink}" target="_blank" rel="noopener" data-manual>📲 ابعت من واتسابك</a>` : ''}
+      ${salesReady(st) && p.wa && queued ? html`<button class="btn sm soft" type="button" data-send>🤖 ابعت من رقم الوكيل</button>` : ''}
+      <button class="btn sm ghost" type="button" data-copy>📋 انسخ الرسالة</button>
       ${p.instagram ? html`<a class="btn sm ghost" href="${p.instagram}" target="_blank" rel="noopener">انستغرام</a>` : ''}
       ${p.website ? html`<a class="btn sm ghost" href="${p.website}" target="_blank" rel="noopener">🌐 صفحته</a>` : ''}
       ${p.phone ? html`<a class="btn sm ghost" href="tel:${p.phone}">اتصال</a>` : ''}
@@ -2043,7 +2045,7 @@ function salesPanel(st) {
   return html`
   <section class="panel stack">
     <h2>🎯 وكيل المبيعات</h2>
-    <p class="hint">بيدوّر بالإنترنت على محلات، بيبعتلهم أول رسالة على واتساب، ولما يردّوا بيحكي معهم وبيفاوض بدون ما ينزّل السعر (تجربة مجانية لحد 30 يوم، والاشتراك السنوي، والباقة الأساسية). إذا حدا بده يحكي معك بيوصلك إشعار.</p>
+    <p class="hint">بيدوّر بالإنترنت على محلات، وبيكتب لكل محل رسالة خاصة فيه مع رابطه. إنت بتكبس «📲 ابعت من واتسابك»، ولما صاحب المحل يفتح الرابط، الوكيل بيكمّل معه وبيفاوض بدون ما ينزّل السعر (تجربة مجانية لحد 30 يوم، والاشتراك السنوي، والباقة الأساسية). إذا حدا بده يحكي معك بيوصلك إشعار.</p>
     <details ${salesReady(st) && st.whatsapp.verified ? '' : 'open'}><summary><b>خطوات التشغيل</b></summary>
       <ol class="steps-list" style="margin-top:8px">
         <li>${st.ai ? '✅' : '⬜'} مفتاح Anthropic كـ Secret بـ Cloudflare: <code>ANTHROPIC_API_KEY</code></li>
@@ -2072,6 +2074,8 @@ function salesPanel(st) {
     <h2>⚙️ الإرسال التلقائي</h2>
     <label class="check"><input type="checkbox" name="auto" ${st.settings.auto ? 'checked' : ''} ${st.whatsapp.ready ? '' : 'disabled'}> يبعت لحاله أول رسالة للمحلات اللي بالدور</label>
     <div class="field"><label for="sd">كم محل باليوم بالكتير</label><input id="sd" name="daily" type="number" inputmode="numeric" min="1" max="200" value="${st.settings.daily}"></div>
+    <div class="field"><label for="sa">رقم واتساب الوكيل <span class="hint">(بعد ربط Meta)</span></label><input id="sa" name="agentWa" type="tel" dir="ltr" placeholder="07xxxxxxxx" value="${st.settings.agentWa}" ${st.whatsapp.ready ? '' : 'disabled'}>
+      <div class="hint">${st.agentWa ? 'الرسالة اللي بتبعتها إنت فيها زر بيفتح محادثة مع واتساب الوكيل، وهو بيكمّل معهم هناك.' : 'لهلأ الرسالة اللي بتبعتها إنت فيها رابط صفحة خاصة بالمحل، والوكيل بيكمّل معهم بالموقع.'}</div></div>
     <p class="hint">من 10 الصبح لـ 8 المسا (مش الجمعة)، ورسالة وحدة لكل محل. ابدأ بـ 20 باليوم: إذا ناس كتير بلّغوا عن الرسائل، واتساب بيوقف الرقم. واللي بيرد «لا» ما بنرجع نبعتله.</p>
     <button class="btn" type="submit">حفظ</button>
   </form>
@@ -2101,12 +2105,12 @@ async function openProspectChat(card) {
   const draw = (d) => {
     const who = { in: 'user', agent: 'bot', owner: 'bot owner' };
     render(box, html`<div class="stack" style="margin-top:10px">
-      <div class="sales-chat">${d.messages.length ? d.messages.map((m) => html`<div class="ai-msg ${who[m.role] || 'bot'}">${m.text}<small>${m.role === 'in' ? d.prospect.name : m.role === 'owner' ? 'إنت' : '🤖 الوكيل'} · ${ago(m.at)}</small></div>`) : html`<p class="small muted">ما في رسائل لسا.</p>`}</div>
+      <div class="sales-chat">${d.messages.length ? d.messages.map((m) => html`<div class="ai-msg ${who[m.role] || 'bot'}">${m.text}<small>${CHANNEL_ICON[m.channel] || ''} ${m.role === 'in' ? d.prospect.name : m.role === 'owner' ? 'إنت' : '🤖 الوكيل'} · ${ago(m.at)}</small></div>`) : html`<p class="small muted">ما في رسائل لسا.</p>`}</div>
       <div class="row">
         <button class="btn sm ${d.prospect.paused ? '' : 'ghost'}" type="button" data-pause>${d.prospect.paused ? '🤖 رجّع الوكيل يرد' : '✋ وقّف الوكيل، رح أرد أنا'}</button>
       </div>
       ${d.canReply ? html`<form class="ai-form" style="padding:0;border:0" data-reply><input name="text" maxlength="1000" required placeholder="ردّك (الوكيل بيوقف مع هالمحل)"><button class="btn" type="submit">إرسال</button></form>`
-        : html`<p class="hint">ما بتقدر تبعتله رسالة عادية هلأ: واتساب بيسمح بس خلال 24 ساعة من آخر رسالة منه.</p>`}
+        : d.prospect.waLink ? html`<p class="hint">بدك تتدخل؟ <a href="https://wa.me/${d.prospect.wa}" target="_blank" rel="noopener">احكيه من واتسابك</a>.</p>` : ''}
     </div>`);
     const log = box.querySelector('.sales-chat');
     log.scrollTop = log.scrollHeight;
@@ -2143,7 +2147,7 @@ function bindSales(st) {
   const settings = $('#salesSettings');
   settings.onsubmit = async (e) => {
     e.preventDefault();
-    try { redraw(await api('/api/admin/sales/settings', { method: 'PUT', body: { auto: settings.auto.checked, daily: Number(settings.daily.value) } })); toast('انحفظ ✅', 'ok'); } catch (err) { toast(err.message, 'bad'); }
+    try { redraw(await api('/api/admin/sales/settings', { method: 'PUT', body: { auto: settings.auto.checked, daily: Number(settings.daily.value), agentWa: settings.agentWa.value } })); toast('انحفظ ✅', 'ok'); } catch (err) { toast(err.message, 'bad'); }
   };
   const add = $('#salesAdd');
   add.onsubmit = async (e) => {
@@ -2169,8 +2173,16 @@ function bindSales(st) {
         try { await api(`/api/admin/prospects/${id}/send`, { method: 'POST' }); toast('انبعتت ✅', 'ok'); redraw(await api('/api/admin/sales')); } catch (e) { toast(e.message, 'bad'); send.disabled = false; }
       };
     }
+    const p = st.prospects.find((x) => String(x.id) === id);
     const manual = card.querySelector('[data-manual]');
-    if (manual) manual.addEventListener('click', () => { api(`/api/admin/prospects/${id}`, { method: 'PUT', body: { status: 'sent' } }).catch(() => {}); });
+    if (manual) {
+      manual.addEventListener('click', () => {
+        api(`/api/admin/prospects/${id}/sent`, { method: 'POST' }).then(() => api('/api/admin/sales')).then(redraw).catch(() => {});
+      });
+    }
+    card.querySelector('[data-copy]').onclick = async () => {
+      try { await navigator.clipboard.writeText(p.message); toast('انسخت ✅ الصقها بالانستغرام أو أي مكان', 'ok'); } catch { prompt('انسخ الرسالة:', p.message); }
+    };
     card.querySelector('[data-st]').onchange = async (e) => {
       try { await api(`/api/admin/prospects/${id}`, { method: 'PUT', body: { status: e.target.value } }); toast('انحفظ', 'ok'); } catch (err) { toast(err.message, 'bad'); }
     };
