@@ -1282,6 +1282,7 @@ async function settings() {
       <form class="panel stack" id="linksForm">
       <h2>🔗 روابط المحل على البطاقة</h2>
       <input name="instagram" placeholder="إنستغرام: @mocha.jo" dir="ltr" value="${(s.links.instagram || '').replace('https://instagram.com/', '@')}">
+      <input name="snapchat" placeholder="سناب شات: mocha.jo" dir="ltr" value="${(s.links.snapchat || '').replace('https://www.snapchat.com/add/', '')}">
       <input name="tiktok" placeholder="تيك توك: @mocha.jo" dir="ltr" value="${(s.links.tiktok || '').replace('https://www.tiktok.com/', '')}">
       <input name="facebook" placeholder="فيسبوك: mochajo" dir="ltr" value="${(s.links.facebook || '').replace('https://facebook.com/', '')}">
       <input name="whatsapp" placeholder="واتساب المحل: 079xxxxxxx" dir="ltr" inputmode="tel" value="${(s.links.whatsapp || '').replace('https://wa.me/', '+')}">

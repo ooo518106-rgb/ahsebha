@@ -2337,7 +2337,7 @@ async function creditHistory(c, id) {
   return json({ credit: m.credit / 1000, history: rows.map((r) => ({ ...r, amount: r.amount / 1000, bonus: r.bonus / 1000 })) });
 }
 
-// ─── روابط المحل على البطاقة (إنستغرام، تيك توك، فيسبوك، واتساب، الموقع) ───
+// ─── روابط المحل على البطاقة (إنستغرام، سناب شات، تيك توك، فيسبوك، واتساب، الموقع) ───
 function normalizeLinks(b, country) {
   const out = {};
   const handle = (v, re) => {
@@ -2350,6 +2350,14 @@ function normalizeLinks(b, country) {
   const ig = handle(b.instagram, /^[A-Za-z0-9._]{1,30}$/);
   if (ig === false) fail(400, 'حساب إنستغرام مش صحيح');
   if (ig) out.instagram = `https://instagram.com/${ig}`;
+  // سناب: الاسم لحاله، أو @الاسم، أو رابط snapchat.com/add/الاسم أو snapchat.com/@الاسم
+  let sc = String(b.snapchat || '').trim();
+  if (sc) {
+    try { if (/^https?:\/\//i.test(sc)) { const parts = new URL(sc).pathname.split('/').filter(Boolean); sc = parts[0] === 'add' ? parts[1] || '' : parts[0] || ''; } } catch { sc = ''; }
+    sc = sc.replace(/^@/, '');
+    if (!/^[A-Za-z][A-Za-z0-9._-]{2,14}$/.test(sc)) fail(400, 'حساب سناب شات مش صحيح');
+    out.snapchat = `https://www.snapchat.com/add/${sc}`;
+  }
   const tt = handle(b.tiktok, /^[A-Za-z0-9._]{2,24}$/);
   if (tt === false) fail(400, 'حساب تيك توك مش صحيح');
   if (tt) out.tiktok = `https://www.tiktok.com/@${tt}`;

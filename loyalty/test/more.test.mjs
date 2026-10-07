@@ -237,9 +237,14 @@ test('صلاحية النقاط: بتبلّش من يوم التفعيل، تذ�
 test('روابط المحل والفروع: الروابط بتتصحّح، والموظف مربوط بفرعه بالحركات والتقارير', async () => {
   const p = await platform();
   const { owner } = p;
-  let r = await owner.put('/api/shop/links', { instagram: '@mocha.jo', tiktok: 'https://www.tiktok.com/@mochajo', facebook: 'mochajo', whatsapp: '0791234567', website: 'https://mocha.jo' });
+  let r = await owner.put('/api/shop/links', { instagram: '@mocha.jo', snapchat: '@mocha.jo', tiktok: 'https://www.tiktok.com/@mochajo', facebook: 'mochajo', whatsapp: '0791234567', website: 'https://mocha.jo' });
   assert.equal(r.status, 200);
-  assert.deepEqual(r.data.shop.links, { instagram: 'https://instagram.com/mocha.jo', tiktok: 'https://www.tiktok.com/@mochajo', facebook: 'https://facebook.com/mochajo', whatsapp: 'https://wa.me/962791234567', website: 'https://mocha.jo' });
+  assert.deepEqual(r.data.shop.links, { instagram: 'https://instagram.com/mocha.jo', snapchat: 'https://www.snapchat.com/add/mocha.jo', tiktok: 'https://www.tiktok.com/@mochajo', facebook: 'https://facebook.com/mochajo', whatsapp: 'https://wa.me/962791234567', website: 'https://mocha.jo' });
+  // سناب: من الرابط بشكليه
+  assert.equal((await owner.put('/api/shop/links', { snapchat: 'https://www.snapchat.com/add/mochajo?share_id=x' })).data.shop.links.snapchat, 'https://www.snapchat.com/add/mochajo');
+  assert.equal((await owner.put('/api/shop/links', { snapchat: 'https://snapchat.com/@mocha_jo' })).data.shop.links.snapchat, 'https://www.snapchat.com/add/mocha_jo');
+  assert.equal((await owner.put('/api/shop/links', { snapchat: 'سناب' })).status, 400);
+  r = await owner.put('/api/shop/links', { instagram: '@mocha.jo', tiktok: 'https://www.tiktok.com/@mochajo', facebook: 'mochajo', whatsapp: '0791234567', website: 'https://mocha.jo' });
   assert.equal((await owner.put('/api/shop/links', { website: 'http://x.com' })).status, 400);
   assert.equal((await owner.put('/api/shop/links', { instagram: 'not valid!' })).status, 400);
   const sara = await p.customer('سارة', '0791110008');

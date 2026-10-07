@@ -165,7 +165,7 @@ let gift = null; // آخر هدية عملها: { url, text }
 const fmtDay = (ms) => fmtDate(ms, { weekday: 'long', day: 'numeric', month: 'long' });
 const first = (name) => String(name).trim().split(/\s+/)[0];
 const unitOf = (shop) => t(shop.programType === 'stamps' ? 'unitStamp' : 'unitPoint');
-const LINKS = ['instagram', 'tiktok', 'facebook', 'whatsapp', 'website'];
+const LINKS = ['instagram', 'snapchat', 'tiktok', 'facebook', 'whatsapp', 'website'];
 
 function perksPanels(shop, member, refUrl, canRate, coupons) {
   const unit = unitOf(shop);

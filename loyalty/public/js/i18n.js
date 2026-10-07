@@ -49,7 +49,7 @@ const AR = {
   coupon: '🎟️ {title}', couponUntil: 'لحد {day} · اعرض بطاقتك للكاشير',
   credit: '💳 رصيدك: {amount} {cur}', creditHint: 'بتدفع منه عند الكاشير',
   expires: '⏳ نقاطك صالحة لحد {day}. أي زيارة بتجددها.',
-  links: 'تابعنا', instagram: 'إنستغرام', tiktok: 'تيك توك', facebook: 'فيسبوك', whatsapp: 'واتساب', website: 'الموقع',
+  links: 'تابعنا', instagram: 'إنستغرام', snapchat: 'سناب شات', tiktok: 'تيك توك', facebook: 'فيسبوك', whatsapp: 'واتساب', website: 'الموقع',
   months: ['كانون الثاني', 'شباط', 'آذار', 'نيسان', 'أيار', 'حزيران', 'تموز', 'آب', 'أيلول', 'تشرين الأول', 'تشرين الثاني', 'كانون الأول'],
   langSwitch: 'English',
   // الانضمام
@@ -97,7 +97,7 @@ const EN = {
   coupon: '🎟️ {title}', couponUntil: 'Until {day} · show your card at the counter',
   credit: '💳 Your balance: {amount} {cur}', creditHint: 'Pay with it at the counter',
   expires: '⏳ Your points are valid until {day}. Any visit renews them.',
-  links: 'Follow us', instagram: 'Instagram', tiktok: 'TikTok', facebook: 'Facebook', whatsapp: 'WhatsApp', website: 'Website',
+  links: 'Follow us', instagram: 'Instagram', snapchat: 'Snapchat', tiktok: 'TikTok', facebook: 'Facebook', whatsapp: 'WhatsApp', website: 'Website',
   months: ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'],
   langSwitch: 'العربية',
   joinTitle: 'Join the loyalty card', joinPageTitle: 'Join the {shop} loyalty card', paused: 'This shop’s loyalty program is paused for now.', openMine: 'Open my card',

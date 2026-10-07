@@ -7,7 +7,7 @@ import { DEMO_LOGO, DEMO_MENU_PDF, MENU_IMAGES } from './demo-assets.js';
 export const DEMO_SLUG = 'demo-cafe';
 export const DEMO_EMAIL = 'demo@nuqatak.demo';
 // زيد الرقم كل ما تضيف إشي جديد للعرض: الحساب بيتجدّد لحاله بعد النشر (بدل ما يستنى الساعة 4 الصبح)
-export const DEMO_VERSION = 4;
+export const DEMO_VERSION = 5;
 const DAY = 864e5;
 const AMMAN = 3 * 36e5; // الأردن UTC+3 طول السنة
 
@@ -132,7 +132,7 @@ export async function seedDemo(db, now = Date.now()) {
       expiry_months = 12, expiry_since = ?, onboard = '{}', updated_at = ? WHERE id = ?`, [
       DEMO_SLUG, now + 3650 * DAY,
       JSON.stringify([{ id: 'bdemo01', name: 'الفرع الرئيسي — عبدون', lat: 31.9539, lng: 35.8806 }, { id: 'bdemo02', name: 'فرع الصويفية', lat: 31.9605, lng: 35.8622 }]),
-      JSON.stringify({ instagram: 'https://instagram.com/nuqatak.demo', tiktok: 'https://www.tiktok.com/@nuqatak.demo', facebook: 'https://facebook.com/nuqatak.demo', whatsapp: 'https://wa.me/962790000000' }),
+      JSON.stringify({ instagram: 'https://instagram.com/nuqatak.demo', snapchat: 'https://www.snapchat.com/add/nuqatak.demo', tiktok: 'https://www.tiktok.com/@nuqatak.demo', facebook: 'https://facebook.com/nuqatak.demo', whatsapp: 'https://wa.me/962790000000' }),
       JSON.stringify([{ days: [0], from: '14:00', to: '17:00', mult: 2 }, { days: [5], from: '08:00', to: '11:00', mult: 2 }]),
       now - 100 * DAY, now, s,
     ]],

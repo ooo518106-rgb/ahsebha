@@ -5,7 +5,7 @@ import { LANG, applyLang, setLang, t } from './i18n.js';
 applyLang();
 const slug = location.pathname.split('/')[2];
 const root = $('#root');
-const LINKS = ['instagram', 'tiktok', 'facebook', 'whatsapp', 'website'];
+const LINKS = ['instagram', 'snapchat', 'tiktok', 'facebook', 'whatsapp', 'website'];
 const fmtPrice = (n, cur) => `${new Intl.NumberFormat('en-US', { maximumFractionDigits: 3 }).format(n)} ${cur}`;
 
 function savedCard() {
