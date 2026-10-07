@@ -8,6 +8,7 @@ import * as webpush from './webpush.js';
 import * as perks from './perks.js';
 import { DEMO_EMAIL, DEMO_VERSION, seedDemo } from './demo.js';
 import { APP_VERSION, CHANGELOG } from './changelog.js';
+import { aiConfig, aiCost, askClaude, cleanHistory, customerPrompt, shopPrompt } from './ai.js';
 import { defaultLogoPng } from './png.js';
 import { earnFor, progress, rewardCost, rewardRule, stampsLine, unitLabel } from '../public/js/rules.js';
 import { b64ToBytes, bytesToB64, clean, fail, HttpError, isUniqueError, json, normPhone, randomDigits, randomToken } from './util.js';
@@ -87,6 +88,7 @@ function perksView(shop) {
     creditOn: !!shop.credit_on,
     creditBonus: shop.credit_bonus,
     expiryMonths: shop.expiry_months,
+    aiOn: !!shop.ai_on,
   };
 }
 
@@ -971,7 +973,7 @@ export const BASIC_LIMITS = { branches: 1, staff: 2, broadcasts: 4 };
 const isPro = (shop) => shop.plan !== 'basic' || !shop.paid || !!shop.demo;
 const PRO_SQL = "(s.plan <> 'basic' OR s.paid = 0 OR s.demo = 1)";
 // بالأساسي إعدادات الميزات المميزة بتضل محفوظة بس ما بتشتغل، وبترجع لحالها لما يرقّي
-const BASIC_OFF = { boosts: '[]', tiers_on: 0, ref_bonus: 0, bday_on: 0, winback_days: 0, review_on: 0, expiry_months: 0, credit_on: 0, guard_cooldown: 0, guard_daily: 0, guard_big: Number.MAX_SAFE_INTEGER };
+const BASIC_OFF = { ai_on: 0, boosts: '[]', tiers_on: 0, ref_bonus: 0, bday_on: 0, winback_days: 0, review_on: 0, expiry_months: 0, credit_on: 0, guard_cooldown: 0, guard_daily: 0, guard_big: Number.MAX_SAFE_INTEGER };
 const planShop = (shop) => (!shop || isPro(shop) ? shop : { ...shop, ...BASIC_OFF });
 const shopRow = async (db, id) => planShop(await db.get('SELECT * FROM shops WHERE id = ?', id));
 const proMsg = (what) => `${what} من ميزات الباقة المميزة 💎. رقّي باقتك من ⚙️ الإعدادات ← الاشتراك`;
@@ -1106,6 +1108,7 @@ async function cardInfo(c, token) {
     coupons,
     canRate: rate,
     menuUrl,
+    assistant: aiAvailable(c, shop),
   });
 }
 
@@ -1334,7 +1337,12 @@ async function adminStats(c) {
     if ((sub.state === 'trial' || sub.state === 'active') && sub.daysLeft <= 7) ending.push({ id: s.id, name: s.name, state: sub.state, daysLeft: sub.daysLeft, ownerEmail: s.ownerEmail });
   }
   ending.sort((a, b) => a.daysLeft - b.daysLeft);
-  return json({ revenueMonth: month.n, revenueTotal: total.n, mrr: Math.round(mrr * 100) / 100, counts, ending, version: APP_VERSION, changelog: CHANGELOG });
+  const ai = await aiMonth(c.db);
+  const cfg = aiConfig(c.env);
+  return json({
+    revenueMonth: month.n, revenueTotal: total.n, mrr: Math.round(mrr * 100) / 100, counts, ending, version: APP_VERSION, changelog: CHANGELOG,
+    ai: { ready: !!cfg, model: cfg ? cfg.model : null, ...ai, costUsd: cfg ? aiCost(cfg.model, ai) : null },
+  });
 }
 
 // مدير المنصة بيفعّل اشتراك محل (+ شهر / + سنة) أو بيوقفه
@@ -1533,6 +1541,7 @@ async function me(c) {
     google: googleStatus(c, c.shop),
     subscription: await subscription(c, c.shop),
     plan: planInfo(c.shop),
+    ai: { ready: !!aiConfig(c.env), monthQuestions: (await aiMonth(c.db, c.shop.id)).requests },
     pushCount: (await c.db.get('SELECT COUNT(DISTINCT member_id) AS n FROM push_subs WHERE shop_id = ?', c.shop.id)).n,
     userPush: (await c.db.get('SELECT COUNT(*) AS n FROM user_push_subs WHERE user_id = ?', c.user.id)).n,
     whatsapp: /^\d{8,15}$/.test(String(c.env.WHATSAPP_NUMBER || '')) ? String(c.env.WHATSAPP_NUMBER) : null,
@@ -2082,6 +2091,7 @@ async function updatePerks(c) {
     credit_on: flag('creditOn', 'credit_on'),
     credit_bonus: num('creditBonus', 'credit_bonus', 0, 100, 'هدية الشحن لازم تكون بين 0 و 100%'),
     expiry_months: num('expiryMonths', 'expiry_months', 0, 24, 'المدة لازم تكون 0 أو 6 أو 12 أو 24 شهر'),
+    ai_on: flag('aiOn', 'ai_on'),
     expiry_since: s.expiry_since,
     boosts: s.boosts,
   };
@@ -2547,17 +2557,111 @@ async function menuPdf(c, shopId, ver) {
   });
 }
 
-async function publicMenu(c, slug) {
-  const shop = await shopBySlug(c.db, slug);
+// أصناف المنيو المتوفرة بأقسامها (الأقسام بترتيب أول صنف فيها)
+async function menuCategories(c, shop) {
   const items = await c.db.all(`SELECT ${MENU_COLS} FROM menu_items WHERE shop_id = ? AND available = 1 ORDER BY sort, id`, shop.id);
-  // الأقسام بترتيب أول صنف فيها
   const cats = [];
   for (const it of items) {
     let cat = cats.find((x) => x.name === it.category);
     if (!cat) { cat = { name: it.category, items: [] }; cats.push(cat); }
     cat.items.push(menuView(it, c.origin));
   }
-  return json({ shop: publicShopView(shop, c.origin), categories: cats, pdf: menuPdfView(shop, c.origin) });
+  return cats;
+}
+
+async function publicMenu(c, slug) {
+  const shop = await shopBySlug(c.db, slug);
+  return json({ shop: publicShopView(shop, c.origin), categories: await menuCategories(c, shop), pdf: menuPdfView(shop, c.origin), assistant: aiAvailable(c, shop) });
+}
+
+// ─── 🤖 المساعد الذكي للزبون (بالباقة المميزة، وصاحب المحل بيقدر يطفيه) ───
+const aiAvailable = (c, shop) => !!(aiConfig(c.env) && isPro(shop) && shop.ai_on);
+const WEEKDAYS_AR = ['الأحد', 'الاتنين', 'التلاتا', 'الأربعا', 'الخميس', 'الجمعة', 'السبت'];
+
+function aiShopInfo(shop) {
+  const unit = unitLabel(shop);
+  const extra = [];
+  for (const b of perks.parseBoosts(shop.boosts)) extra.push(`نقاط ×${b.mult} أيام ${b.days.map((d) => WEEKDAYS_AR[d]).join(' و')} من ${b.from} لـ ${b.to}`);
+  if (shop.tiers_on) extra.push(`مستويات: فضي بعد ${shop.tier_silver} زيارة وذهبي بعد ${shop.tier_gold}${shop.program_type === 'stamps' ? '' : ' (الفضي نقاط ×1.25 والذهبي ×1.5)'}`);
+  if (perks.refBonus(shop) > 0) extra.push(`ادعُ صاحبك من رابط الدعوة على البطاقة: كل واحد بياخد ${perks.refBonus(shop)} ${unit} بأول زيارة لصاحبه`);
+  if (shop.bday_on) extra.push(`هدية عيد الميلاد: ${perks.bdayGift(shop)} ${unit} (إذا كاتب تاريخ ميلاده على البطاقة)`);
+  if (shop.credit_on) extra.push(`رصيد مدفوع مسبقاً عند الكاشير${shop.credit_bonus ? ` مع هدية شحن ${shop.credit_bonus}%` : ''}`);
+  if (shop.expiry_months > 0) extra.push(`النقاط بتنتهي إذا الزبون ما زار المحل ${shop.expiry_months} شهر`);
+  const links = Object.entries(JSON.parse(shop.links || '{}')).filter(([, v]) => v).map(([k]) => k);
+  return { name: shop.name, rule: rewardRule(shop), rewardName: shop.reward_name, currency: shop.currency, welcomeText: shop.welcome_text, perks: extra, branches: branchesOf(shop).map((b) => b.name), links };
+}
+
+async function aiCustomer(c, shop, m) {
+  const v = memberView(m, shop);
+  const unit = unitLabel(shop);
+  const p = v.progress;
+  return {
+    firstName: perks.firstName(m.name),
+    balanceText: shop.program_type === 'stamps' ? `${v.stamps} (${p.toward} من ${p.cost} أختام)` : `${m.balance} ${unit}`,
+    progressText: p.available ? `عنده ${p.available} مكافأة جاهزة (${shop.reward_name})، بيصرفها عند الكاشير` : `باقيله ${p.remaining} ${unit} لـ ${shop.reward_name}`,
+    tier: v.tier ? `${v.tier.icon} ${v.tier.name}${v.tier.next ? ` (باقيله ${v.tier.next.visitsLeft} زيارة لـ ${v.tier.next.name})` : ''}` : null,
+    credit: v.credit,
+    creditText: `${v.credit} ${shop.currency}`,
+    boostUntil: v.boostUntil,
+    expiresAt: v.expiresAt ? new Date(v.expiresAt).toISOString().slice(0, 10) : null,
+    coupons: (await activeCoupons(c.db, m.id)).map((cp) => `${cp.title}${cp.details ? ` (${cp.details})` : ''}`),
+  };
+}
+
+async function logAi(c, shopId, usage) {
+  await c.db.run(
+    `INSERT INTO ai_usage (shop_id, day, requests, input_tokens, output_tokens, cache_read, cache_write) VALUES (?, ?, 1, ?, ?, ?, ?)
+     ON CONFLICT(shop_id, day) DO UPDATE SET requests = requests + 1, input_tokens = input_tokens + excluded.input_tokens,
+       output_tokens = output_tokens + excluded.output_tokens, cache_read = cache_read + excluded.cache_read, cache_write = cache_write + excluded.cache_write`,
+    shopId, localDayKey('JO'), usage.input_tokens || 0, usage.output_tokens || 0, usage.cache_read_input_tokens || 0, usage.cache_creation_input_tokens || 0,
+  );
+}
+
+async function assistantRoute(c) {
+  const cfg = aiConfig(c.env);
+  if (!cfg) fail(404, 'المساعد مش مفعّل');
+  const token = String(c.body.token || '');
+  let shop;
+  let m = null;
+  if (TOKEN_RE.test(token)) {
+    m = await c.db.get('SELECT * FROM members WHERE token = ?', token);
+    if (!m) fail(404, 'ما لقينا هالبطاقة');
+    shop = await shopRow(c.db, m.shop_id);
+  } else {
+    shop = await shopBySlug(c.db, c.body.slug);
+  }
+  if (!aiAvailable(c, shop) || (await subscription(c, shop)).state === 'expired') fail(404, 'المساعد مش مفعّل بهالمحل');
+  const messages = cleanHistory(c.body.messages);
+  if (!messages) fail(400, 'اكتب سؤالك');
+  // حدود باليوم: لكل زبون (أو جهاز بدون بطاقة)، لكل محل (المحل التجريبي أقل)، وللمنصة كلها
+  await rateLimit(c, `ai:m:${m ? m.id : c.ip}`, cfg.perCustomer, DAY, 'سألت كتير اليوم 🙏 جرّب بكرا، أو اسأل الكاشير');
+  await rateLimit(c, `ai:s:${shop.id}`, shop.demo ? Math.min(50, cfg.perShop) : cfg.perShop, DAY, 'المساعد خلّص أسئلته لليوم، جرّب بكرا أو اسأل الكاشير');
+  await rateLimit(c, 'ai:all', cfg.platform, DAY, 'المساعد مشغول هلأ، جرّب بعد شوي');
+  let r;
+  try {
+    r = await askClaude(cfg, {
+      shopText: shopPrompt(aiShopInfo(shop), await menuCategories(c, shop)),
+      customerText: customerPrompt(m ? await aiCustomer(c, shop, m) : null),
+      messages,
+    });
+  } catch (e) {
+    console.error('assistant:', e.status || '', e.message);
+    fail(503, 'المساعد مش متاح هلأ، جرّب بعد شوي');
+  }
+  await logAi(c, shop.id, r.usage);
+  const reply = r.refused || !r.text ? 'ما بقدر أساعد بهالسؤال 🙏 بس بقدر أنصحك من المنيو أو أحكيلك عن نقاطك.' : r.text;
+  return json({ reply });
+}
+
+// استهلاك المساعد من أول الشهر (بتوقيت الأردن)
+async function aiMonth(db, shopId = null) {
+  const t = perks.localTime('JO');
+  const from = String(t.year * 10000 + t.month * 100 + 1);
+  return db.get(
+    `SELECT COALESCE(SUM(requests), 0) AS requests, COALESCE(SUM(input_tokens), 0) AS input, COALESCE(SUM(output_tokens), 0) AS output,
+       COALESCE(SUM(cache_read), 0) AS cacheRead, COALESCE(SUM(cache_write), 0) AS cacheWrite FROM ai_usage WHERE day >= ?${shopId ? ' AND shop_id = ?' : ''}`,
+    from, ...(shopId ? [shopId] : []),
+  );
 }
 
 async function menuImage(c, id) {
@@ -2666,6 +2770,7 @@ async function removeStaff(c, id) {
 const API = [
   ['GET', /^\/api\/shops\/([a-z0-9-]{3,40})\/public$/, publicShop],
   ['GET', /^\/api\/version$/, () => json({ version: APP_VERSION, date: CHANGELOG[0].date })],
+  ['POST', /^\/api\/assistant$/, assistantRoute],
   ['GET', /^\/api\/shops\/([a-z0-9-]{3,40})\/menu$/, publicMenu],
   ['GET', /^\/api\/menu$/, listMenu, 'owner'],
   ['POST', /^\/api\/menu$/, syncsMenu(addMenuItem), 'owner'],

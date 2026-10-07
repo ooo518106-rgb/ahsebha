@@ -1,6 +1,7 @@
 // المنيو الإلكتروني للمحل: بيفتح من QR الطاولة، وتحته دعوة لبطاقة الولاء
 import { $, api, html, render, setBrand } from './common.js';
 import { LANG, applyLang, setLang, t } from './i18n.js';
+import { mountAssistant } from './assistant.js';
 
 applyLang();
 const slug = location.pathname.split('/')[2];
@@ -19,6 +20,7 @@ async function main() {
     return;
   }
   const { shop, categories, pdf } = r;
+  if (r.assistant) mountAssistant({ slug: shop.slug, token: savedCard(), shopName: shop.name });
   setBrand(shop.color);
   document.title = `${t('menu')} — ${shop.name}`;
   const card = savedCard();

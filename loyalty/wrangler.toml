@@ -32,6 +32,8 @@ WHATSAPP_NUMBER = "962798900911"
 # الأسرار بتنحط من لوحة Cloudflare (Settings ← Variables and Secrets ← Secret)، مش هون:
 #   GOOGLE_SERVICE_ACCOUNT = محتوى ملف JSON تبع حساب الخدمة
 #   SIGNUP_CODE (اختياري) = رمز بتعطيه للمحلات عشان تقدر تسجّل؛ بدونه التسجيل مفتوح للكل
+#   ANTHROPIC_API_KEY (اختياري) = مفتاح Anthropic للمساعد الذكي؛ بدونه المساعد مخفي
+# اختياري للمساعد (متغيرات عادية): AI_MODEL (الافتراضي claude-opus-5-5)، AI_CUSTOMER_DAILY (20)، AI_SHOP_DAILY (100)، AI_DAILY_LIMIT (1000)
 
 # سجلّ الأخطاء (بيبيّن بـ Cloudflare ← Workers ← loyalty ← Logs)
 [observability]

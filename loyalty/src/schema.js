@@ -247,6 +247,17 @@ export const SCHEMA = [
   )`,
   'CREATE INDEX IF NOT EXISTS menu_shop ON menu_items(shop_id, category, sort)',
   // ملف المنيو PDF: بينحفظ قطع (base64) لأنه قاعدة البيانات ما بتقبل قيمة أكبر من 2 ميغا. ver = وقت الرفع
+  // 🤖 استهلاك المساعد الذكي لكل محل باليوم (عدد الأسئلة والتوكنز، بدون المحادثات نفسها)
+  `CREATE TABLE IF NOT EXISTS ai_usage (
+    shop_id INTEGER NOT NULL,
+    day TEXT NOT NULL,
+    requests INTEGER NOT NULL DEFAULT 0,
+    input_tokens INTEGER NOT NULL DEFAULT 0,
+    output_tokens INTEGER NOT NULL DEFAULT 0,
+    cache_read INTEGER NOT NULL DEFAULT 0,
+    cache_write INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (shop_id, day)
+  )`,
   `CREATE TABLE IF NOT EXISTS menu_files (
     shop_id INTEGER NOT NULL REFERENCES shops(id),
     ver INTEGER NOT NULL,
@@ -334,6 +345,7 @@ export const MIGRATIONS = [
   // الباقات: أساسي أو مميز (المحلات الموجودة والتجارب على المميز)
   "ALTER TABLE shops ADD COLUMN plan TEXT NOT NULL DEFAULT 'pro'",
   "ALTER TABLE payments ADD COLUMN tier TEXT NOT NULL DEFAULT 'pro'",
+  'ALTER TABLE shops ADD COLUMN ai_on INTEGER NOT NULL DEFAULT 1',
   'ALTER TABLE credit_txns ADD COLUMN note TEXT',
   // فهارس على الأعمدة الجديدة (لازم تيجي بعد ما ينضاف العمود)
   'CREATE INDEX IF NOT EXISTS shops_reseller ON shops(reseller_id)',

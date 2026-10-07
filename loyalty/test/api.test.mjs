@@ -357,7 +357,7 @@ test('صفحة الخصوصية وإيميل التواصل', async () => {
   const { PLANS } = await import('../src/app.js');
   const { PLAN_DEFAULTS, FEATURES } = await import('../public/js/plans.js');
   assert.deepEqual(PLAN_DEFAULTS, PLANS, 'أسعار صفحة البيع نفس أسعار السيرفر');
-  assert.equal(FEATURES.length, 15);
+  assert.equal(FEATURES.length, 16);
   assert.deepEqual((await c.get('/api/site')).data, { contactEmail: 'privacy@example.com', whatsapp: null, signupOpen: true, apple: false, plans: PLANS });
   const { client: client2 } = await setup({ WHATSAPP_NUMBER: '962798900911', SIGNUP_CODE: 'x' });
   assert.deepEqual((await client2().get('/api/site')).data, { contactEmail: null, whatsapp: '962798900911', signupOpen: false, apple: false, plans: PLANS });

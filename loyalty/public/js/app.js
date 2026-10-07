@@ -1553,6 +1553,13 @@ function offers() {
       <p class="hint">بعد الزيارة بساعة بيوصل الزبون «كيف كانت زيارتك؟». اللي بيعطي 4 أو 5 نجوم بنطلب منه يقيّم على Google، واللي أقل بيوصلك كلامه إنت بس (بتشوفه بـ 📊 النشاط).</p>
       <button class="btn" type="submit">حفظ</button>
       </form>
+      <form class="panel stack" data-perks="ai">
+      <h2>🤖 المساعد الذكي للزبائن</h2>
+      <label class="check"><input type="checkbox" name="aiOn" ${p.aiOn ? 'checked' : ''}> مفعّل</label>
+      <p class="hint">زر «🤖 اسأل المساعد» على بطاقة الزبون وصفحة المنيو. بينصحه من منيوك بالأحجام والأسعار، وبيجاوبه عن نقاطه ومكافأته وكوبوناته، بلهجته. بيعتمد على معلومات محلك بس، وما بيقدر يغيّر إشي بالبطاقة.</p>
+      ${state.me.ai && state.me.ai.ready ? html`<p class="small muted">أسئلة زبائنك هالشهر: <b class="num">${fmt(state.me.ai.monthQuestions)}</b></p>` : html`<p class="alert warn small">لسا مش شغّال على المنصة. بيشتغل أول ما مدير المنصة يفعّله.</p>`}
+      <button class="btn" type="submit">حفظ</button>
+      </form>
     </div>
     <div class="grid2 group" data-group="credit">
       <form class="panel stack" data-perks="credit">
@@ -1623,6 +1630,7 @@ function offers() {
         tiers: { tiersOn: on('tiersOn'), tierSilver: f.get('tierSilver'), tierGold: f.get('tierGold') },
         credit: { creditOn: on('creditOn'), creditBonus: f.get('creditBonus') },
         expiry: { expiryMonths: f.get('expiryMonths') },
+        ai: { aiOn: on('aiOn') },
       }[kind];
       const btn = form.querySelector('button[type=submit]');
       btn.disabled = true;
@@ -1900,6 +1908,9 @@ async function admin() {
       <span class="badge ok num">الإصدار ${stats.version}</span>
       <span class="grow small"><b>شو الجديد:</b> ${stats.changelog[0].items[0]}</span>
       <span aria-hidden="true">←</span></a>
+    ${stats.ai && stats.ai.ready
+      ? html`<p class="alert ok small">🤖 المساعد الذكي (${stats.ai.model}): <b class="num">${fmt(stats.ai.requests)}</b> سؤال هالشهر${stats.ai.costUsd != null ? html` · تكلفة تقريبية <b class="num">$${stats.ai.costUsd}</b>` : ''}</p>`
+      : html`<p class="alert warn small">🤖 المساعد الذكي مش مفعّل. بيشتغل لما تضيف مفتاح Anthropic بإعدادات Cloudflare (ANTHROPIC_API_KEY).</p>`}
     ${signupOpen
       ? html`<p class="alert ok">أي محل بيقدر يسجّل ويجرّب ${14} يوم مجاناً، وبعدها بيتوقف لحاله لحد ما تفعّله من هون بـ «+ شهر» أو «+ سنة».</p>`
       : html`<p class="alert ok">التسجيل مسكّر برمز. ابعت للمحل الجديد: <span dir="ltr" class="num">${location.origin}/?code=رمزك</span></p>`}
