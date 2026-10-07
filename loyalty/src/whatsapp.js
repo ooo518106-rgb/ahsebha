@@ -108,7 +108,25 @@ export function incoming(payload, phoneId) {
   return out;
 }
 
-// ملخص إشعار للتشخيص: شو الحقول، وكم رسالة لرقمنا ولأرقام تانية
+// رسائلنا اللي فشلت بعد ما Meta قبلتها (الرقم مش عليه واتساب، حد رسائل التسويق، الدفع، القالب…):
+// Meta بترد «تمام» على الإرسال، وبعدين بتبعت إشعار حالة «failed» فيه السبب. [{ id, to, code, message }]
+export function failures(payload, phoneId) {
+  const out = [];
+  for (const entry of (payload && payload.entry) || []) {
+    for (const ch of entry.changes || []) {
+      const v = ch.value || {};
+      if (phoneId && v.metadata && v.metadata.phone_number_id && v.metadata.phone_number_id !== phoneId) continue;
+      for (const st of v.statuses || []) {
+        if (st.status !== 'failed' || !st.id) continue;
+        const er = (st.errors && st.errors[0]) || {};
+        out.push({ id: String(st.id), to: normPhone(st.recipient_id), code: Number(er.code) || null, message: String((er.error_data && er.error_data.details) || er.message || er.title || 'failed').slice(0, 300) });
+      }
+    }
+  }
+  return out;
+}
+
+// ملخص إشعار للتشخيص: شو الحقول، وكم رسالة لرقمنا ولأرقام تانية، وكم رسالة إلنا فشلت
 export function hookSummary(payload, phoneId) {
   const fields = new Set();
   let ours = 0;
@@ -121,8 +139,11 @@ export function hookSummary(payload, phoneId) {
       if (pid && pid === phoneId) ours += n; else other += n;
     }
   }
-  return { fields: [...fields].slice(0, 5), ours, other };
+  return { fields: [...fields].slice(0, 5), ours, other, failed: failures(payload, phoneId).length };
 }
 
-// «لا» أو «وقف» أو «stop»: ما منرجع نبعتله
-export const isOptOut = (text) => /^\s*(لا|لأ|لا شكرا|لا شكراً|لا، شكراً|لا شكرًا|مش مهتم|مو مهتم|وقف|توقف|الغاء|إلغاء|stop|unsubscribe|no thanks?)\s*[.!🙏]*\s*$/i.test(String(text || ''));
+// «وقف» أو «stop» أو «مش مهتم»: ما منرجع نبعتله. «لا» لحالها بس إذا كانت أول رد على رسالتنا،
+// لأنه بنص المحادثة غالباً جواب على سؤال الوكيل («عندك فروع؟» «لا»)
+const STOP_RE = /^\s*(مش مهتم|مو مهتم|مش مهتمين|ما بدي|لا تبعت(لي)?|لا ترسل|وقف|توقف|وقّف|الغاء|إلغاء|stop|unsubscribe|not interested)\s*[.!🙏]*\s*$/i;
+const NO_RE = /^\s*(لا|لأ|لا شكرا|لا شكراً|لا، شكراً|لا شكرًا|لا مشكور|no|no thanks?)\s*[.!🙏]*\s*$/i;
+export const isOptOut = (text, { firstReply = true } = {}) => STOP_RE.test(String(text || '')) || (firstReply && NO_RE.test(String(text || '')));

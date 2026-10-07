@@ -2017,6 +2017,7 @@ const CHANNEL_ICON = { web: '🌐', wa: '💬', manual: '📲' };
 function prospectCard(p, st) {
   const [label, cls] = PROSPECT_ST[p.status] || [p.status, ''];
   const queued = p.status === 'new' || p.status === 'failed';
+  const outreach = p.source !== 'inbound' && !p.lastInAt; // اللي راسلنا أو رد علينا ما بنبعتله رسالة التعريف
   return html`<div class="prospect" data-pid="${p.id}">
     <div class="prospect-top"><div class="grow">
       <b>${p.name}</b> <span class="st ${cls}">${label}</span>${p.paused ? html` <span class="st">✋ إنت بترد</span>` : ''}${p.offer ? html` <span class="st">🎁 ${p.offer.trialDays} يوم${p.offer.used ? ' ✓' : ''}</span>` : ''}${p.source === 'inbound' ? html` <span class="st">📥 راسلنا</span>` : ''}${p.openedAt ? html` <span class="st">👀 فتح رابطه</span>` : ''}
@@ -2027,9 +2028,9 @@ function prospectCard(p, st) {
     </div></div>
     <div class="acts">
       ${p.sentAt || p.lastInAt ? html`<button class="btn sm" type="button" data-chat>💬 المحادثة</button>` : ''}
-      ${p.waLink && !p.sentAt ? html`<a class="btn sm wa" href="${p.waLink}" target="_blank" rel="noopener" data-manual>📲 ابعت من واتسابك</a>` : ''}
+      ${p.waLink && !p.sentAt && outreach ? html`<a class="btn sm wa" href="${p.waLink}" target="_blank" rel="noopener" data-manual>📲 ابعت من واتسابك</a>` : ''}
       ${salesReady(st) && p.wa && queued ? html`<button class="btn sm soft" type="button" data-send>🤖 ابعت من رقم الوكيل</button>` : ''}
-      <button class="btn sm ghost" type="button" data-copy>📋 انسخ الرسالة</button>
+      ${outreach ? html`<button class="btn sm ghost" type="button" data-copy>📋 انسخ الرسالة</button>` : ''}
       ${p.instagram ? html`<a class="btn sm ghost" href="${p.instagram}" target="_blank" rel="noopener">انستغرام</a>` : ''}
       ${p.website ? html`<a class="btn sm ghost" href="${p.website}" target="_blank" rel="noopener">🌐 صفحته</a>` : ''}
       ${p.phone ? html`<a class="btn sm ghost" href="tel:${p.phone}">اتصال</a>` : ''}
@@ -2120,7 +2121,7 @@ function waNumberHTML(d, err) {
       <li><span class="muted">الاسم</span> <b>${d.name || '—'}</b></li>
       ${row('nameStatus', 'موافقة الاسم')}${row('codeStatus', 'تأكيد الرقم')}${row('platform', 'التسجيل')}${row('status', 'الحالة')}
       ${d.subscribed == null ? '' : html`<li><span class="muted">استلام الردود (Webhooks)</span> <b>${d.subscribed ? '✅ مشترك' : '❌ مش مشترك'}</b></li>`}
-      <li><span class="muted">آخر إشعار من Meta</span> <b>${!d.lastHook ? 'لسا ما وصل ولا إشي' : html`${ago(d.lastHook.at)} · ${d.lastHook.signed ? '✅ موقّع' : '❌ التوقيع غلط (تأكد من WHATSAPP_APP_SECRET)'}${d.lastHook.fields && d.lastHook.fields.length ? ` · ${d.lastHook.fields.join('، ')}` : ''}${d.lastHook.ours ? ` · ${d.lastHook.ours} رسالة لرقم الإيجنت` : ''}${d.lastHook.other ? ` · ${d.lastHook.other} رسالة لرقم تاني` : ''}`}</b></li>
+      <li><span class="muted">آخر إشعار من Meta</span> <b>${!d.lastHook ? 'لسا ما وصل ولا إشي' : html`${ago(d.lastHook.at)} · ${d.lastHook.signed ? '✅ موقّع' : '❌ التوقيع غلط (تأكد من WHATSAPP_APP_SECRET)'}${d.lastHook.fields && d.lastHook.fields.length ? ` · ${d.lastHook.fields.join('، ')}` : ''}${d.lastHook.ours ? ` · ${d.lastHook.ours} رسالة لرقم الإيجنت` : ''}${d.lastHook.other ? ` · ${d.lastHook.other} رسالة لرقم تاني` : ''}${d.lastHook.failed ? ` · ⚠️ ${d.lastHook.failed} رسالة فشلت (السبب على المحل)` : ''}`}</b></li>
     </ul>` : ''}
     <div class="row" style="margin-top:8px">
       <button class="btn sm ghost" type="button" data-wa-check>🔄 افحص</button>
@@ -2238,9 +2239,12 @@ function bindSales(st) {
         api(`/api/admin/prospects/${id}/sent`, { method: 'POST' }).then(() => api('/api/admin/sales')).then(redraw).catch(() => {});
       });
     }
-    card.querySelector('[data-copy]').onclick = async () => {
-      try { await navigator.clipboard.writeText(p.message); toast('انسخت ✅ الصقها بالانستغرام أو أي مكان', 'ok'); } catch { prompt('انسخ الرسالة:', p.message); }
-    };
+    const copy = card.querySelector('[data-copy]');
+    if (copy) {
+      copy.onclick = async () => {
+        try { await navigator.clipboard.writeText(p.message); toast('انسخت ✅ الصقها بالانستغرام أو أي مكان', 'ok'); } catch { prompt('انسخ الرسالة:', p.message); }
+      };
+    }
     card.querySelector('[data-st]').onchange = async (e) => {
       try { await api(`/api/admin/prospects/${id}`, { method: 'PUT', body: { status: e.target.value } }); toast('انحفظ', 'ok'); } catch (err) { toast(err.message, 'bad'); }
     };

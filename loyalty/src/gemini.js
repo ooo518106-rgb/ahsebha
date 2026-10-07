@@ -86,7 +86,8 @@ export async function geminiChat(cfg, { system, messages, tools = [], runTool, s
     for (const p of callsMade) {
       let response;
       try { response = await runTool(p.functionCall.name, p.functionCall.args || {}); } catch (e) { response = { error: String(e.message || e) }; }
-      parts.push({ functionResponse: { name: p.functionCall.name, response: response && typeof response === 'object' ? response : { result: response } } });
+      // id: الموديلات الجديدة بتربط كل جواب بطلبه
+      parts.push({ functionResponse: { ...(p.functionCall.id ? { id: p.functionCall.id } : {}), name: p.functionCall.name, response: response && typeof response === 'object' ? response : { result: response } } });
     }
     if (stopOn && callsMade.some((p) => p.functionCall.name === stopOn)) return { text, usage, refused: false, rounds: round };
     contents.push({ role: 'user', parts });

@@ -224,7 +224,7 @@ $('#auth').addEventListener('submit', async (e) => {
   $('#authError').textContent = '';
   try {
     if (mode === 'signup') {
-      await api('/api/auth/signup', { method: 'POST', body: { ...Object.fromEntries(f), partner: partner(), offer: offerCode() } });
+      await api('/api/auth/signup', { method: 'POST', body: { ...Object.fromEntries(f), partner: partner(), offer: offerCode(), prospect: prospectCode() } });
       location.href = '/app#settings';
     } else {
       await api('/api/auth/login', { method: 'POST', body: { email: f.get('email'), password: f.get('password') } });

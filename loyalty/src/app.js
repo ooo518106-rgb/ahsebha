@@ -622,7 +622,7 @@ export async function runScheduled(ctx, now = Date.now()) {
   if (c.budget > 0) out.winback = await winbackJob(c, shopOf, now);
   if (c.budget > 0) out.summaries = await summaryJob(c, now);
   if (c.budget > 0) out.reminders = await reminderJob(c, platformShop, now);
-  out.outreach = await salesOutreachJob(c, now);
+  out.outreach = await salesOutreachJob(c, now).catch((e) => { console.error('outreach:', e.message); return 0; });
   Object.assign(out, await expiryJob(c, shopOf, now));
   out.giftsRefunded = await giftRefundJob(c, now);
   const day = localDayKey('JO', now);
@@ -1510,11 +1510,11 @@ async function signup(c) {
   await storeDefaultLogo(c.db, shop);
   const reseller = await resellerByCode(c.db, b.partner);
   if (reseller) await c.db.run('UPDATE shops SET reseller_id = ? WHERE id = ?', reseller.id, shop.id);
-  if (offer) {
-    await c.db.run('UPDATE offers SET shop_id = ?, used_at = ? WHERE code = ?', shop.id, now, offer.code);
-    if (offer.prospect_id) await c.db.run("UPDATE prospects SET status = 'won', shop_id = ? WHERE id = ?", shop.id, offer.prospect_id);
-  }
-  await notifyAdmin(c, { title: offer ? '🎉 محل جديد سجّل من عرض وكيل المبيعات' : '🎉 محل جديد بلّش تجربة', body: `${shopName} · ${email}${offer ? ` · تجربة ${offer.trial_days} يوم` : ''}`, url: `${c.origin}/app#admin` });
+  if (offer) await c.db.run('UPDATE offers SET shop_id = ?, used_at = ? WHERE code = ?', shop.id, now, offer.code);
+  // المحل اللي حكى معه وكيل المبيعات (من العرض، أو من رابطه الخاص /?p=…)
+  const prospectId = (offer && offer.prospect_id) || ((await prospectByCode(c.db, b.prospect)) || {}).id;
+  if (prospectId) await c.db.run("UPDATE prospects SET status = 'won', shop_id = ? WHERE id = ?", shop.id, prospectId);
+  await notifyAdmin(c, { title: offer ? '🎉 محل جديد سجّل من عرض وكيل المبيعات' : prospectId ? '🎉 محل من وكيل المبيعات بلّش تجربة' : '🎉 محل جديد بلّش تجربة', body: `${shopName} · ${email}${offer ? ` · تجربة ${offer.trial_days} يوم` : ''}`, url: `${c.origin}/app#admin` });
   const user = await c.db.get('SELECT id FROM users WHERE email = ?', email);
   const token = await auth.createSession(c.db, user.id);
   return json({ ok: true }, 201, { 'set-cookie': auth.sessionCookie(token, c.req) });
@@ -2788,7 +2788,7 @@ async function publicProspect(c, code) {
 // ─── 📲 واتساب ───
 const WA_PLACEHOLDER = { image: '[بعت صورة]', audio: '[بعت رسالة صوتية]', video: '[بعت فيديو]', sticker: '[بعت ستيكر]', document: '[بعت ملف]', location: '[بعت موقع]', contacts: '[بعت جهة اتصال]' };
 // الأخطاء اللي بتخص الرقم نفسه (مش واتساب، أو ما بده رسائل تسويق)؛ غيرها (القالب، التوكن) بيوقف الإرسال كله
-const WA_RECIPIENT_ERRORS = new Set([131026, 131049, 131047, 131021, 131050, 131051]);
+const WA_RECIPIENT_ERRORS = new Set([131026, 131049, 131047, 131021, 131050, 131051, 130472]);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function saveSalesMsg(db, prospectId, role, text, waId = null, at = Date.now(), channel = 'wa') {
@@ -2806,6 +2806,13 @@ async function sendIntro(c, wcfg, p, now = Date.now()) {
     return true;
   } catch (e) {
     const msg = clean(e.message, 200);
+    if (!e.status) {
+      // ما وصلنا لـ Meta (الشبكة): بيرجع للدور ومنجرّب بالدورة الجاية، بدون ما نوقف الإرسال
+      await c.db.run("UPDATE prospects SET status = 'new', sent_at = NULL, error = ? WHERE id = ?", msg, p.id);
+      const err = new Error(msg);
+      err.stop = true;
+      throw err;
+    }
     if (WA_RECIPIENT_ERRORS.has(e.code)) {
       await c.db.run('UPDATE prospects SET status = ?, sent_at = NULL, error = ? WHERE id = ?', e.code === 131050 ? 'optout' : 'failed', msg, p.id);
       return false;
@@ -2864,7 +2871,30 @@ async function waWebhook(c) {
   if (!signed) return new Response('bad signature', { status: 401 });
   if (!payload) return new Response('bad json', { status: 400 });
   for (const m of wa.incoming(payload, wcfg.phoneId)) await waIncoming(c, wcfg, m);
+  for (const f of wa.failures(payload, wcfg.phoneId)) await waFailed(c, f);
   return new Response('ok');
+}
+
+// رسالة إلنا فشلت بعد ما Meta قبلتها. إذا كانت أول رسالة (القالب): نفس اللي بنعمله لما Meta ترفض فوراً،
+// يعني الرقم بيصير «ما انبعتت»، ومشكلة الحساب (الدفع، القالب) بتوقف الإرسال التلقائي وبتبلّغك
+async function waFailed(c, f) {
+  const sent = await c.db.get('SELECT prospect_id FROM sales_msgs WHERE wa_id = ?', f.id);
+  const p = sent && await c.db.get('SELECT * FROM prospects WHERE id = ?', sent.prospect_id);
+  if (!p) return;
+  const msg = clean(`${f.message}${f.code ? ` (${f.code})` : ''}`, 200);
+  if (p.status !== 'sent' || p.last_in_at) {
+    await c.db.run('UPDATE prospects SET error = ? WHERE id = ?', msg, p.id);
+    return;
+  }
+  if (WA_RECIPIENT_ERRORS.has(f.code)) {
+    await c.db.run('UPDATE prospects SET status = ?, sent_at = NULL, error = ? WHERE id = ?', f.code === 131050 ? 'optout' : 'failed', msg, p.id);
+    return;
+  }
+  await c.db.run("UPDATE prospects SET status = 'new', sent_at = NULL, error = ? WHERE id = ?", msg, p.id);
+  if ((await getSetting(c.db, 'sales_auto')) === '1') {
+    await setSetting(c.db, 'sales_auto', '0');
+    await notifyAdmin(c, { title: '⚠️ وكيل المبيعات وقف الإرسال', body: msg, url: `${c.origin}/app#admin` });
+  }
 }
 
 async function waIncoming(c, wcfg, m) {
@@ -2879,13 +2909,15 @@ async function waIncoming(c, wcfg, m) {
     await c.db.run('UPDATE prospects SET wa = ? WHERE id = ?', from, linked.id);
     p = { ...linked, wa: from };
   } else if (!p) {
-    await c.db.run("INSERT INTO prospects (name, phone, wa, code, status, source, created_at) VALUES (?, ?, ?, ?, 'talking', 'inbound', ?) ON CONFLICT DO NOTHING", clean(m.name, 60) || `+${from}`, `+${from}`, from, randomToken(8), now);
+    const name = clean(m.name, 60); // اسمه على واتساب، إلا إذا رموز بس (متل «.»)
+    await c.db.run("INSERT INTO prospects (name, phone, wa, code, status, source, created_at) VALUES (?, ?, ?, ?, 'talking', 'inbound', ?) ON CONFLICT DO NOTHING", /[\p{L}\p{N}]/u.test(name) ? name : `+${from}`, `+${from}`, from, randomToken(8), now);
     p = await c.db.get('SELECT * FROM prospects WHERE wa = ?', from);
+    if (!p) return;
   }
   const text = m.text || WA_PLACEHOLDER[m.type] || '[رسالة]';
   const ins = await saveSalesMsg(c.db, p.id, 'in', text, m.id, now);
   if (!ins.changes) return; // Meta بتعيد نفس الرسالة أحياناً
-  if (wa.isOptOut(m.text)) {
+  if (wa.isOptOut(m.text, { firstReply: !p.last_in_at })) {
     await c.db.run("UPDATE prospects SET status = 'optout', last_in_at = ? WHERE id = ?", now, p.id);
     try {
       const bye = 'تمام، ما رح نرجع نبعتلك 🙏 وإذا احتجت إشي بأي وقت، إحنا هون.';
@@ -2897,7 +2929,13 @@ async function waIncoming(c, wcfg, m) {
   if (!p.last_in_at) await notifyAdmin(c, { title: p.source === 'inbound' ? '💬 حدا جديد راسل وكيل المبيعات' : `💬 ${p.name} رد على وكيل المبيعات`, body: text.slice(0, 120), url: `${c.origin}/app#admin` });
   else if (p.paused || !aiConfig(c.env)) await notifyAdmin(c, { title: `💬 ${p.name}`, body: text.slice(0, 120), url: `${c.origin}/app#admin` });
   if (p.paused || !aiConfig(c.env)) return;
-  c.waitUntil(waReply(c, wcfg, p.id, ins.lastId).catch(async (e) => { console.error('wa reply:', e.status || '', e.message); await noteAi(c, false, e); }));
+  c.waitUntil(waReply(c, wcfg, p.id, ins.lastId).catch(async (e) => {
+    console.error('wa reply:', e.status || '', e.message);
+    // بدون رد، المحل بيضل مستني: بنبلّغك عشان ترد إنت
+    if (e.wa) await c.db.run('UPDATE prospects SET error = ? WHERE id = ?', clean(`واتساب: ${e.message}`, 200), p.id);
+    else await noteAi(c, false, e);
+    await notifyAdmin(c, { title: `⚠️ الوكيل ما قدر يرد على ${p.name}`, body: `${text.slice(0, 80)} · رد عليه إنت من 🎯 المبيعات`, url: `${c.origin}/app#admin` });
+  }).catch((e) => console.error('wa reply alert:', e.message)));
 }
 
 // رد الوكيل: بيستنى ثواني (إذا بعت كذا رسالة ورا بعض، بيرد مرة وحدة على آخرها)
@@ -2923,9 +2961,15 @@ async function waReply(c, wcfg, prospectId, msgId) {
   await logAi(c, 'wa', r.usage);
   await noteAi(c, true);
   if (r.refused || !r.text) return;
-  const id = await wa.sendText(wcfg, p.wa, r.text);
+  let id;
+  try {
+    id = await wa.sendText(wcfg, p.wa, r.text);
+  } catch (e) {
+    e.wa = true;
+    throw e;
+  }
   await saveSalesMsg(c.db, p.id, 'agent', r.text, id);
-  await c.db.run('UPDATE prospects SET last_out_at = ? WHERE id = ?', Date.now(), p.id);
+  await c.db.run('UPDATE prospects SET last_out_at = ?, error = NULL WHERE id = ?', Date.now(), p.id);
 }
 
 // ─── 👑 صفحة المنصة ← 🎯 المبيعات ───

@@ -301,6 +301,93 @@ test('أرقام واتساب ورسائل الإيقاف', () => {
   assert.ok(isOptOut('لا شكراً'));
   assert.ok(isOptOut('STOP'));
   assert.ok(!isOptOut('لا بدي أعرف السعر'));
+  // بنص المحادثة «لا» جواب على سؤال، مش طلب إيقاف
+  assert.ok(!isOptOut('لا', { firstReply: false }));
+  assert.ok(!isOptOut('لا شكراً', { firstReply: false }));
+  assert.ok(isOptOut('مش مهتم', { firstReply: false }));
+  assert.ok(isOptOut('وقف', { firstReply: false }));
+});
+
+const statusHook = (id, code, message) => ({
+  object: 'whatsapp_business_account',
+  entry: [{ changes: [{ field: 'messages', value: { metadata: { phone_number_id: '1234567890' }, statuses: [{ id, status: 'failed', timestamp: '1760000000', recipient_id: '962791000001', errors: [{ code, title: message, error_data: { details: message } }] }] } }] }],
+});
+
+test('واتساب: الرسالة اللي بتفشل بعد ما Meta قبلتها (الدفع، الرقم) بتبيّن على المحل، ومشكلة الحساب بتوقف الإرسال', async () => {
+  const f = fakes();
+  const p = await platform({ ANTHROPIC_API_KEY: 'sk-test', fetch: f.fetch, ...WA_ENV });
+  await p.admin.post('/api/admin/prospects', { name: 'محل 1', phone: '0791000001' });
+  await p.admin.post('/api/admin/prospects', { name: 'محل 2', phone: '0791000002' });
+  await p.admin.put('/api/admin/sales/settings', { auto: true, daily: 20 });
+  assert.equal((await runScheduled({ db: p.db, env: p.env, waitUntil: (x) => x }, SUNDAY_NOON)).outreach, 2);
+  const meta = p.client();
+  // الرقم الأول مش عليه واتساب: بس هالمحل
+  assert.equal((await hook(meta, statusHook('wamid.1', 131026, 'Message undeliverable'))).status, 200);
+  let st = (await p.admin.get('/api/admin/sales')).data;
+  let one = st.prospects.find((x) => x.name === 'محل 1');
+  assert.equal(one.status, 'failed');
+  assert.match(one.error, /undeliverable \(131026\)/);
+  assert.equal(st.settings.auto, true);
+  // التاني: مشكلة بالدفع، يعني كل الرسائل رح تفشل: بيرجع للدور وبيوقف الإرسال
+  await hook(meta, statusHook('wamid.2', 131042, 'Business eligibility payment issue'));
+  st = (await p.admin.get('/api/admin/sales')).data;
+  const two = st.prospects.find((x) => x.name === 'محل 2');
+  assert.equal(two.status, 'new');
+  assert.match(two.error, /payment/);
+  assert.equal(st.settings.auto, false);
+  assert.equal(st.sentToday, 0);
+  assert.equal((await p.admin.get('/api/admin/wa/number')).data.lastHook.failed, 1);
+  // رسالة مش إلنا: ولا إشي
+  assert.equal((await hook(meta, statusHook('wamid.unknown', 131042, 'x'))).status, 200);
+
+  // الشبكة وقعت: بيرجع للدور بدون ما يطفي الإرسال
+  const net = fakes(undefined, () => { throw new TypeError('Network connection lost'); });
+  const q = await platform({ ANTHROPIC_API_KEY: 'sk-test', fetch: net.fetch, ...WA_ENV });
+  await q.admin.post('/api/admin/prospects', { name: 'محل', phone: '0791000009' });
+  await q.admin.put('/api/admin/sales/settings', { auto: true, daily: 20 });
+  assert.equal((await runScheduled({ db: q.db, env: q.env, waitUntil: (x) => x }, SUNDAY_NOON)).outreach, 0);
+  const qs = (await q.admin.get('/api/admin/sales')).data;
+  assert.equal(qs.settings.auto, true);
+  assert.equal(qs.prospects[0].status, 'new');
+});
+
+test('واتساب: «لا» بنص المحادثة جواب للوكيل مش إيقاف، ولما الوكيل ما بيقدر يرد بينحفظ السبب', async () => {
+  let down = false;
+  const f = fakes(() => (down ? { status: 500 } : { text: 'تمام! وكيف بترجّع زبائنك هلأ؟' }));
+  const p = await platform({ ANTHROPIC_API_KEY: 'sk-test', fetch: f.fetch, ...WA_ENV });
+  const meta = p.client();
+  await hook(meta, incomingMsg('962791000001', 'مرحبا، بدي أعرف عن نقاطك'));
+  await meta.flush();
+  await hook(meta, incomingMsg('962791000001', 'لا'));
+  await meta.flush();
+  let pr = (await p.admin.get('/api/admin/sales')).data.prospects[0];
+  assert.equal(pr.status, 'talking');
+  assert.equal(pr.name, 'أبو أحمد');
+  assert.equal(f.claude.length, 2, 'الوكيل رد على «لا»');
+  assert.deepEqual(lastUser(f.claude[1]), { role: 'user', content: 'لا' });
+  // الذكاء الاصطناعي واقع: ما في رد، والخطأ بيبيّن بصفحة المبيعات
+  down = true;
+  const sent = f.graph.length;
+  await hook(meta, incomingMsg('962791000001', 'كم السعر؟'));
+  await meta.flush();
+  const st = (await p.admin.get('/api/admin/sales')).data;
+  assert.ok(st.aiLastError);
+  assert.equal(f.graph.length, sent, 'ما انبعت إشي');
+  // اسم واتساب رموز بس: بنحط الرقم
+  await hook(meta, { ...incomingMsg('962792000002', 'مرحبا'), entry: [{ changes: [{ field: 'messages', value: { metadata: { phone_number_id: '1234567890' }, contacts: [{ wa_id: '962792000002', profile: { name: '.' } }], messages: [{ from: '962792000002', id: 'wamid.dot', timestamp: '1760000000', type: 'text', text: { body: 'مرحبا' } }] } }] }] });
+  pr = (await p.admin.get('/api/admin/sales')).data.prospects.find((x) => x.wa === '962792000002');
+  assert.equal(pr.name, '+962792000002');
+});
+
+test('المحل اللي سجّل من رابطه الخاص (بدون عرض) بيصير «سجّل»', async () => {
+  const p = await platform({});
+  await p.admin.post('/api/admin/prospects', { name: 'كوفي الورد', phone: '0791000001' });
+  const pr = (await p.admin.get('/api/admin/sales')).data.prospects[0];
+  const code = pr.link.split('?p=')[1];
+  await signup(p.client(), { shopName: 'كوفي الورد', prospect: code });
+  const after = (await p.admin.get('/api/admin/sales')).data.prospects[0];
+  assert.equal(after.status, 'won');
+  assert.ok(after.shopId);
 });
 
 test('رابط المحل الخاص: إنت بتبعت من واتسابك، وهو بيفتح الرابط، والوكيل بيكمّل معه بالموقع وبتنحفظ المحادثة', async () => {
