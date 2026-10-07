@@ -3221,8 +3221,11 @@ async function adminWaNumber(c) {
     try {
       const h = (await wa.health(wcfg)).health_status;
       if (h && h.can_send_message) {
-        const errors = (h.entities || []).flatMap((en) => (en.errors || []).map((er) => clean([er.error_description, er.possible_solution].filter(Boolean).join(' — '), 300))).filter(Boolean).slice(0, 3);
-        sending = { can: String(h.can_send_message), errors };
+        const all = (h.entities || []).flatMap((en) => (en.errors || []).map((er) => clean([er.error_description, er.possible_solution].filter(Boolean).join(' — '), 300))).filter(Boolean);
+        // المكالمات (SIP) ما إلها علاقة بالرسائل: إذا هي السبب الوحيد، الرسائل شغّالة
+        const errors = [...new Set(all.filter((e) => !/\b(calling|SIP)\b/i.test(e)))].slice(0, 3);
+        const callsOnly = all.length > 0 && !errors.length && h.can_send_message === 'LIMITED';
+        sending = { can: callsOnly ? 'AVAILABLE' : String(h.can_send_message), errors };
       }
     } catch { sending = null; }
     return json({

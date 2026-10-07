@@ -481,15 +481,14 @@ test('رقم الإيجنت عند Meta: الحالة، الكود، التأك�
 
 test('رقم الإيجنت: حالة قالب أول رسالة على حساب الواتساب الصح، وإذا في إشي مانع الإرسال', async () => {
   let tpl = [{ name: 'nuqatak_intro', status: 'PENDING', language: 'ar', category: 'MARKETING', rejected_reason: 'NONE', id: '1' }];
+  let health = { can_send_message: 'BLOCKED', entities: [{ entity_type: 'WABA', id: '5550001', can_send_message: 'BLOCKED', errors: [{ error_code: 141010, error_description: 'No valid payment method.', possible_solution: 'Add a payment method.' }] }] };
   const urls = [];
   const fetch = async (url) => {
     const u = String(url);
     urls.push(u);
     const ok = (d) => new Response(JSON.stringify(d), { status: 200, headers: { 'content-type': 'application/json' } });
     if (u.includes('/message_templates')) return ok({ data: tpl });
-    if (u.includes('fields=health_status')) {
-      return ok({ health_status: { can_send_message: 'BLOCKED', entities: [{ entity_type: 'WABA', id: '5550001', can_send_message: 'BLOCKED', errors: [{ error_code: 141010, error_description: 'No valid payment method.', possible_solution: 'Add a payment method.' }] }] } });
-    }
+    if (u.includes('fields=health_status')) return ok({ health_status: health });
     if (u.includes('/subscribed_apps')) return ok({ data: [{ whatsapp_business_api_data: { id: '1' } }] });
     return ok({ display_phone_number: '+962 77 052 8804', code_verification_status: 'VERIFIED', platform_type: 'CLOUD_API', status: 'CONNECTED' });
   };
@@ -500,6 +499,10 @@ test('رقم الإيجنت: حالة قالب أول رسالة على حساب
   assert.ok(urls.some((u) => /\/v26\.0\/5550001\/message_templates\?name=nuqatak_intro/.test(u)));
   assert.equal(d.sending.can, 'BLOCKED');
   assert.match(d.sending.errors[0], /payment method/);
+  // المكالمات مش مفعّلة: ما إلها علاقة بالرسائل
+  health = { can_send_message: 'LIMITED', entities: [{ entity_type: 'PHONE_NUMBER', can_send_message: 'LIMITED', errors: [{ error_description: 'WhatsApp Business calling cannot use SIP because it is not enabled', possible_solution: 'Configure SIP' }] }, { entity_type: 'APP', can_send_message: 'LIMITED', errors: [{ error_description: 'This app cannot use SIP for WhatsApp Business calling' }] }] };
+  d = (await p.admin.get('/api/admin/wa/number')).data;
+  assert.deepEqual(d.sending, { can: 'AVAILABLE', errors: [] });
   // القالب انعمل على حساب تاني
   tpl = [{ name: 'nuqatak_intro_old', status: 'APPROVED', language: 'ar' }];
   d = (await p.admin.get('/api/admin/wa/number')).data;
