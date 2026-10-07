@@ -492,3 +492,17 @@ test('Claude أولى إذا الاتنين موجودين، إلا مع AI_PROV
   assert.equal(aiConfig({ GEMINI_API_KEY: 'g', GEMINI_MODEL: 'gemini-2.5-flash' }).model, 'gemini-2.5-flash');
   assert.equal(aiConfig({}), null);
 });
+
+test('Gemini على الموقع الحقيقي: بيستعمل fetch العادي إذا ما في fetch وهمي', async () => {
+  const g = fakeGemini(() => ({ text: 'أهلا! 👋' }));
+  const real = globalThis.fetch;
+  globalThis.fetch = g.fetch;
+  try {
+    const p = await platform({ GEMINI_API_KEY: 'g-key' });
+    const r = await p.client().post('/api/sales', { messages: [{ role: 'user', content: 'مرحبا' }] });
+    assert.equal(r.status, 200, JSON.stringify(r.data));
+    assert.equal(r.data.reply, 'أهلا! 👋');
+  } finally {
+    globalThis.fetch = real;
+  }
+});

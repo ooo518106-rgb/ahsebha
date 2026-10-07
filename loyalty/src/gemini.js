@@ -4,7 +4,8 @@ const BASE = 'https://generativelanguage.googleapis.com/v1beta';
 let picked = null; // الموديل اللي اخترناه (بيضل محفوظ طول ما الـ Worker شغّال)
 
 async function call(cfg, path, body) {
-  const res = await cfg.fetch(`${BASE}/${path}`, {
+  const doFetch = cfg.fetch || ((...a) => fetch(...a)); // بالتجارب منمرّر fetch وهمي، وعلى الموقع fetch العادي
+  const res = await doFetch(`${BASE}/${path}`, {
     method: body ? 'POST' : 'GET',
     headers: { 'x-goog-api-key': cfg.apiKey, ...(body ? { 'content-type': 'application/json' } : {}) },
     ...(body ? { body: JSON.stringify(body) } : {}),
