@@ -881,6 +881,10 @@ async function getSetting(db, k) {
   return row ? row.v : null;
 }
 
+async function jsonSetting(db, k) {
+  try { return JSON.parse((await getSetting(db, k)) || 'null'); } catch { return null; }
+}
+
 async function setSetting(db, k, v) {
   await db.run('INSERT INTO platform_settings (k, v) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v', k, String(v));
 }
@@ -2594,6 +2598,13 @@ async function publicMenu(c, slug) {
 }
 
 // ─── 🎯 وكيل المبيعات: بيدوّر على محلات، بيبعتلهم على واتساب، بيحكي معهم وبيفاوض (بدون خصم) ───
+// للتشخيص بصفحة المبيعات: آخر خطأ من الذكاء الاصطناعي، وآخر رد ناجح
+async function noteAi(c, ok, e = null) {
+  const cfg = aiConfig(c.env);
+  const v = { at: Date.now(), provider: cfg ? cfg.provider : null, ...(ok ? {} : { status: e && e.status, message: clean(e && e.message, 300) }) };
+  try { await setSetting(c.db, ok ? 'ai_last_ok' : 'ai_last_error', JSON.stringify(v)); } catch { /* التشخيص ما بيوقف الشغل */ }
+}
+
 async function logAi(c, kind, usage) {
   await c.db.run(
     `INSERT INTO ai_usage (kind, day, requests, input_tokens, output_tokens, cache_read, cache_write, searches) VALUES (?, ?, 1, ?, ?, ?, ?, ?)
@@ -2740,9 +2751,11 @@ async function salesChat(c) {
     r = await chat(cfg, { system: await salesSystem(c, 'web', prospect, shopOffer), messages, tools: prospect ? sales.waTools() : sales.webTools(), runTool });
   } catch (e) {
     console.error('sales:', e.status || '', e.message);
+    await noteAi(c, false, e);
     fail(503, e.status === 429 ? 'المساعد مشغول كتير هلأ، جرّب بعد شوي أو احكينا على واتساب' : SALES_DOWN);
   }
   await logAi(c, 'web', r.usage);
+  await noteAi(c, true);
   const reply = r.refused || !r.text ? 'ما بقدر أساعد بهالسؤال 🙏 بس بقدر أحكيلك عن نقاطك وأسعارها، أو تشوف المحل التجريبي.' : r.text;
   if (prospect) {
     const now = Date.now();
@@ -2884,7 +2897,7 @@ async function waIncoming(c, wcfg, m) {
   if (!p.last_in_at) await notifyAdmin(c, { title: p.source === 'inbound' ? '💬 حدا جديد راسل وكيل المبيعات' : `💬 ${p.name} رد على وكيل المبيعات`, body: text.slice(0, 120), url: `${c.origin}/app#admin` });
   else if (p.paused || !aiConfig(c.env)) await notifyAdmin(c, { title: `💬 ${p.name}`, body: text.slice(0, 120), url: `${c.origin}/app#admin` });
   if (p.paused || !aiConfig(c.env)) return;
-  c.waitUntil(waReply(c, wcfg, p.id, ins.lastId).catch((e) => console.error('wa reply:', e.message)));
+  c.waitUntil(waReply(c, wcfg, p.id, ins.lastId).catch(async (e) => { console.error('wa reply:', e.status || '', e.message); await noteAi(c, false, e); }));
 }
 
 // رد الوكيل: بيستنى ثواني (إذا بعت كذا رسالة ورا بعض، بيرد مرة وحدة على آخرها)
@@ -2908,6 +2921,7 @@ async function waReply(c, wcfg, prospectId, msgId) {
   const runTool = prospectTools(c, p, 'wa');
   const r = await chat(cfg, { system: await salesSystem(c, 'wa', p, offer), messages, tools: sales.waTools(), runTool, maxTokens: 3000 });
   await logAi(c, 'wa', r.usage);
+  await noteAi(c, true);
   if (r.refused || !r.text) return;
   const id = await wa.sendText(wcfg, p.wa, r.text);
   await saveSalesMsg(c.db, p.id, 'agent', r.text, id);
@@ -2954,6 +2968,8 @@ async function salesState(c) {
     agentWa: ctx.agentWa,
     ai: !!aiConfig(c.env),
     aiProvider: aiConfig(c.env) ? aiConfig(c.env).provider : null,
+    aiLastError: await jsonSetting(c.db, 'ai_last_error'),
+    aiLastOk: await jsonSetting(c.db, 'ai_last_ok'),
     whatsapp: {
       ready: !!wcfg,
       verified: !!(wcfg && wcfg.appSecret && wcfg.verifyToken),
@@ -3010,6 +3026,7 @@ async function adminSalesSearch(c) {
     }
   } catch (e) {
     console.error('sales search:', e.status || '', e.message);
+    await noteAi(c, false, e);
     fail(503, e.status === 429 ? 'خلصت حصة البحث المجانية لليوم، جرّب بكرا' : 'البحث ما زبط هلأ، جرّب كمان شوي');
   }
   await logAi(c, 'search', r.usage);

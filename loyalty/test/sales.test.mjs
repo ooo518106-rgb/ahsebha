@@ -455,6 +455,11 @@ test('Gemini: بمفتاح GEMINI_API_KEY الوكيل بيحكي ويفاوض �
   const e = await q.client().post('/api/sales', { messages: [{ role: 'user', content: 'مرحبا' }] });
   assert.equal(e.status, 503);
   assert.match(e.data.error, /مشغول/);
+  const diag = (await q.admin.get('/api/admin/sales')).data;
+  assert.equal(diag.aiLastError.provider, 'gemini');
+  assert.equal(diag.aiLastError.status, 429);
+  assert.equal(diag.aiLastOk, null);
+  assert.ok((await p.admin.get('/api/admin/sales')).data.aiLastOk.at, 'الرد الناجح بينسجّل');
 });
 
 test('Gemini: البحث عن محلات بـ Google Search وبعدين ترتيبها JSON', async () => {

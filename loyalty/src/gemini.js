@@ -67,7 +67,7 @@ export async function geminiChat(cfg, { system, messages, tools = [], runTool, s
   const usage = emptyUsage();
   const body = {
     systemInstruction: { parts: (Array.isArray(system) ? system : [{ text: String(system) }]).map((b) => ({ text: b.text })) },
-    generationConfig: { maxOutputTokens: maxTokens, temperature: 0.7 },
+    generationConfig: { maxOutputTokens: maxTokens },
   };
   if (tools.length) body.tools = [{ functionDeclarations: tools.map((t) => ({ name: t.name, description: t.description, parameters: toGeminiSchema(t.input_schema) })) }];
   let text = '';

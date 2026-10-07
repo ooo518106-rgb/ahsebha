@@ -2055,6 +2055,8 @@ function salesPanel(st) {
         <li>قالب أول رسالة بـ Meta، اسمه <code>${st.whatsapp.template}</code> (Marketing، عربي)، ونصه:<div class="small" style="margin-top:4px">${st.whatsapp.templateText}</div></li>
       </ol>
     </details>
+    ${st.aiLastError && (!st.aiLastOk || st.aiLastError.at > st.aiLastOk.at) ? html`<p class="alert bad small">⚠️ آخر خطأ من ${st.aiLastError.provider === 'gemini' ? 'Gemini' : 'Claude'} (${ago(st.aiLastError.at)}): <span dir="ltr">${st.aiLastError.message || ''}${st.aiLastError.status ? ` [${st.aiLastError.status}]` : ''}</span></p>` : ''}
+    ${st.aiLastOk ? html`<p class="small muted">✅ آخر رد ناجح من الوكيل: ${ago(st.aiLastOk.at)}</p>` : ''}
     <div class="stats">
       <div class="stat"><b class="num">${fmt(c.new || 0)}</b><span class="small muted">بالدور</span></div>
       <div class="stat"><b class="num">${fmt(st.sentToday)}/${fmt(st.settings.daily)}</b><span class="small muted">انبعتلهم اليوم</span></div>
