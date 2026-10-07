@@ -13,7 +13,7 @@ function fakes(reply = () => ({ text: 'أهلا! شو نوع محلك؟ ☕' }),
   const fetch = async (url, init = {}) => {
     const u = String(url);
     if (u.startsWith('https://graph.facebook.com/')) {
-      const body = JSON.parse(init.body);
+      const body = init.body ? JSON.parse(init.body) : {};
       graph.push({ url: u, headers: new Headers(init.headers), body });
       const r = waReply(body, graph.length);
       if (r.status !== 200) return new Response(JSON.stringify({ error: { message: r.message || 'boom', code: r.code } }), { status: r.status, headers: { 'content-type': 'application/json' } });
@@ -358,4 +358,26 @@ test('بعد ربط Meta: رسالتك بتفتح واتساب الوكيل، و
   assert.equal(st.prospects[0].wa, '962795555555');
   assert.equal(st.prospects[0].status, 'talking');
   assert.match(f.claude[0].body.system[1].text, /الاسم: مخبز الشام/);
+});
+
+test('رقم الإيجنت عند Meta: الحالة، الكود، التأكيد والتسجيل، وسبب الرفض بالزبط', async () => {
+  const f = fakes(undefined, (body, n) => (body.pin === '000000' ? { status: 400, code: 133005, message: 'Two step verification PIN Mismatch' } : { status: 200 }));
+  const p = await platform({ ANTHROPIC_API_KEY: 'sk-test', fetch: f.fetch, ...WA_ENV });
+  const off = await platform({});
+  assert.equal((await off.admin.get('/api/admin/wa/number')).status, 400);
+  assert.equal((await p.client().get('/api/admin/wa/number')).status, 401);
+  assert.equal((await p.admin.get('/api/admin/wa/number')).status, 200);
+  assert.match(f.graph.at(-1).url, /\/v22\.0\/1234567890\?fields=.*code_verification_status/);
+  await p.admin.post('/api/admin/wa/number', { action: 'code', method: 'VOICE' });
+  assert.match(f.graph.at(-2).url, /1234567890\/request_code$/);
+  assert.deepEqual(f.graph.at(-2).body, { code_method: 'VOICE', language: 'ar' });
+  assert.equal((await p.admin.post('/api/admin/wa/number', { action: 'verify', code: '12' })).status, 400);
+  await p.admin.post('/api/admin/wa/number', { action: 'verify', code: '123 456' });
+  assert.deepEqual(f.graph.at(-2).body, { code: '123456' });
+  await p.admin.post('/api/admin/wa/number', { action: 'register', pin: '246810' });
+  assert.match(f.graph.at(-2).url, /1234567890\/register$/);
+  assert.deepEqual(f.graph.at(-2).body, { messaging_product: 'whatsapp', pin: '246810' });
+  const bad = await p.admin.post('/api/admin/wa/number', { action: 'register', pin: '000000' });
+  assert.equal(bad.status, 502);
+  assert.match(bad.data.error, /PIN Mismatch.*133005/);
 });

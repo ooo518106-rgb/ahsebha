@@ -2062,6 +2062,11 @@ function salesPanel(st) {
       <div class="stat"><b class="num">${fmt(st.signups)}</b><span class="small muted">سجّلوا من عروضه</span></div>
     </div>
   </section>
+  ${st.whatsapp.ready ? html`<section class="panel stack" id="waNumber">
+    <h2>📞 رقم الإيجنت عند Meta</h2>
+    <p class="hint">إذا زر «تسجيل» بصفحة Meta ما زبط، سجّله من هون: بيطلعلك السبب بالزبط إذا Meta رفضت.</p>
+    <div id="waNumberBox"><button class="btn ghost" type="button" data-wa-check>🔍 افحص الرقم</button></div>
+  </section>` : ''}
   <form class="panel stack" id="salesSearch">
     <h2>🔎 دوّر على محلات</h2>
     <div class="row">
@@ -2096,6 +2101,51 @@ function salesPanel(st) {
         <button class="btn" type="submit">ضيف للدور</button>
       </form></details>
   </section>`;
+}
+
+// 📞 حالة رقم الإيجنت عند Meta، والتأكيد بالكود والتسجيل
+const WA_LABELS = {
+  codeStatus: { VERIFIED: '✅ مؤكّد', NOT_VERIFIED: '❌ مش مؤكّد (ابعت كود)', EXPIRED: '⏳ التأكيد انتهى (ابعت كود جديد)' },
+  platform: { CLOUD_API: '✅ مسجّل وجاهز', NOT_APPLICABLE: '❌ مش مسجّل لسا', ON_PREMISE: '⚠️ مسجّل على نظام قديم' },
+  nameStatus: { APPROVED: '✅ موافق عليه', AVAILABLE_WITHOUT_REVIEW: '✅ موافق عليه', PENDING_REVIEW: '⏳ Meta عم تراجعه', DECLINED: '❌ مرفوض', NONE: '—' },
+  status: { CONNECTED: '✅ متصل', PENDING: '⏳ بيستنى', DISCONNECTED: '❌ مفصول', FLAGGED: '⚠️ عليه تحذير', RESTRICTED: '⚠️ مقيّد', BANNED: '⛔ محظور' },
+};
+function waNumberHTML(d, err) {
+  const row = (k, label) => html`<li><span class="muted">${label}</span> <b>${(WA_LABELS[k] && WA_LABELS[k][d[k]]) || d[k] || '—'}</b></li>`;
+  return html`${err ? html`<p class="alert bad small">${err}</p>` : ''}
+    ${d ? html`<ul class="list small" style="margin:0">
+      <li><span class="muted">الرقم</span> <b dir="ltr">${d.number || '—'}</b></li>
+      <li><span class="muted">الاسم</span> <b>${d.name || '—'}</b></li>
+      ${row('nameStatus', 'موافقة الاسم')}${row('codeStatus', 'تأكيد الرقم')}${row('platform', 'التسجيل')}${row('status', 'الحالة')}
+    </ul>` : ''}
+    <div class="row" style="margin-top:8px">
+      <button class="btn sm ghost" type="button" data-wa-check>🔄 افحص</button>
+      ${!d || d.codeStatus !== 'VERIFIED' ? html`<button class="btn sm" type="button" data-wa-code="SMS">✉️ ابعت كود برسالة</button><button class="btn sm soft" type="button" data-wa-code="VOICE">📞 كود بمكالمة</button>` : ''}
+    </div>
+    ${!d || d.codeStatus !== 'VERIFIED' ? html`<form class="row" data-wa-verify style="margin-top:8px"><input name="code" inputmode="numeric" maxlength="6" placeholder="الكود (6 أرقام)" dir="ltr" style="max-width:180px"><button class="btn sm" type="submit">✅ أكّد الكود</button></form>` : ''}
+    ${!d || d.platform !== 'CLOUD_API' ? html`<form class="row" data-wa-register style="margin-top:8px"><input name="pin" inputmode="numeric" maxlength="6" placeholder="PIN من 6 أرقام بتختاره" dir="ltr" style="max-width:220px"><button class="btn sm" type="submit">📲 سجّل الرقم</button></form>
+      <p class="hint">الـ PIN رقم سري من 6 أرقام بتختاره إنت (تحقق بخطوتين). احفظه، ممكن نحتاجه بعدين.</p>` : ''}`;
+}
+function bindWaNumber() {
+  const box = $('#waNumberBox');
+  if (!box) return;
+  const run = async (method, body, btn) => {
+    if (btn) btn.disabled = true;
+    let d = null;
+    let err = '';
+    try { d = await api('/api/admin/wa/number', method === 'GET' ? {} : { method: 'POST', body }); if (body) toast('تمام ✅', 'ok'); } catch (e) { err = e.message; }
+    render(box, waNumberHTML(d, err));
+    bind();
+  };
+  const bind = () => {
+    box.querySelectorAll('[data-wa-check]').forEach((b) => { b.onclick = () => run('GET', null, b); });
+    box.querySelectorAll('[data-wa-code]').forEach((b) => { b.onclick = () => run('POST', { action: 'code', method: b.dataset.waCode }, b); });
+    const v = box.querySelector('[data-wa-verify]');
+    if (v) v.onsubmit = (e) => { e.preventDefault(); run('POST', { action: 'verify', code: v.code.value }, v.querySelector('button')); };
+    const r = box.querySelector('[data-wa-register]');
+    if (r) r.onsubmit = (e) => { e.preventDefault(); run('POST', { action: 'register', pin: r.pin.value }, r.querySelector('button')); };
+  };
+  bind();
 }
 
 async function openProspectChat(card) {
@@ -2133,6 +2183,7 @@ async function openProspectChat(card) {
 
 function bindSales(st) {
   const redraw = (next) => { const g = $('[data-group="sales"]'); if (g) { render(g, salesPanel(next)); bindSales(next); } };
+  bindWaNumber();
   const search = $('#salesSearch');
   search.onsubmit = async (e) => {
     e.preventDefault();

@@ -3105,6 +3105,43 @@ async function adminProspectReply(c, id) {
   return adminProspect(c, id);
 }
 
+// 📞 رقم الإيجنت: حالته عند Meta، وتأكيده بكود وتسجيله (بدل زر «تسجيل» بصفحة Meta إذا علّق)
+async function adminWaNumber(c) {
+  await requireAdmin(c);
+  const wcfg = wa.waConfig(c.env);
+  if (!wcfg) fail(400, 'حط WHATSAPP_TOKEN و WHATSAPP_PHONE_ID بإعدادات Cloudflare أول');
+  const b = c.body;
+  try {
+    if (c.req.method === 'POST') {
+      await rateLimit(c, `wanum:${c.user.id}`, 20, 60 * MIN, 'محاولات كتير، استنى شوي');
+      if (b.action === 'code') await wa.requestCode(wcfg, b.method);
+      else if (b.action === 'verify') {
+        const code = String(b.code || '').replace(/\D/g, '');
+        if (!/^\d{6}$/.test(code)) fail(400, 'الكود 6 أرقام');
+        await wa.verifyCode(wcfg, code);
+      } else if (b.action === 'register') {
+        const pin = String(b.pin || '').replace(/\D/g, '');
+        if (!/^\d{6}$/.test(pin)) fail(400, 'الـ PIN لازم يكون 6 أرقام');
+        await wa.registerNumber(wcfg, pin);
+      } else fail(400, 'إجراء مش معروف');
+    }
+    const st = await wa.numberStatus(wcfg);
+    return json({
+      ok: true,
+      number: st.display_phone_number || null,
+      name: st.verified_name || null,
+      nameStatus: st.name_status || null,
+      codeStatus: st.code_verification_status || null,
+      status: st.status || null,
+      platform: st.platform_type || null,
+      quality: st.quality_rating || null,
+    });
+  } catch (e) {
+    if (e instanceof HttpError) throw e;
+    fail(502, `Meta: ${clean(e.message, 300)}${e.code ? ` (${e.code})` : ''}`);
+  }
+}
+
 async function adminSalesSettings(c) {
   await requireAdmin(c);
   const auto = !!c.body.auto;
@@ -3253,6 +3290,8 @@ const API = [
   ['GET', /^\/api\/admin\/sales$/, adminSales, 'staff'],
   ['POST', /^\/api\/admin\/sales\/search$/, adminSalesSearch, 'staff'],
   ['PUT', /^\/api\/admin\/sales\/settings$/, adminSalesSettings, 'staff'],
+  ['GET', /^\/api\/admin\/wa\/number$/, adminWaNumber, 'staff'],
+  ['POST', /^\/api\/admin\/wa\/number$/, adminWaNumber, 'staff'],
   ['POST', /^\/api\/admin\/prospects$/, adminAddProspect, 'staff'],
   ['GET', /^\/api\/admin\/prospects\/(\d+)$/, adminProspect, 'staff'],
   ['PUT', /^\/api\/admin\/prospects\/(\d+)$/, adminProspectUpdate, 'staff'],

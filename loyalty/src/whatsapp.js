@@ -32,21 +32,34 @@ export function waNumber(raw, country = 'JO') {
   return /^\d{10,15}$/.test(d) ? d : null;
 }
 
-async function graph(cfg, body) {
-  const res = await cfg.fetch(`https://graph.facebook.com/${cfg.version}/${cfg.phoneId}/messages`, {
-    method: 'POST',
-    headers: { authorization: `Bearer ${cfg.token}`, 'content-type': 'application/json' },
-    body: JSON.stringify({ messaging_product: 'whatsapp', ...body }),
+// طلب لـ Graph API. الخطأ بيحمل رسالة Meta (التفاصيل أوضح إشي) ورقمها
+async function call(cfg, path, { method = 'POST', body } = {}) {
+  const res = await cfg.fetch(`https://graph.facebook.com/${cfg.version}/${path}`, {
+    method,
+    headers: { authorization: `Bearer ${cfg.token}`, ...(body ? { 'content-type': 'application/json' } : {}) },
+    ...(body ? { body: JSON.stringify(body) } : {}),
   });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    const e = new Error((data.error && (data.error.error_user_msg || data.error.message)) || `WhatsApp ${res.status}`);
-    e.code = data.error && data.error.code;
+  if (!res.ok || data.error) {
+    const er = data.error || {};
+    const e = new Error((er.error_data && er.error_data.details) || er.error_user_msg || er.message || `WhatsApp ${res.status}`);
+    e.code = er.code;
     e.status = res.status;
     throw e;
   }
+  return data;
+}
+
+async function graph(cfg, body) {
+  const data = await call(cfg, `${cfg.phoneId}/messages`, { body: { messaging_product: 'whatsapp', ...body } });
   return data.messages && data.messages[0] ? data.messages[0].id : null;
 }
+
+// ─── تسجيل رقم الإيجنت من صفحة المنصة (لما صفحة Meta بتعلق) ───
+export const numberStatus = (cfg) => call(cfg, `${cfg.phoneId}?fields=display_phone_number,verified_name,code_verification_status,name_status,status,quality_rating,platform_type`, { method: 'GET' });
+export const requestCode = (cfg, method) => call(cfg, `${cfg.phoneId}/request_code`, { body: { code_method: method === 'VOICE' ? 'VOICE' : 'SMS', language: 'ar' } });
+export const verifyCode = (cfg, code) => call(cfg, `${cfg.phoneId}/verify_code`, { body: { code } });
+export const registerNumber = (cfg, pin) => call(cfg, `${cfg.phoneId}/register`, { body: { messaging_product: 'whatsapp', pin } });
 
 // أول رسالة: القالب، والمتغير {{1}} = اسم المحل
 export const sendTemplate = (cfg, to, shopName) => graph(cfg, {
