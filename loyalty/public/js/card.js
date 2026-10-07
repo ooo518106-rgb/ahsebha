@@ -160,7 +160,7 @@ function remember(slug) {
 
 // ─── العروض على البطاقة: المستوى، نقاط دبل، عيد الميلاد، التقييم، ادعُ صاحبك ───
 let lastSig = null;
-let rate = null; // { stars } لما يختار نجوم أقل من 4 ويكتب ملاحظة، أو { done, googleUrl }
+let rate = null; // { stars, note } لما يختار النجوم (وبيكبس «إرسال»)، أو { done, googleUrl }
 let gift = null; // آخر هدية عملها: { url, text }
 const fmtDay = (ms) => fmtDate(ms, { weekday: 'long', day: 'numeric', month: 'long' });
 const first = (name) => String(name).trim().split(/\s+/)[0];
@@ -187,7 +187,7 @@ function perksPanels(shop, member, refUrl, canRate, coupons) {
         ${rate.googleUrl ? html`<p class="muted">${t('googleAsk')}</p><a class="btn block" href="${rate.googleUrl}" target="_blank" rel="noopener">${t('googleBtn')}</a>` : html`<p class="muted">${t('feedbackSent', { shop: shop.name })}</p>`}</div>`
       : canRate ? html`<div class="panel small center stack" id="ratePanel"><b>${t('rateAsk')}</b>
         <div class="stars" role="group" aria-label="${t('rateAsk')}">${[1, 2, 3, 4, 5].map((n) => html`<button type="button" data-star="${n}" class="${rate && rate.stars >= n ? 'on' : ''}" aria-label="${n}/5">★</button>`)}</div>
-        ${rate && rate.stars ? html`<textarea id="rateNote" rows="2" maxlength="500" placeholder="${t('rateNote')}"></textarea>
+        ${rate && rate.stars ? html`<textarea id="rateNote" rows="2" maxlength="500" placeholder="${t(rate.stars >= 4 ? 'rateNoteGood' : 'rateNote')}">${rate.note || ''}</textarea>
           <button class="btn block" type="button" id="rateSend">${t('send')}</button>` : ''}</div>` : ''}
     ${shop.bdayOn && !member.birthday ? html`<form class="panel small stack" id="bdayForm"><b>${t('bdayAsk')}</b>
         <span class="muted">${shop.bdayGift > 0 ? t('bdayGift', { gift: shop.bdayGift >= shop.cost ? shop.rewardName : `${shop.bdayGift} ${unit}` }) : t('bdayGreet')}</span>
@@ -275,7 +275,7 @@ root.addEventListener('click', (e) => {
   if (t) runTest(t);
 });
 
-// التقييم: 4 أو 5 نجوم بينبعت فوراً (ومنطلب تقييم على Google)، وأقل بنسأل شو اللي ما عجبه
+// التقييم: بيختار النجوم (وبيقدر يغيّرها) وبيكتب ملاحظة إذا بده، وبيكبس «إرسال». 4 أو 5 نجوم منطلب منه تقييم على Google
 async function sendRating(stars, comment = '') {
   try {
     const r = await api(`/api/cards/${token}/review`, { method: 'POST', body: { stars, comment } });
@@ -290,12 +290,13 @@ async function sendRating(stars, comment = '') {
 root.addEventListener('click', async (e) => {
   const star = e.target.closest('[data-star]');
   if (star) {
-    const n = Number(star.dataset.star);
-    if (n >= 4) sendRating(n);
-    else { rate = { stars: n }; draw(); $('#rateNote')?.focus(); }
+    rate = { stars: Number(star.dataset.star), note: $('#rateNote')?.value || '' };
+    draw();
+    if (rate.stars < 4) $('#rateNote')?.focus();
     return;
   }
-  if (e.target.closest('#rateSend')) { sendRating(rate.stars, $('#rateNote').value); return; }
+  const rs = e.target.closest('#rateSend');
+  if (rs) { rs.disabled = true; sendRating(rate.stars, $('#rateNote').value); return; }
   if (e.target.closest('#giftBtn')) { makeGift(); return; }
   if (e.target.closest('#giftShare')) {
     if (navigator.share) { navigator.share({ text: gift.text }).catch(() => {}); } else { window.open(`https://wa.me/?text=${encodeURIComponent(gift.text)}`, '_blank', 'noopener'); }
