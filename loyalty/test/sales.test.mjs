@@ -336,7 +336,11 @@ test('واتساب: الرسالة اللي بتفشل بعد ما Meta قبلت
   assert.match(two.error, /payment/);
   assert.equal(st.settings.auto, false);
   assert.equal(st.sentToday, 0);
-  assert.equal((await p.admin.get('/api/admin/wa/number')).data.lastHook.failed, 1);
+  const num = (await p.admin.get('/api/admin/wa/number')).data;
+  assert.equal(num.lastHook.failed, 1);
+  assert.equal(num.lastFailure.code, 131042);
+  assert.equal(num.lastFailure.name, 'محل 2');
+  assert.match(num.lastFailure.message, /payment issue \(131042\)/);
   // رسالة مش إلنا: ولا إشي
   assert.equal((await hook(meta, statusHook('wamid.unknown', 131042, 'x'))).status, 200);
 

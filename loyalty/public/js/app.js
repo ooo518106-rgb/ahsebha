@@ -2024,7 +2024,7 @@ function prospectCard(p, st) {
       <div class="small muted">${[p.ownerName, p.kind, p.area].filter(Boolean).join(' · ')}${p.phone ? html` · <span class="num" dir="ltr">${p.phone}</span>` : ''} · ${ago(p.lastInAt || p.lastOutAt || p.createdAt)}</div>
       ${p.why ? html`<div class="small" style="margin-top:4px">${p.why}</div>` : ''}
       ${p.note ? html`<div class="small" style="margin-top:4px">📝 ${p.note}</div>` : ''}
-      ${p.error ? html`<div class="small" style="margin-top:4px;color:var(--bad)">⚠️ ${p.error}</div>` : ''}
+      ${p.error ? html`<div class="small" style="margin-top:4px;color:var(--bad)">⚠️ ${waHint(p.error) ? html`${waHint(p.error)} <span class="muted" dir="ltr">${p.error}</span>` : p.error}</div>` : ''}
     </div></div>
     <div class="acts">
       ${p.sentAt || p.lastInAt ? html`<button class="btn sm" type="button" data-chat>💬 المحادثة</button>` : ''}
@@ -2117,6 +2117,22 @@ const TEMPLATE_LABELS = {
   APPROVED: '✅ موافق عليه وجاهز', PENDING: '⏳ Meta عم تراجعه', REJECTED: '❌ مرفوض', PAUSED: '⏸ موقوف مؤقتاً (ناس بلّغوا عنه)', DISABLED: '⛔ موقوف',
   IN_APPEAL: '⏳ بالاستئناف', LIMIT_EXCEEDED: '⚠️ وصلت حد القوالب', PENDING_DELETION: '🗑 عم ينحذف',
 };
+// أسباب فشل رسائل واتساب (رقم الخطأ من Meta) بكلام بسيط، وشو الحل
+const WA_ERRORS = {
+  131026: 'الرقم مش عليه واتساب، أو الواتساب عنده قديم ومحتاج تحديث',
+  131049: 'Meta ما وصّلتها عشان الشخص ما يوصله رسائل تسويق كتير (بتصير كتير مع رقم جديد، وبتخف مع الوقت). جرّب محل تاني',
+  131050: 'صاحب الرقم موقّف رسائل التسويق من الشركات',
+  131037: 'لازم Meta توافق على اسم العرض (Nuqatak) قبل ما الرقم يبعت أول رسالة لحدا',
+  131042: 'مشكلة بطريقة الدفع بحساب الواتساب عند Meta',
+  130497: 'Meta ما بتسمح لحسابك يبعت رسائل تسويق لأرقام هالبلد',
+  131048: 'Meta حسبت رسائل كتير سبام، خفّف الإرسال باليوم',
+  131056: 'رسائل كتير لنفس الرقم بوقت قصير، استنى شوي',
+  132001: 'القالب مش موجود أو لسا مش موافق عليه',
+  132015: 'القالب موقوف مؤقتاً لأنه ناس بلّغوا عنه',
+  131047: 'مرّ أكتر من 24 ساعة على آخر رسالة منه، وواتساب ما بيسمح ترد إلا لما يراسلك هو',
+  131031: 'Meta قافلة الحساب',
+};
+const waHint = (text) => { const m = /\((\d{6})\)\s*$/.exec(String(text || '')); return m && WA_ERRORS[m[1]] ? WA_ERRORS[m[1]] : ''; };
 const SENDING_LABELS = { AVAILABLE: '✅ بيقدر يبعت', LIMITED: '⚠️ محدود', BLOCKED: '⛔ ممنوع يبعت' };
 function templateRow(d) {
   const t = d.template;
@@ -2135,7 +2151,9 @@ function waNumberHTML(d, err) {
       ${d.wabaId ? html`<li><span class="muted">حساب الواتساب</span> <b class="num" dir="ltr">${d.wabaId}</b></li>` : ''}
       ${templateRow(d)}
       ${d.sending ? html`<li><span class="muted">الإرسال</span> <b>${SENDING_LABELS[d.sending.can] || d.sending.can}</b>${d.sending.errors.map((e) => html`<div class="small" dir="auto" style="color:var(--bad)">${e}</div>`)}</li>` : ''}
-      <li><span class="muted">آخر إشعار من Meta</span> <b>${!d.lastHook ? 'لسا ما وصل ولا إشي' : html`${ago(d.lastHook.at)} · ${d.lastHook.signed ? '✅ موقّع' : '❌ التوقيع غلط (تأكد من WHATSAPP_APP_SECRET)'}${d.lastHook.fields && d.lastHook.fields.length ? ` · ${d.lastHook.fields.join('، ')}` : ''}${d.lastHook.ours ? ` · ${d.lastHook.ours} رسالة لرقم الإيجنت` : ''}${d.lastHook.other ? ` · ${d.lastHook.other} رسالة لرقم تاني` : ''}${d.lastHook.failed ? ` · ⚠️ ${d.lastHook.failed} رسالة فشلت (السبب على المحل)` : ''}`}</b></li>
+      <li><span class="muted">آخر إشعار من Meta</span> <b>${!d.lastHook ? 'لسا ما وصل ولا إشي' : html`${ago(d.lastHook.at)} · ${d.lastHook.signed ? '✅ موقّع' : '❌ التوقيع غلط (تأكد من WHATSAPP_APP_SECRET)'}${d.lastHook.fields && d.lastHook.fields.length ? ` · ${d.lastHook.fields.join('، ')}` : ''}${d.lastHook.ours ? ` · ${d.lastHook.ours} رسالة لرقم الإيجنت` : ''}${d.lastHook.other ? ` · ${d.lastHook.other} رسالة لرقم تاني` : ''}${d.lastHook.failed ? ` · ⚠️ ${d.lastHook.failed} رسالة فشلت` : ''}`}</b></li>
+      ${d.lastFailure ? html`<li><span class="muted">آخر رسالة فشلت</span> <b>${d.lastFailure.name} · ${ago(d.lastFailure.at)}</b>
+        <div class="small" style="color:var(--bad)">${waHint(d.lastFailure.message) || ''} <span dir="ltr">${d.lastFailure.message}</span></div></li>` : ''}
     </ul>` : ''}
     <div class="row" style="margin-top:8px">
       <button class="btn sm ghost" type="button" data-wa-check>🔄 افحص</button>

@@ -2805,7 +2805,7 @@ async function sendIntro(c, wcfg, p, now = Date.now()) {
     await c.db.run('UPDATE prospects SET last_out_at = ? WHERE id = ?', now, p.id);
     return true;
   } catch (e) {
-    const msg = clean(e.message, 200);
+    const msg = clean(`${e.message}${e.code ? ` (${e.code})` : ''}`, 200);
     if (!e.status) {
       // ما وصلنا لـ Meta (الشبكة): بيرجع للدور ومنجرّب بالدورة الجاية، بدون ما نوقف الإرسال
       await c.db.run("UPDATE prospects SET status = 'new', sent_at = NULL, error = ? WHERE id = ?", msg, p.id);
@@ -2882,6 +2882,8 @@ async function waFailed(c, f) {
   const p = sent && await c.db.get('SELECT * FROM prospects WHERE id = ?', sent.prospect_id);
   if (!p) return;
   const msg = clean(`${f.message}${f.code ? ` (${f.code})` : ''}`, 200);
+  // للتشخيص بمربع رقم الإيجنت: آخر رسالة فشلت ولمين
+  await setSetting(c.db, 'wa_last_failure', JSON.stringify({ at: Date.now(), code: f.code, message: msg, name: p.name }));
   if (p.status !== 'sent' || p.last_in_at) {
     await c.db.run('UPDATE prospects SET error = ? WHERE id = ?', msg, p.id);
     return;
@@ -3202,8 +3204,8 @@ async function adminWaNumber(c) {
       } else fail(400, 'إجراء مش معروف');
     }
     const st = await wa.numberStatus(wcfg);
-    let lastHook = null;
-    try { lastHook = JSON.parse((await getSetting(c.db, 'wa_last_hook')) || 'null'); } catch { lastHook = null; }
+    const lastHook = await jsonSetting(c.db, 'wa_last_hook');
+    const lastFailure = await jsonSetting(c.db, 'wa_last_failure');
     let subscribed = null;
     let template = null;
     if (wcfg.wabaId) {
@@ -3230,6 +3232,7 @@ async function adminWaNumber(c) {
     } catch { sending = null; }
     return json({
       lastHook,
+      lastFailure,
       subscribed,
       template,
       templateName: wcfg.template,
