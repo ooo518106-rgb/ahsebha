@@ -458,16 +458,17 @@ test('رقم الإيجنت عند Meta: الحالة، الكود، التأك�
   assert.equal((await off.admin.get('/api/admin/wa/number')).status, 400);
   assert.equal((await p.client().get('/api/admin/wa/number')).status, 401);
   assert.equal((await p.admin.get('/api/admin/wa/number')).status, 200);
-  assert.match(f.graph.at(-1).url, /\/v26\.0\/1234567890\?fields=.*code_verification_status/);
+  assert.ok(f.graph.some((g) => /\/v26\.0\/1234567890\?fields=.*code_verification_status/.test(g.url)));
+  const lastPost = () => f.graph.filter((g) => !g.url.includes('?')).at(-1); // بعد كل إجراء بنفحص الحالة (GET)
   await p.admin.post('/api/admin/wa/number', { action: 'code', method: 'VOICE' });
-  assert.match(f.graph.at(-2).url, /1234567890\/request_code$/);
-  assert.deepEqual(f.graph.at(-2).body, { code_method: 'VOICE', language: 'ar' });
+  assert.match(lastPost().url, /1234567890\/request_code$/);
+  assert.deepEqual(lastPost().body, { code_method: 'VOICE', language: 'ar' });
   assert.equal((await p.admin.post('/api/admin/wa/number', { action: 'verify', code: '12' })).status, 400);
   await p.admin.post('/api/admin/wa/number', { action: 'verify', code: '123 456' });
-  assert.deepEqual(f.graph.at(-2).body, { code: '123456' });
+  assert.deepEqual(lastPost().body, { code: '123456' });
   await p.admin.post('/api/admin/wa/number', { action: 'register', pin: '246810' });
-  assert.match(f.graph.at(-2).url, /1234567890\/register$/);
-  assert.deepEqual(f.graph.at(-2).body, { messaging_product: 'whatsapp', pin: '246810' });
+  assert.match(lastPost().url, /1234567890\/register$/);
+  assert.deepEqual(lastPost().body, { messaging_product: 'whatsapp', pin: '246810' });
   // الاشتراك باستلام الردود (بيحتاج WHATSAPP_WABA_ID)
   const w = await platform({ ANTHROPIC_API_KEY: 'sk-test', fetch: f.fetch, ...WA_ENV, WHATSAPP_WABA_ID: '5550001' });
   await w.admin.post('/api/admin/wa/number', { action: 'subscribe' });
@@ -476,6 +477,36 @@ test('رقم الإيجنت عند Meta: الحالة، الكود، التأك�
   const bad = await p.admin.post('/api/admin/wa/number', { action: 'register', pin: '000000' });
   assert.equal(bad.status, 502);
   assert.match(bad.data.error, /PIN Mismatch.*133005/);
+});
+
+test('رقم الإيجنت: حالة قالب أول رسالة على حساب الواتساب الصح، وإذا في إشي مانع الإرسال', async () => {
+  let tpl = [{ name: 'nuqatak_intro', status: 'PENDING', language: 'ar', category: 'MARKETING', rejected_reason: 'NONE', id: '1' }];
+  const urls = [];
+  const fetch = async (url) => {
+    const u = String(url);
+    urls.push(u);
+    const ok = (d) => new Response(JSON.stringify(d), { status: 200, headers: { 'content-type': 'application/json' } });
+    if (u.includes('/message_templates')) return ok({ data: tpl });
+    if (u.includes('fields=health_status')) {
+      return ok({ health_status: { can_send_message: 'BLOCKED', entities: [{ entity_type: 'WABA', id: '5550001', can_send_message: 'BLOCKED', errors: [{ error_code: 141010, error_description: 'No valid payment method.', possible_solution: 'Add a payment method.' }] }] } });
+    }
+    if (u.includes('/subscribed_apps')) return ok({ data: [{ whatsapp_business_api_data: { id: '1' } }] });
+    return ok({ display_phone_number: '+962 77 052 8804', code_verification_status: 'VERIFIED', platform_type: 'CLOUD_API', status: 'CONNECTED' });
+  };
+  const p = await platform({ GEMINI_API_KEY: 'g', fetch, ...WA_ENV, WHATSAPP_WABA_ID: '5550001' });
+  let d = (await p.admin.get('/api/admin/wa/number')).data;
+  assert.deepEqual(d.template, { status: 'PENDING', language: 'ar', category: 'MARKETING', reason: null });
+  assert.equal(d.wabaId, '5550001');
+  assert.ok(urls.some((u) => /\/v26\.0\/5550001\/message_templates\?name=nuqatak_intro/.test(u)));
+  assert.equal(d.sending.can, 'BLOCKED');
+  assert.match(d.sending.errors[0], /payment method/);
+  // القالب انعمل على حساب تاني
+  tpl = [{ name: 'nuqatak_intro_old', status: 'APPROVED', language: 'ar' }];
+  d = (await p.admin.get('/api/admin/wa/number')).data;
+  assert.deepEqual(d.template, { status: 'MISSING' });
+  // بدون WHATSAPP_WABA_ID: ما في فحص للقالب
+  const q = await platform({ GEMINI_API_KEY: 'g', fetch, ...WA_ENV });
+  assert.equal((await q.admin.get('/api/admin/wa/number')).data.template, null);
 });
 
 test('صفحة حذف البيانات لـ Meta بتفتح على أي عنوان بدون تحويل', async () => {

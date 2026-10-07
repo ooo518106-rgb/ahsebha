@@ -2113,6 +2113,17 @@ const WA_LABELS = {
   nameStatus: { APPROVED: '✅ موافق عليه', AVAILABLE_WITHOUT_REVIEW: '✅ موافق عليه', PENDING_REVIEW: '⏳ Meta عم تراجعه', DECLINED: '❌ مرفوض', NONE: '—', NON_EXISTS: '⏳ لسا ما انراجع (الإرسال شغّال)' },
   status: { CONNECTED: '✅ متصل', PENDING: '⏳ بيستنى', DISCONNECTED: '❌ مفصول', FLAGGED: '⚠️ عليه تحذير', RESTRICTED: '⚠️ مقيّد', BANNED: '⛔ محظور' },
 };
+const TEMPLATE_LABELS = {
+  APPROVED: '✅ موافق عليه وجاهز', PENDING: '⏳ Meta عم تراجعه', REJECTED: '❌ مرفوض', PAUSED: '⏸ موقوف مؤقتاً (ناس بلّغوا عنه)', DISABLED: '⛔ موقوف',
+  IN_APPEAL: '⏳ بالاستئناف', LIMIT_EXCEEDED: '⚠️ وصلت حد القوالب', PENDING_DELETION: '🗑 عم ينحذف',
+};
+const SENDING_LABELS = { AVAILABLE: '✅ بيقدر يبعت', LIMITED: '⚠️ محدود', BLOCKED: '⛔ ممنوع يبعت' };
+function templateRow(d) {
+  const t = d.template;
+  if (!t) return '';
+  const label = t.status === 'MISSING' ? html`⚠️ مش موجود على حساب الواتساب <span class="num" dir="ltr">${d.wabaId}</span>. اعمله على هالحساب بالزبط` : TEMPLATE_LABELS[t.status] || t.status;
+  return html`<li><span class="muted">قالب أول رسالة (<span dir="ltr">${d.templateName}</span>)</span> <b>${label}${t.reason ? ` · ${t.reason}` : ''}${t.language && t.language !== 'ar' ? ` · اللغة ${t.language} (لازم العربية ar)` : ''}${t.category && t.category !== 'MARKETING' ? ` · الفئة ${t.category}` : ''}</b></li>`;
+}
 function waNumberHTML(d, err) {
   const row = (k, label) => html`<li><span class="muted">${label}</span> <b>${(WA_LABELS[k] && WA_LABELS[k][d[k]]) || d[k] || '—'}</b></li>`;
   return html`${err ? html`<p class="alert bad small">${err}</p>` : ''}
@@ -2121,6 +2132,9 @@ function waNumberHTML(d, err) {
       <li><span class="muted">الاسم</span> <b>${d.name || '—'}</b></li>
       ${row('nameStatus', 'موافقة الاسم')}${row('codeStatus', 'تأكيد الرقم')}${row('platform', 'التسجيل')}${row('status', 'الحالة')}
       ${d.subscribed == null ? '' : html`<li><span class="muted">استلام الردود (Webhooks)</span> <b>${d.subscribed ? '✅ مشترك' : '❌ مش مشترك'}</b></li>`}
+      ${d.wabaId ? html`<li><span class="muted">حساب الواتساب</span> <b class="num" dir="ltr">${d.wabaId}</b></li>` : ''}
+      ${templateRow(d)}
+      ${d.sending ? html`<li><span class="muted">الإرسال</span> <b>${SENDING_LABELS[d.sending.can] || d.sending.can}</b>${d.sending.errors.map((e) => html`<div class="small" dir="auto" style="color:var(--bad)">${e}</div>`)}</li>` : ''}
       <li><span class="muted">آخر إشعار من Meta</span> <b>${!d.lastHook ? 'لسا ما وصل ولا إشي' : html`${ago(d.lastHook.at)} · ${d.lastHook.signed ? '✅ موقّع' : '❌ التوقيع غلط (تأكد من WHATSAPP_APP_SECRET)'}${d.lastHook.fields && d.lastHook.fields.length ? ` · ${d.lastHook.fields.join('، ')}` : ''}${d.lastHook.ours ? ` · ${d.lastHook.ours} رسالة لرقم الإيجنت` : ''}${d.lastHook.other ? ` · ${d.lastHook.other} رسالة لرقم تاني` : ''}${d.lastHook.failed ? ` · ⚠️ ${d.lastHook.failed} رسالة فشلت (السبب على المحل)` : ''}`}</b></li>
     </ul>` : ''}
     <div class="row" style="margin-top:8px">

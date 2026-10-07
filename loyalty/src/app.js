@@ -3205,12 +3205,33 @@ async function adminWaNumber(c) {
     let lastHook = null;
     try { lastHook = JSON.parse((await getSetting(c.db, 'wa_last_hook')) || 'null'); } catch { lastHook = null; }
     let subscribed = null;
+    let template = null;
     if (wcfg.wabaId) {
       try { subscribed = ((await wa.subscribedApps(wcfg)).data || []).length > 0; } catch { subscribed = null; }
+      try {
+        const list = ((await wa.templates(wcfg)).data || []).filter((t) => t.name === wcfg.template);
+        const t = list.find((x) => x.language === wcfg.lang) || list[0];
+        template = t
+          ? { status: t.status, language: t.language, category: t.category, reason: t.rejected_reason && t.rejected_reason !== 'NONE' ? clean(t.rejected_reason, 80) : null }
+          : { status: 'MISSING' };
+      } catch { template = null; }
     }
+    // هل في إشي مانع الإرسال (الدفع، الحساب، الرقم)
+    let sending = null;
+    try {
+      const h = (await wa.health(wcfg)).health_status;
+      if (h && h.can_send_message) {
+        const errors = (h.entities || []).flatMap((en) => (en.errors || []).map((er) => clean([er.error_description, er.possible_solution].filter(Boolean).join(' — '), 300))).filter(Boolean).slice(0, 3);
+        sending = { can: String(h.can_send_message), errors };
+      }
+    } catch { sending = null; }
     return json({
       lastHook,
       subscribed,
+      template,
+      templateName: wcfg.template,
+      wabaId: wcfg.wabaId,
+      sending,
       ok: true,
       number: st.display_phone_number || null,
       name: st.verified_name || null,

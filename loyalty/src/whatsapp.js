@@ -64,6 +64,10 @@ export const registerNumber = (cfg, pin) => call(cfg, `${cfg.phoneId}/register`,
 // اشتراك التطبيق بحساب الواتساب (زر «الاشتراك في Webhooks» بصفحة Meta): بدونه ردود المحلات ما بتوصل
 export const subscribedApps = (cfg) => call(cfg, `${cfg.wabaId}/subscribed_apps`, { method: 'GET' });
 export const subscribeApp = (cfg) => call(cfg, `${cfg.wabaId}/subscribed_apps`, {});
+// قالب أول رسالة على حساب الواتساب: حالته عند Meta (APPROVED، PENDING، REJECTED…)؛ إذا القائمة فاضية، القالب مش على هالحساب
+export const templates = (cfg) => call(cfg, `${cfg.wabaId}/message_templates?name=${encodeURIComponent(cfg.template)}&fields=name,status,language,category,rejected_reason`, { method: 'GET' });
+// بيقدر يبعت؟ (Meta بتقول إذا في إشي مانع: الدفع، الحساب، الرقم) { can_send_message, entities: [{ errors }] }
+export const health = (cfg) => call(cfg, `${cfg.phoneId}?fields=health_status`, { method: 'GET' });
 
 // أول رسالة: القالب، والمتغير {{1}} = اسم المحل
 export const sendTemplate = (cfg, to, shopName) => graph(cfg, {
