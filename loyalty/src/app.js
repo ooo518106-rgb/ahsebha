@@ -3463,6 +3463,8 @@ export async function handle(req, ctx) {
     if (p === '/cards' || p === '/cards/') return await page(c, '/cards.html');
     if (p === '/' || p === '/index.html') return await page(c, '/index.html');
     if (p === '/privacy' || p === '/privacy/') return await page(c, '/privacy.html');
+    // نفس صفحة الخصوصية لـ Meta (تعليمات حذف البيانات): ما بتتحوّل للدومين، لأنه زاحف Meta ما بيعدّي حماية البوتات عليه
+    if (p === '/data-deletion' || p === '/data-deletion/') return await page(c, '/privacy.html');
     if (/^\/partner\/[a-z2-9]{20}\/?$/.test(p)) return await page(c, '/partner.html');
     if (p === '/app' || p === '/app/') return await page(c, '/app.html');
     if (/^\/j\/[a-z0-9-]{3,40}\/?$/.test(p)) return await page(c, '/join.html');

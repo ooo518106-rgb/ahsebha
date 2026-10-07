@@ -386,3 +386,12 @@ test('رقم الإيجنت عند Meta: الحالة، الكود، التأك�
   assert.equal(bad.status, 502);
   assert.match(bad.data.error, /PIN Mismatch.*133005/);
 });
+
+test('صفحة حذف البيانات لـ Meta بتفتح على أي عنوان بدون تحويل', async () => {
+  const p = await platform({});
+  const c = p.client();
+  assert.equal((await c.get('/privacy')).status, 301, 'الخصوصية بتتحوّل للدومين');
+  const r = await c.get('/data-deletion');
+  assert.equal(r.status, 200);
+  assert.match(r.data, /privacy\.html/);
+});
