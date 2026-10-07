@@ -8,9 +8,12 @@ import * as webpush from './webpush.js';
 import * as perks from './perks.js';
 import { DEMO_EMAIL, DEMO_VERSION, seedDemo } from './demo.js';
 import { APP_VERSION, CHANGELOG } from './changelog.js';
-import { aiConfig, aiCost, askClaude, cleanHistory, customerPrompt, shopPrompt } from './ai.js';
+import { aiConfig, aiCost, chat, cleanHistory } from './ai.js';
+import * as sales from './sales.js';
+import * as wa from './whatsapp.js';
 import { defaultLogoPng } from './png.js';
 import { earnFor, progress, rewardCost, rewardRule, stampsLine, unitLabel } from '../public/js/rules.js';
+import { FEATURES } from '../public/js/plans.js';
 import { b64ToBytes, bytesToB64, clean, fail, HttpError, isUniqueError, json, normPhone, randomDigits, randomToken } from './util.js';
 
 const COLOR_RE = /^#[0-9a-f]{6}$/i;
@@ -88,7 +91,6 @@ function perksView(shop) {
     creditOn: !!shop.credit_on,
     creditBonus: shop.credit_bonus,
     expiryMonths: shop.expiry_months,
-    aiOn: !!shop.ai_on,
   };
 }
 
@@ -619,6 +621,7 @@ export async function runScheduled(ctx, now = Date.now()) {
   if (c.budget > 0) out.winback = await winbackJob(c, shopOf, now);
   if (c.budget > 0) out.summaries = await summaryJob(c, now);
   if (c.budget > 0) out.reminders = await reminderJob(c, platformShop, now);
+  out.outreach = await salesOutreachJob(c, now);
   Object.assign(out, await expiryJob(c, shopOf, now));
   out.giftsRefunded = await giftRefundJob(c, now);
   const day = localDayKey('JO', now);
@@ -973,7 +976,7 @@ export const BASIC_LIMITS = { branches: 1, staff: 2, broadcasts: 4 };
 const isPro = (shop) => shop.plan !== 'basic' || !shop.paid || !!shop.demo;
 const PRO_SQL = "(s.plan <> 'basic' OR s.paid = 0 OR s.demo = 1)";
 // بالأساسي إعدادات الميزات المميزة بتضل محفوظة بس ما بتشتغل، وبترجع لحالها لما يرقّي
-const BASIC_OFF = { ai_on: 0, boosts: '[]', tiers_on: 0, ref_bonus: 0, bday_on: 0, winback_days: 0, review_on: 0, expiry_months: 0, credit_on: 0, guard_cooldown: 0, guard_daily: 0, guard_big: Number.MAX_SAFE_INTEGER };
+const BASIC_OFF = { boosts: '[]', tiers_on: 0, ref_bonus: 0, bday_on: 0, winback_days: 0, review_on: 0, expiry_months: 0, credit_on: 0, guard_cooldown: 0, guard_daily: 0, guard_big: Number.MAX_SAFE_INTEGER };
 const planShop = (shop) => (!shop || isPro(shop) ? shop : { ...shop, ...BASIC_OFF });
 const shopRow = async (db, id) => planShop(await db.get('SELECT * FROM shops WHERE id = ?', id));
 const proMsg = (what) => `${what} من ميزات الباقة المميزة 💎. رقّي باقتك من ⚙️ الإعدادات ← الاشتراك`;
@@ -1108,7 +1111,6 @@ async function cardInfo(c, token) {
     coupons,
     canRate: rate,
     menuUrl,
-    assistant: aiAvailable(c, shop),
   });
 }
 
@@ -1234,14 +1236,20 @@ async function site(c) {
     signupOpen: !c.env.SIGNUP_CODE,
     apple: !!(await appleConfig(c, { withKey: false })),
     plans: PLANS,
+    sales: !!aiConfig(c.env),
   });
 }
 
 // طلب اشتراك من صفحة البيع
 const LEAD_KINDS = ['مطعم', 'كوفي شوب', 'مخبز وحلويات', 'صالون', 'محل تجاري', 'غيره'];
 async function createLead(c) {
-  const b = c.body;
-  if (b.website) fail(400, 'طلب غير صالح');
+  if (c.body.website) fail(400, 'طلب غير صالح');
+  await saveLead(c, c.body, 'form');
+  return json({ ok: true }, 201);
+}
+
+// source: form (الفورم بالصفحة) أو ai (مساعد المبيعات بالمحادثة)
+async function saveLead(c, b, source) {
   await rateLimit(c, `lead:${c.ip}`, 5, 60 * MIN);
   const shopName = clean(b.shopName, 60);
   if (shopName.length < 2) fail(400, 'اكتب اسم المحل');
@@ -1249,11 +1257,10 @@ async function createLead(c) {
   const phone = readPhone(b.phone);
   const kind = LEAD_KINDS.includes(b.kind) ? b.kind : '';
   await c.db.run(
-    'INSERT INTO leads (shop_name, name, phone, city, kind, note, reseller_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-    shopName, name, phone, clean(b.city, 40), kind, clean(b.note, 500), (await resellerByCode(c.db, b.partner))?.id ?? null, Date.now(),
+    'INSERT INTO leads (shop_name, name, phone, city, kind, note, reseller_id, source, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    shopName, name, phone, clean(b.city, 40), kind, clean(b.note, 500), (await resellerByCode(c.db, b.partner))?.id ?? null, source, Date.now(),
   );
-  await notifyAdmin(c, { title: '📩 طلب اشتراك جديد', body: `${shopName} · ${name}${kind ? ` · ${kind}` : ''}`, url: `${c.origin}/app#admin` });
-  return json({ ok: true }, 201);
+  await notifyAdmin(c, { title: source === 'ai' ? '🤖 طلب اشتراك من مساعد المبيعات' : '📩 طلب اشتراك جديد', body: `${shopName} · ${name}${kind ? ` · ${kind}` : ''}`, url: `${c.origin}/app#admin` });
 }
 
 // مدير المنصة = أول حساب حقيقي انعمل عليها (صاحب المنصة)
@@ -1277,7 +1284,7 @@ const forShop = (fn) => async (c, shopId, ...rest) => {
 
 async function adminLeads(c) {
   await requireAdmin(c);
-  const leads = await c.db.all(`SELECT l.id, l.shop_name AS shopName, l.name, l.phone, l.city, l.kind, l.note, l.status, l.created_at AS createdAt, r.name AS reseller
+  const leads = await c.db.all(`SELECT l.id, l.shop_name AS shopName, l.name, l.phone, l.city, l.kind, l.note, l.status, l.source, l.created_at AS createdAt, r.name AS reseller
     FROM leads l LEFT JOIN resellers r ON r.id = l.reseller_id ORDER BY l.created_at DESC LIMIT 200`);
   return json({ leads });
 }
@@ -1475,6 +1482,7 @@ async function signup(c) {
   if (await c.db.get('SELECT id FROM users WHERE email = ?', email)) fail(409, 'هالإيميل مسجّل من قبل، سجّل دخول');
   const ownerName = clean(b.name, 60) || shopName;
   const country = CURRENCIES[b.country] ? b.country : 'JO';
+  const offer = await liveOffer(c.db, b.offer); // 🎁 عرض من وكيل المبيعات: تجربة أطول
   const pw = await auth.hashPassword(b.password);
   const now = Date.now();
   const base = slugBase(shopName);
@@ -1482,7 +1490,7 @@ async function signup(c) {
   for (let i = 0; ; i++) {
     try {
       await c.db.batch([
-        ['INSERT INTO shops (slug, name, country, currency, welcome_text, active_until, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)', [slug, shopName, country, CURRENCIES[country], `${shopName} ترحب بكم`, now + TRIAL_DAYS * DAY, now]],
+        ['INSERT INTO shops (slug, name, country, currency, welcome_text, active_until, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)', [slug, shopName, country, CURRENCIES[country], `${shopName} ترحب بكم`, now + (offer ? offer.trial_days : TRIAL_DAYS) * DAY, now]],
         ['INSERT INTO users (shop_id, email, name, role, pw_hash, created_at) VALUES ((SELECT id FROM shops WHERE slug = ?), ?, ?, \'owner\', ?, ?)', [slug, email, ownerName, pw, now]],
       ]);
       break;
@@ -1497,7 +1505,11 @@ async function signup(c) {
   await storeDefaultLogo(c.db, shop);
   const reseller = await resellerByCode(c.db, b.partner);
   if (reseller) await c.db.run('UPDATE shops SET reseller_id = ? WHERE id = ?', reseller.id, shop.id);
-  await notifyAdmin(c, { title: '🎉 محل جديد بلّش تجربة', body: `${shopName} · ${email}`, url: `${c.origin}/app#admin` });
+  if (offer) {
+    await c.db.run('UPDATE offers SET shop_id = ?, used_at = ? WHERE code = ?', shop.id, now, offer.code);
+    if (offer.prospect_id) await c.db.run("UPDATE prospects SET status = 'won', shop_id = ? WHERE id = ?", shop.id, offer.prospect_id);
+  }
+  await notifyAdmin(c, { title: offer ? '🎉 محل جديد سجّل من عرض وكيل المبيعات' : '🎉 محل جديد بلّش تجربة', body: `${shopName} · ${email}${offer ? ` · تجربة ${offer.trial_days} يوم` : ''}`, url: `${c.origin}/app#admin` });
   const user = await c.db.get('SELECT id FROM users WHERE email = ?', email);
   const token = await auth.createSession(c.db, user.id);
   return json({ ok: true }, 201, { 'set-cookie': auth.sessionCookie(token, c.req) });
@@ -1541,7 +1553,6 @@ async function me(c) {
     google: googleStatus(c, c.shop),
     subscription: await subscription(c, c.shop),
     plan: planInfo(c.shop),
-    ai: { ready: !!aiConfig(c.env), monthQuestions: (await aiMonth(c.db, c.shop.id)).requests },
     pushCount: (await c.db.get('SELECT COUNT(DISTINCT member_id) AS n FROM push_subs WHERE shop_id = ?', c.shop.id)).n,
     userPush: (await c.db.get('SELECT COUNT(*) AS n FROM user_push_subs WHERE user_id = ?', c.user.id)).n,
     whatsapp: /^\d{8,15}$/.test(String(c.env.WHATSAPP_NUMBER || '')) ? String(c.env.WHATSAPP_NUMBER) : null,
@@ -2091,7 +2102,6 @@ async function updatePerks(c) {
     credit_on: flag('creditOn', 'credit_on'),
     credit_bonus: num('creditBonus', 'credit_bonus', 0, 100, 'هدية الشحن لازم تكون بين 0 و 100%'),
     expiry_months: num('expiryMonths', 'expiry_months', 0, 24, 'المدة لازم تكون 0 أو 6 أو 12 أو 24 شهر'),
-    ai_on: flag('aiOn', 'ai_on'),
     expiry_since: s.expiry_since,
     boosts: s.boosts,
   };
@@ -2571,97 +2581,458 @@ async function menuCategories(c, shop) {
 
 async function publicMenu(c, slug) {
   const shop = await shopBySlug(c.db, slug);
-  return json({ shop: publicShopView(shop, c.origin), categories: await menuCategories(c, shop), pdf: menuPdfView(shop, c.origin), assistant: aiAvailable(c, shop) });
+  return json({ shop: publicShopView(shop, c.origin), categories: await menuCategories(c, shop), pdf: menuPdfView(shop, c.origin) });
 }
 
-// ─── 🤖 المساعد الذكي للزبون (بالباقة المميزة، وصاحب المحل بيقدر يطفيه) ───
-const aiAvailable = (c, shop) => !!(aiConfig(c.env) && isPro(shop) && shop.ai_on);
-const WEEKDAYS_AR = ['الأحد', 'الاتنين', 'التلاتا', 'الأربعا', 'الخميس', 'الجمعة', 'السبت'];
-
-function aiShopInfo(shop) {
-  const unit = unitLabel(shop);
-  const extra = [];
-  for (const b of perks.parseBoosts(shop.boosts)) extra.push(`نقاط ×${b.mult} أيام ${b.days.map((d) => WEEKDAYS_AR[d]).join(' و')} من ${b.from} لـ ${b.to}`);
-  if (shop.tiers_on) extra.push(`مستويات: فضي بعد ${shop.tier_silver} زيارة وذهبي بعد ${shop.tier_gold}${shop.program_type === 'stamps' ? '' : ' (الفضي نقاط ×1.25 والذهبي ×1.5)'}`);
-  if (perks.refBonus(shop) > 0) extra.push(`ادعُ صاحبك من رابط الدعوة على البطاقة: كل واحد بياخد ${perks.refBonus(shop)} ${unit} بأول زيارة لصاحبه`);
-  if (shop.bday_on) extra.push(`هدية عيد الميلاد: ${perks.bdayGift(shop)} ${unit} (إذا كاتب تاريخ ميلاده على البطاقة)`);
-  if (shop.credit_on) extra.push(`رصيد مدفوع مسبقاً عند الكاشير${shop.credit_bonus ? ` مع هدية شحن ${shop.credit_bonus}%` : ''}`);
-  if (shop.expiry_months > 0) extra.push(`النقاط بتنتهي إذا الزبون ما زار المحل ${shop.expiry_months} شهر`);
-  const links = Object.entries(JSON.parse(shop.links || '{}')).filter(([, v]) => v).map(([k]) => k);
-  return { name: shop.name, rule: rewardRule(shop), rewardName: shop.reward_name, currency: shop.currency, welcomeText: shop.welcome_text, perks: extra, branches: branchesOf(shop).map((b) => b.name), links };
+// ─── 🎯 وكيل المبيعات: بيدوّر على محلات، بيبعتلهم على واتساب، بيحكي معهم وبيفاوض (بدون خصم) ───
+async function logAi(c, kind, usage) {
+  await c.db.run(
+    `INSERT INTO ai_usage (kind, day, requests, input_tokens, output_tokens, cache_read, cache_write, searches) VALUES (?, ?, 1, ?, ?, ?, ?, ?)
+     ON CONFLICT(kind, day) DO UPDATE SET requests = requests + 1, input_tokens = input_tokens + excluded.input_tokens,
+       output_tokens = output_tokens + excluded.output_tokens, cache_read = cache_read + excluded.cache_read,
+       cache_write = cache_write + excluded.cache_write, searches = searches + excluded.searches`,
+    kind, localDayKey('JO'), usage.input_tokens || 0, usage.output_tokens || 0, usage.cache_read_input_tokens || 0, usage.cache_creation_input_tokens || 0, usage.web_search_requests || 0,
+  );
 }
 
-async function aiCustomer(c, shop, m) {
-  const v = memberView(m, shop);
-  const unit = unitLabel(shop);
-  const p = v.progress;
+// استهلاك الوكيل من أول الشهر (بتوقيت الأردن): المجموع، ولكل قناة
+async function aiMonth(db) {
+  const t = perks.localTime('JO');
+  const rows = await db.all(
+    `SELECT kind, SUM(requests) AS requests, SUM(input_tokens) AS input, SUM(output_tokens) AS output, SUM(cache_read) AS cacheRead,
+       SUM(cache_write) AS cacheWrite, SUM(searches) AS searches FROM ai_usage WHERE day >= ? GROUP BY kind`,
+    String(t.year * 10000 + t.month * 100 + 1),
+  );
+  const total = { requests: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, searches: 0 };
+  const byKind = {};
+  for (const r of rows) {
+    byKind[r.kind] = r.requests;
+    for (const k of Object.keys(total)) total[k] += r[k] || 0;
+  }
+  return { ...total, byKind };
+}
+
+const ownerWhatsapp = (env) => (/^\d{8,15}$/.test(String(env.WHATSAPP_NUMBER || '')) ? String(env.WHATSAPP_NUMBER) : null);
+
+// التعليمات (بالكاش) + القناة والمحل والعرض
+async function salesSystem(c, channel, prospect, offer) {
+  const rules = sales.salesRules({
+    plans: PLANS, features: FEATURES, apple: !!(await appleConfig(c, { withKey: false })), signupOpen: !c.env.SIGNUP_CODE, origin: c.origin, ownerWhatsapp: ownerWhatsapp(c.env),
+  });
+  const t = perks.localTime('JO');
+  const today = `${t.year}-${String(t.month).padStart(2, '0')}-${String(t.day).padStart(2, '0')}`;
+  return [
+    { type: 'text', text: rules, cache_control: { type: 'ephemeral' } },
+    { type: 'text', text: sales.salesContext({ channel, today, prospect, offer, offerLink: offer ? offerLink(c, offer.code) : null }) },
+  ];
+}
+
+const OFFER_RE = /^[a-z2-9]{8}$/;
+const offerLink = (c, code) => `${c.origin}/?offer=${code}#start`;
+async function liveOffer(db, code) {
+  const v = String(code || '').toLowerCase();
+  return OFFER_RE.test(v) ? db.get('SELECT * FROM offers WHERE code = ? AND used_at IS NULL AND expires_at > ?', v, Date.now()) : null;
+}
+
+// 🎁 عرض: تجربة مجانية أطول برابط خاص (بدون أي خصم). لنفس المحل بنحدّث العرض الموجود وما منقصّر أيامه
+async function createOffer(c, { prospect = null, shopName = null, channel, input }) {
+  const days = Number(input.trial_days);
+  if (!Number.isInteger(days) || days <= sales.BASE_TRIAL || days > sales.MAX_TRIAL) throw new Error(`trial_days لازم يكون بين ${sales.BASE_TRIAL + 1} و ${sales.MAX_TRIAL}`);
+  const plan = readTier(input.plan);
+  const now = Date.now();
+  const expires = now + sales.OFFER_DAYS * DAY;
+  const old = prospect && await c.db.get('SELECT * FROM offers WHERE prospect_id = ? AND used_at IS NULL AND expires_at > ? ORDER BY created_at DESC LIMIT 1', prospect.id, now);
+  let code;
+  if (old) {
+    code = old.code;
+    await c.db.run('UPDATE offers SET trial_days = MAX(trial_days, ?), plan = ?, expires_at = ? WHERE code = ?', days, plan, expires, code);
+  } else {
+    code = randomToken(8);
+    await c.db.run('INSERT INTO offers (code, prospect_id, shop_name, trial_days, plan, channel, expires_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      code, prospect ? prospect.id : null, clean(shopName || (prospect && prospect.name), 60) || null, days, plan, channel, expires, now);
+  }
+  const row = await c.db.get('SELECT * FROM offers WHERE code = ?', code);
+  if (prospect) await c.db.run("UPDATE prospects SET note = TRIM(COALESCE(note, '') || ?) WHERE id = ?", ` 🎁 عرض تجربة ${row.trial_days} يوم: ${clean(input.reason, 120)}`, prospect.id);
+  return { code, trialDays: row.trial_days, link: offerLink(c, code), validUntil: new Date(expires).toISOString().slice(0, 10) };
+}
+
+async function publicOffer(c, code) {
+  const o = await liveOffer(c.db, code);
+  if (!o) fail(404, 'العرض خلص أو مش موجود');
+  return json({ trialDays: o.trial_days, plan: o.plan, shopName: o.shop_name, expiresAt: o.expires_at });
+}
+
+const SALES_DOWN = 'المساعد مش متاح هلأ، جرّب بعد شوي أو احكينا على واتساب';
+
+// 💬 المحادثة بصفحة نقاطك الرئيسية (الزائر بيبعت المحادثة كلها، وما منحفظها)
+async function salesChat(c) {
+  const cfg = aiConfig(c.env);
+  if (!cfg) fail(404, 'المساعد مش مفعّل');
+  const messages = cleanHistory(c.body.messages);
+  if (!messages) fail(400, 'اكتب سؤالك');
+  await rateLimit(c, `ai:v:${c.ip}`, cfg.perVisitor, DAY, 'حكينا كتير اليوم 🙏 كمّل معنا على واتساب أو جرّب بكرا');
+  await rateLimit(c, 'ai:all', cfg.platform, DAY, 'المساعد مشغول هلأ، جرّب بعد شوي');
+  const offer = await liveOffer(c.db, c.body.offer);
+  const prospect = offer && offer.prospect_id ? await c.db.get('SELECT * FROM prospects WHERE id = ?', offer.prospect_id) : null;
+  let lead = false;
+  let made = null;
+  const runTool = async (name, input) => {
+    if (name === 'make_offer') {
+      await rateLimit(c, `offer:${c.ip}`, 3, DAY, 'ما بقدر أعمل عروض زيادة اليوم');
+      made = await createOffer(c, { prospect, shopName: offer && offer.shop_name, channel: 'web', input });
+      return { link: made.link, trial_days: made.trialDays, valid_until: made.validUntil };
+    }
+    if (name === 'save_contact') {
+      await saveLead(c, { shopName: input.shop_name, name: input.name, phone: input.phone, city: input.city, kind: input.kind, note: input.note, partner: c.body.partner }, 'ai');
+      lead = true;
+      return { saved: true };
+    }
+    throw new Error(`أداة مش معروفة: ${name}`);
+  };
+  let r;
+  try {
+    r = await chat(cfg, { system: await salesSystem(c, 'web', prospect, offer), messages, tools: sales.webTools(), runTool });
+  } catch (e) {
+    console.error('sales:', e.status || '', e.message);
+    fail(503, SALES_DOWN);
+  }
+  await logAi(c, 'web', r.usage);
+  const reply = r.refused || !r.text ? 'ما بقدر أساعد بهالسؤال 🙏 بس بقدر أحكيلك عن نقاطك وأسعارها، أو تشوف المحل التجريبي.' : r.text;
+  return json({ reply, lead, offer: made ? { code: made.code, trialDays: made.trialDays } : null });
+}
+
+// ─── 📲 واتساب ───
+const WA_PLACEHOLDER = { image: '[بعت صورة]', audio: '[بعت رسالة صوتية]', video: '[بعت فيديو]', sticker: '[بعت ستيكر]', document: '[بعت ملف]', location: '[بعت موقع]', contacts: '[بعت جهة اتصال]' };
+// الأخطاء اللي بتخص الرقم نفسه (مش واتساب، أو ما بده رسائل تسويق)؛ غيرها (القالب، التوكن) بيوقف الإرسال كله
+const WA_RECIPIENT_ERRORS = new Set([131026, 131049, 131047, 131021, 131050, 131051]);
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+async function saveSalesMsg(db, prospectId, role, text, waId = null, at = Date.now()) {
+  return db.run('INSERT INTO sales_msgs (prospect_id, role, text, wa_id, created_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT DO NOTHING', prospectId, role, text, waId, at);
+}
+
+// أول رسالة (القالب). بيرجّع true إذا انبعتت
+async function sendIntro(c, wcfg, p, now = Date.now()) {
+  const claim = await c.db.run("UPDATE prospects SET status = 'sent', sent_at = ?, error = NULL WHERE id = ? AND status IN ('new', 'failed') AND wa IS NOT NULL", now, p.id);
+  if (!claim.changes) return false;
+  try {
+    const id = await wa.sendTemplate(wcfg, p.wa, p.name);
+    await saveSalesMsg(c.db, p.id, 'agent', sales.templateFor(p.name), id, now);
+    await c.db.run('UPDATE prospects SET last_out_at = ? WHERE id = ?', now, p.id);
+    return true;
+  } catch (e) {
+    const msg = clean(e.message, 200);
+    if (WA_RECIPIENT_ERRORS.has(e.code)) {
+      await c.db.run('UPDATE prospects SET status = ?, sent_at = NULL, error = ? WHERE id = ?', e.code === 131050 ? 'optout' : 'failed', msg, p.id);
+      return false;
+    }
+    // مشكلة بالحساب أو القالب: بنرجّع المحل للدور وبنوقف الإرسال التلقائي لحد ما تصلّحها
+    await c.db.run("UPDATE prospects SET status = 'new', sent_at = NULL, error = ? WHERE id = ?", msg, p.id);
+    await setSetting(c.db, 'sales_auto', '0');
+    await notifyAdmin(c, { title: '⚠️ وكيل المبيعات وقف الإرسال', body: msg, url: `${c.origin}/app#admin` });
+    const err = new Error(msg);
+    err.stop = true;
+    throw err;
+  }
+}
+
+// كل 5 دقايق: لحد رسالتين، بأوقات الدوام بالأردن (10 الصبح لـ 8 المسا، مش الجمعة)، وضمن الحد باليوم
+async function salesOutreachJob(c, now) {
+  const wcfg = wa.waConfig(c.env);
+  if (!wcfg || (await getSetting(c.db, 'sales_auto')) !== '1') return 0;
+  const t = perks.localTime('JO', now);
+  if (t.weekday === 5 || t.hour < 10 || t.hour >= 20) return 0;
+  const daily = Number(await getSetting(c.db, 'sales_daily')) || SALES_DAILY;
+  const sent = (await c.db.get('SELECT COUNT(*) AS n FROM prospects WHERE sent_at > ?', now - DAY)).n;
+  let n = 0;
+  for (let room = Math.min(2, daily - sent); room > 0; room--) {
+    const p = await c.db.get("SELECT * FROM prospects WHERE status = 'new' AND wa IS NOT NULL AND paused = 0 ORDER BY id LIMIT 1");
+    if (!p) break;
+    try {
+      if (await sendIntro(c, wcfg, p, now)) n++;
+    } catch (e) {
+      if (e.stop) break;
+      throw e;
+    }
+  }
+  return n;
+}
+const SALES_DAILY = 20;
+
+// الـ webhook تبع Meta: GET للربط أول مرة، وPOST لكل رسالة واصلة (موقّعة بسر التطبيق)
+async function waWebhook(c) {
+  const wcfg = wa.waConfig(c.env);
+  if (c.req.method === 'GET') {
+    const q = c.url.searchParams;
+    if (wcfg && wcfg.verifyToken && q.get('hub.mode') === 'subscribe' && q.get('hub.verify_token') === wcfg.verifyToken) {
+      return new Response(q.get('hub.challenge') || '', { headers: { 'content-type': 'text/plain' } });
+    }
+    return new Response('forbidden', { status: 403 });
+  }
+  if (c.req.method !== 'POST' || !wcfg) return new Response('not found', { status: 404 });
+  const raw = await c.req.text();
+  if (raw.length > MAX_BODY) return new Response('too large', { status: 413 });
+  if (!(await wa.verifySignature(wcfg.appSecret, raw, c.req.headers.get('x-hub-signature-256')))) return new Response('bad signature', { status: 401 });
+  let payload;
+  try { payload = JSON.parse(raw); } catch { return new Response('bad json', { status: 400 }); }
+  for (const m of wa.incoming(payload, wcfg.phoneId)) await waIncoming(c, wcfg, m);
+  return new Response('ok');
+}
+
+async function waIncoming(c, wcfg, m) {
+  const from = wa.waNumber(m.from) || m.from;
+  if (!/^\d{8,15}$/.test(from)) return;
+  const now = Date.now();
+  let p = await c.db.get('SELECT * FROM prospects WHERE wa = ?', from);
+  if (!p) {
+    await c.db.run("INSERT INTO prospects (name, phone, wa, status, source, created_at) VALUES (?, ?, ?, 'talking', 'inbound', ?) ON CONFLICT DO NOTHING", clean(m.name, 60) || `+${from}`, `+${from}`, from, now);
+    p = await c.db.get('SELECT * FROM prospects WHERE wa = ?', from);
+  }
+  const text = m.text || WA_PLACEHOLDER[m.type] || '[رسالة]';
+  const ins = await saveSalesMsg(c.db, p.id, 'in', text, m.id, now);
+  if (!ins.changes) return; // Meta بتعيد نفس الرسالة أحياناً
+  if (wa.isOptOut(m.text)) {
+    await c.db.run("UPDATE prospects SET status = 'optout', last_in_at = ? WHERE id = ?", now, p.id);
+    try {
+      const bye = 'تمام، ما رح نرجع نبعتلك 🙏 وإذا احتجت إشي بأي وقت، إحنا هون.';
+      await saveSalesMsg(c.db, p.id, 'agent', bye, await wa.sendText(wcfg, from, bye));
+    } catch (e) { console.error('wa bye:', e.message); }
+    return;
+  }
+  await c.db.run("UPDATE prospects SET last_in_at = ?, status = CASE WHEN status IN ('new', 'sent', 'failed', 'manual', 'lost', 'optout') THEN 'talking' ELSE status END WHERE id = ?", now, p.id);
+  if (!p.last_in_at) await notifyAdmin(c, { title: p.source === 'inbound' ? '💬 حدا جديد راسل وكيل المبيعات' : `💬 ${p.name} رد على وكيل المبيعات`, body: text.slice(0, 120), url: `${c.origin}/app#admin` });
+  else if (p.paused || !aiConfig(c.env)) await notifyAdmin(c, { title: `💬 ${p.name}`, body: text.slice(0, 120), url: `${c.origin}/app#admin` });
+  if (p.paused || !aiConfig(c.env)) return;
+  c.waitUntil(waReply(c, wcfg, p.id, ins.lastId).catch((e) => console.error('wa reply:', e.message)));
+}
+
+// رد الوكيل: بيستنى ثواني (إذا بعت كذا رسالة ورا بعض، بيرد مرة وحدة على آخرها)
+async function waReply(c, wcfg, prospectId, msgId) {
+  const cfg = aiConfig(c.env);
+  await sleep(Number(c.env.WA_DEBOUNCE_MS ?? 3000));
+  const last = await c.db.get("SELECT id FROM sales_msgs WHERE prospect_id = ? AND role = 'in' ORDER BY id DESC LIMIT 1", prospectId);
+  if (!last || last.id !== msgId) return;
+  const p = await c.db.get('SELECT * FROM prospects WHERE id = ?', prospectId);
+  if (!p || p.paused || p.status === 'optout') return;
+  try {
+    await rateLimit(c, `ai:wa:${p.id}`, 30, DAY);
+    await rateLimit(c, 'ai:all', cfg.platform, DAY);
+  } catch {
+    return; // ما منرد أكتر اليوم (بيحمينا من الردود الآلية اللي بترد على بعض)
+  }
+  const rows = await c.db.all('SELECT role, text FROM sales_msgs WHERE prospect_id = ? ORDER BY id DESC LIMIT 16', p.id);
+  const messages = cleanHistory(rows.reverse().map((r) => ({ role: r.role === 'in' ? 'user' : 'assistant', content: r.text })));
+  if (!messages) return;
+  const offer = await c.db.get('SELECT * FROM offers WHERE prospect_id = ? AND used_at IS NULL AND expires_at > ? ORDER BY created_at DESC LIMIT 1', p.id, Date.now());
+  const runTool = async (name, input) => {
+    if (name === 'make_offer') {
+      const o = await createOffer(c, { prospect: p, channel: 'wa', input });
+      return { link: o.link, trial_days: o.trialDays, valid_until: o.validUntil };
+    }
+    if (name === 'save_contact') {
+      await c.db.run(
+        "UPDATE prospects SET owner_name = COALESCE(NULLIF(?, ''), owner_name), kind = COALESCE(NULLIF(?, ''), kind), area = COALESCE(NULLIF(?, ''), area), note = ? WHERE id = ?",
+        clean(input.owner_name, 60), clean(input.kind, 40), clean(input.area, 60), clean(input.note, 500), p.id,
+      );
+      return { saved: true };
+    }
+    if (name === 'call_owner') {
+      await c.db.run("UPDATE prospects SET status = 'hot' WHERE id = ? AND status <> 'won'", p.id);
+      await notifyAdmin(c, { title: `🙋 ${p.name} بده يحكي معك`, body: clean(input.reason, 140), url: `${c.origin}/app#admin` });
+      return { notified: true };
+    }
+    if (name === 'set_status') {
+      if (!['lost', 'optout'].includes(input.status)) throw new Error('حالة مش معروفة');
+      await c.db.run('UPDATE prospects SET status = ? WHERE id = ?', input.status, p.id);
+      return { saved: true };
+    }
+    throw new Error(`أداة مش معروفة: ${name}`);
+  };
+  const r = await chat(cfg, { system: await salesSystem(c, 'wa', p, offer), messages, tools: sales.waTools(), runTool, maxTokens: 3000 });
+  await logAi(c, 'wa', r.usage);
+  if (r.refused || !r.text) return;
+  const id = await wa.sendText(wcfg, p.wa, r.text);
+  await saveSalesMsg(c.db, p.id, 'agent', r.text, id);
+  await c.db.run('UPDATE prospects SET last_out_at = ? WHERE id = ?', Date.now(), p.id);
+}
+
+// ─── 👑 صفحة المنصة ← 🎯 المبيعات ───
+const PROSPECT_STATUSES = ['new', 'sent', 'talking', 'hot', 'won', 'lost', 'optout', 'failed', 'manual'];
+function prospectView(p, offer) {
   return {
-    firstName: perks.firstName(m.name),
-    balanceText: shop.program_type === 'stamps' ? `${v.stamps} (${p.toward} من ${p.cost} أختام)` : `${m.balance} ${unit}`,
-    progressText: p.available ? `عنده ${p.available} مكافأة جاهزة (${shop.reward_name})، بيصرفها عند الكاشير` : `باقيله ${p.remaining} ${unit} لـ ${shop.reward_name}`,
-    tier: v.tier ? `${v.tier.icon} ${v.tier.name}${v.tier.next ? ` (باقيله ${v.tier.next.visitsLeft} زيارة لـ ${v.tier.next.name})` : ''}` : null,
-    credit: v.credit,
-    creditText: `${v.credit} ${shop.currency}`,
-    boostUntil: v.boostUntil,
-    expiresAt: v.expiresAt ? new Date(v.expiresAt).toISOString().slice(0, 10) : null,
-    coupons: (await activeCoupons(c.db, m.id)).map((cp) => `${cp.title}${cp.details ? ` (${cp.details})` : ''}`),
+    id: p.id, name: p.name, area: p.area, kind: p.kind, phone: p.phone, wa: p.wa, instagram: p.instagram, website: p.website, why: p.why,
+    ownerName: p.owner_name, note: p.note, status: p.status, source: p.source, paused: !!p.paused, error: p.error, shopId: p.shop_id,
+    sentAt: p.sent_at, lastInAt: p.last_in_at, lastOutAt: p.last_out_at, createdAt: p.created_at,
+    waLink: p.wa ? `https://wa.me/${p.wa}?text=${encodeURIComponent(sales.templateFor(p.name))}` : null,
+    offer: offer ? { trialDays: offer.trial_days, code: offer.code, used: !!offer.used_at } : null,
   };
 }
 
-async function logAi(c, shopId, usage) {
-  await c.db.run(
-    `INSERT INTO ai_usage (shop_id, day, requests, input_tokens, output_tokens, cache_read, cache_write) VALUES (?, ?, 1, ?, ?, ?, ?)
-     ON CONFLICT(shop_id, day) DO UPDATE SET requests = requests + 1, input_tokens = input_tokens + excluded.input_tokens,
-       output_tokens = output_tokens + excluded.output_tokens, cache_read = cache_read + excluded.cache_read, cache_write = cache_write + excluded.cache_write`,
-    shopId, localDayKey('JO'), usage.input_tokens || 0, usage.output_tokens || 0, usage.cache_read_input_tokens || 0, usage.cache_creation_input_tokens || 0,
-  );
+async function salesState(c) {
+  const rows = await c.db.all('SELECT * FROM prospects ORDER BY COALESCE(last_in_at, last_out_at, created_at) DESC LIMIT 300');
+  const offers = await c.db.all('SELECT * FROM offers WHERE prospect_id IS NOT NULL ORDER BY created_at');
+  const offerOf = new Map(offers.map((o) => [o.prospect_id, o]));
+  const counts = Object.fromEntries((await c.db.all('SELECT status, COUNT(*) AS n FROM prospects GROUP BY status')).map((r) => [r.status, r.n]));
+  const wcfg = wa.waConfig(c.env);
+  return {
+    prospects: rows.map((p) => prospectView(p, offerOf.get(p.id))),
+    counts,
+    sentToday: (await c.db.get('SELECT COUNT(*) AS n FROM prospects WHERE sent_at > ?', Date.now() - DAY)).n,
+    signups: (await c.db.get('SELECT COUNT(*) AS n FROM offers WHERE used_at IS NOT NULL')).n,
+    settings: { auto: (await getSetting(c.db, 'sales_auto')) === '1', daily: Number(await getSetting(c.db, 'sales_daily')) || SALES_DAILY },
+    ai: !!aiConfig(c.env),
+    whatsapp: {
+      ready: !!wcfg,
+      verified: !!(wcfg && wcfg.appSecret && wcfg.verifyToken),
+      webhookUrl: `${c.origin}/api/wa/webhook`,
+      template: wcfg ? wcfg.template : String(c.env.WHATSAPP_TEMPLATE || 'nuqatak_intro'),
+      templateText: sales.TEMPLATE_TEXT,
+    },
+  };
 }
 
-async function assistantRoute(c) {
+async function adminSales(c) {
+  await requireAdmin(c);
+  return json(await salesState(c));
+}
+
+// روابط من نتايج البحث: http(s) بس، والانستغرام من اسم الحساب كمان
+const webUrl = (v) => { const u = clean(v, 300); return /^https?:\/\/[^\s]+$/i.test(u) ? u : null; };
+function instaUrl(v) {
+  const u = clean(v, 120);
+  if (/^https?:\/\/(www\.)?instagram\.com\/[^\s]+$/i.test(u)) return u;
+  const h = u.replace(/^@/, '');
+  return /^[A-Za-z0-9._]{1,30}$/.test(h) ? `https://instagram.com/${h}` : null;
+}
+
+// 🔎 الوكيل بيدوّر بالإنترنت على محلات وبيحفظهم بالقائمة (بدقيقة تقريباً)
+async function adminSalesSearch(c) {
+  await requireAdmin(c);
   const cfg = aiConfig(c.env);
-  if (!cfg) fail(404, 'المساعد مش مفعّل');
-  const token = String(c.body.token || '');
-  let shop;
-  let m = null;
-  if (TOKEN_RE.test(token)) {
-    m = await c.db.get('SELECT * FROM members WHERE token = ?', token);
-    if (!m) fail(404, 'ما لقينا هالبطاقة');
-    shop = await shopRow(c.db, m.shop_id);
-  } else {
-    shop = await shopBySlug(c.db, c.body.slug);
-  }
-  if (!aiAvailable(c, shop) || (await subscription(c, shop)).state === 'expired') fail(404, 'المساعد مش مفعّل بهالمحل');
-  const messages = cleanHistory(c.body.messages);
-  if (!messages) fail(400, 'اكتب سؤالك');
-  // حدود باليوم: لكل زبون (أو جهاز بدون بطاقة)، لكل محل (المحل التجريبي أقل)، وللمنصة كلها
-  await rateLimit(c, `ai:m:${m ? m.id : c.ip}`, cfg.perCustomer, DAY, 'سألت كتير اليوم 🙏 جرّب بكرا، أو اسأل الكاشير');
-  await rateLimit(c, `ai:s:${shop.id}`, shop.demo ? Math.min(50, cfg.perShop) : cfg.perShop, DAY, 'المساعد خلّص أسئلته لليوم، جرّب بكرا أو اسأل الكاشير');
-  await rateLimit(c, 'ai:all', cfg.platform, DAY, 'المساعد مشغول هلأ، جرّب بعد شوي');
+  if (!cfg) fail(400, 'ضيف مفتاح Anthropic (ANTHROPIC_API_KEY) بإعدادات Cloudflare أول');
+  const query = clean(c.body.query, 120);
+  if (query.length < 3) fail(400, 'اكتب شو بدك يدوّر (مثلاً: كوفي شوب بعبدون)');
+  const count = Math.min(20, Math.max(3, Number(c.body.count) || 10));
+  await rateLimit(c, `search:${c.user.id}`, 20, DAY, 'دوّرت كتير اليوم، كمّل بكرا');
+  const known = await c.db.all('SELECT name FROM prospects ORDER BY id DESC LIMIT 120');
+  let found = [];
+  const runTool = async (name, input) => {
+    if (name !== 'save_shops') throw new Error(`أداة مش معروفة: ${name}`);
+    found = Array.isArray(input.shops) ? input.shops.slice(0, count) : [];
+    return { saved: found.length };
+  };
   let r;
   try {
-    r = await askClaude(cfg, {
-      shopText: shopPrompt(aiShopInfo(shop), await menuCategories(c, shop)),
-      customerText: customerPrompt(m ? await aiCustomer(c, shop, m) : null),
-      messages,
+    r = await chat(cfg, {
+      system: sales.searchSystem(count),
+      messages: [{ role: 'user', content: sales.searchAsk(query, known.map((k) => k.name)) }],
+      tools: [{ type: 'web_search_20260209', name: 'web_search', max_uses: 8, user_location: { type: 'approximate', country: 'JO', city: 'Amman', timezone: 'Asia/Amman' } }, sales.SAVE_SHOPS],
+      runTool, stopOn: 'save_shops', maxTokens: 12000, effort: 'medium', timeout: 180_000, maxRounds: 8,
     });
   } catch (e) {
-    console.error('assistant:', e.status || '', e.message);
-    fail(503, 'المساعد مش متاح هلأ، جرّب بعد شوي');
+    console.error('sales search:', e.status || '', e.message);
+    fail(503, 'البحث ما زبط هلأ، جرّب كمان شوي');
   }
-  await logAi(c, shop.id, r.usage);
-  const reply = r.refused || !r.text ? 'ما بقدر أساعد بهالسؤال 🙏 بس بقدر أنصحك من المنيو أو أحكيلك عن نقاطك.' : r.text;
-  return json({ reply });
+  await logAi(c, 'search', r.usage);
+  const now = Date.now();
+  let added = 0;
+  const names = new Set(known.map((k) => k.name.trim().toLowerCase()));
+  for (const s of found) {
+    const name = clean(s && s.name, 60);
+    if (name.length < 2 || names.has(name.toLowerCase())) continue;
+    names.add(name.toLowerCase());
+    const phone = clean(s.phone, 30);
+    const num = phone ? wa.waNumber(phone) : null;
+    const res = await c.db.run(
+      `INSERT INTO prospects (name, area, kind, phone, wa, instagram, website, why, status, source, search, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'search', ?, ?) ON CONFLICT DO NOTHING`,
+      name, clean(s.area, 60), clean(s.kind, 40), phone || null, num, instaUrl(s.instagram), webUrl(s.website), clean(s.why, 300), num ? 'new' : 'manual', query, now,
+    );
+    if (res.changes) added++;
+  }
+  return json({ added, found: found.length, searches: r.usage.web_search_requests, ...(await salesState(c)) });
 }
 
-// استهلاك المساعد من أول الشهر (بتوقيت الأردن)
-async function aiMonth(db, shopId = null) {
-  const t = perks.localTime('JO');
-  const from = String(t.year * 10000 + t.month * 100 + 1);
-  return db.get(
-    `SELECT COALESCE(SUM(requests), 0) AS requests, COALESCE(SUM(input_tokens), 0) AS input, COALESCE(SUM(output_tokens), 0) AS output,
-       COALESCE(SUM(cache_read), 0) AS cacheRead, COALESCE(SUM(cache_write), 0) AS cacheWrite FROM ai_usage WHERE day >= ?${shopId ? ' AND shop_id = ?' : ''}`,
-    from, ...(shopId ? [shopId] : []),
-  );
+async function adminAddProspect(c) {
+  await requireAdmin(c);
+  const name = clean(c.body.name, 60);
+  if (name.length < 2) fail(400, 'اكتب اسم المحل');
+  const phone = clean(c.body.phone, 30);
+  const num = wa.waNumber(phone);
+  if (!num) fail(400, 'اكتب رقم موبايل عليه واتساب (07…)');
+  if (await c.db.get('SELECT id FROM prospects WHERE wa = ?', num)) fail(409, 'هالرقم بالقائمة من قبل');
+  await c.db.run("INSERT INTO prospects (name, area, kind, phone, wa, why, status, source, created_at) VALUES (?, ?, ?, ?, ?, ?, 'new', 'manual', ?)",
+    name, clean(c.body.area, 60), clean(c.body.kind, 40), phone, num, clean(c.body.note, 300), Date.now());
+  return adminSales(c);
+}
+
+async function prospectById(c, id) {
+  await requireAdmin(c);
+  const p = await c.db.get('SELECT * FROM prospects WHERE id = ?', Number(id));
+  if (!p) fail(404, 'ما لقينا المحل');
+  return p;
+}
+
+async function adminProspect(c, id) {
+  const p = await prospectById(c, id);
+  const msgs = await c.db.all('SELECT role, text, created_at AS at FROM sales_msgs WHERE prospect_id = ? ORDER BY id DESC LIMIT 100', p.id);
+  const offer = await c.db.get('SELECT * FROM offers WHERE prospect_id = ? ORDER BY created_at DESC LIMIT 1', p.id);
+  return json({ prospect: prospectView(p, offer), messages: msgs.reverse(), canReply: !!(wa.waConfig(c.env) && p.last_in_at && Date.now() - p.last_in_at < DAY) });
+}
+
+async function adminProspectUpdate(c, id) {
+  const p = await prospectById(c, id);
+  const status = c.body.status === undefined ? p.status : c.body.status;
+  if (!PROSPECT_STATUSES.includes(status)) fail(400, 'حالة مش معروفة');
+  const paused = c.body.paused === undefined ? p.paused : c.body.paused ? 1 : 0;
+  await c.db.run('UPDATE prospects SET status = ?, paused = ? WHERE id = ?', status, paused, p.id);
+  return adminProspect(c, id);
+}
+
+async function adminProspectDelete(c, id) {
+  const p = await prospectById(c, id);
+  await c.db.batch([['DELETE FROM sales_msgs WHERE prospect_id = ?', [p.id]], ['DELETE FROM prospects WHERE id = ?', [p.id]]]);
+  return json({ ok: true });
+}
+
+// إرسال أول رسالة لمحل هلأ (بدون ما يستنى الدور)
+async function adminProspectSend(c, id) {
+  const p = await prospectById(c, id);
+  const wcfg = wa.waConfig(c.env);
+  if (!wcfg) fail(400, 'واتساب لسا مش مربوط');
+  if (!p.wa) fail(400, 'ما في رقم واتساب لهالمحل');
+  if (!['new', 'failed'].includes(p.status)) fail(400, 'انبعتله من قبل');
+  try {
+    if (!(await sendIntro(c, wcfg, p))) fail(400, (await c.db.get('SELECT error FROM prospects WHERE id = ?', p.id)).error || 'ما انبعتت');
+  } catch (e) {
+    if (e instanceof HttpError) throw e;
+    fail(502, `واتساب رفض: ${e.message}`);
+  }
+  return adminProspect(c, id);
+}
+
+// إنت بترد بنفسك: الوكيل بيوقف مع هالمحل لحد ما ترجّعه
+async function adminProspectReply(c, id) {
+  const p = await prospectById(c, id);
+  const wcfg = wa.waConfig(c.env);
+  if (!wcfg) fail(400, 'واتساب لسا مش مربوط');
+  const text = clean(c.body.text, 1000);
+  if (!text) fail(400, 'اكتب الرسالة');
+  if (!p.last_in_at || Date.now() - p.last_in_at >= DAY) fail(400, 'مرّ أكتر من 24 ساعة على آخر رسالة منه، وواتساب ما بيسمح ترد عليه إلا لما يراسلك هو');
+  let waId;
+  try { waId = await wa.sendText(wcfg, p.wa, text); } catch (e) { fail(502, `واتساب رفض: ${e.message}`); }
+  await saveSalesMsg(c.db, p.id, 'owner', text, waId);
+  await c.db.run('UPDATE prospects SET paused = 1, last_out_at = ? WHERE id = ?', Date.now(), p.id);
+  return adminProspect(c, id);
+}
+
+async function adminSalesSettings(c) {
+  await requireAdmin(c);
+  const auto = !!c.body.auto;
+  if (auto && !wa.waConfig(c.env)) fail(400, 'اربط واتساب أول (المفاتيح بإعدادات Cloudflare)');
+  const daily = int(c.body.daily, 1, 200, 'الحد باليوم بين 1 و 200');
+  await setSetting(c.db, 'sales_auto', auto ? '1' : '0');
+  await setSetting(c.db, 'sales_daily', String(daily));
+  return adminSales(c);
 }
 
 async function menuImage(c, id) {
@@ -2770,7 +3141,8 @@ async function removeStaff(c, id) {
 const API = [
   ['GET', /^\/api\/shops\/([a-z0-9-]{3,40})\/public$/, publicShop],
   ['GET', /^\/api\/version$/, () => json({ version: APP_VERSION, date: CHANGELOG[0].date })],
-  ['POST', /^\/api\/assistant$/, assistantRoute],
+  ['POST', /^\/api\/sales$/, salesChat],
+  ['GET', /^\/api\/offers\/([a-z2-9]{8})$/, publicOffer],
   ['GET', /^\/api\/shops\/([a-z0-9-]{3,40})\/menu$/, publicMenu],
   ['GET', /^\/api\/menu$/, listMenu, 'owner'],
   ['POST', /^\/api\/menu$/, syncsMenu(addMenuItem), 'owner'],
@@ -2794,6 +3166,15 @@ const API = [
   ['DELETE', /^\/api\/cards\/([a-z2-9]{20})\/push$/, cardPushUnsubscribe],
   ['POST', /^\/api\/leads$/, createLead],
   ['GET', /^\/api\/admin\/leads$/, adminLeads, 'staff'],
+  ['GET', /^\/api\/admin\/sales$/, adminSales, 'staff'],
+  ['POST', /^\/api\/admin\/sales\/search$/, adminSalesSearch, 'staff'],
+  ['PUT', /^\/api\/admin\/sales\/settings$/, adminSalesSettings, 'staff'],
+  ['POST', /^\/api\/admin\/prospects$/, adminAddProspect, 'staff'],
+  ['GET', /^\/api\/admin\/prospects\/(\d+)$/, adminProspect, 'staff'],
+  ['PUT', /^\/api\/admin\/prospects\/(\d+)$/, adminProspectUpdate, 'staff'],
+  ['DELETE', /^\/api\/admin\/prospects\/(\d+)$/, adminProspectDelete, 'staff'],
+  ['POST', /^\/api\/admin\/prospects\/(\d+)\/send$/, adminProspectSend, 'staff'],
+  ['POST', /^\/api\/admin\/prospects\/(\d+)\/reply$/, adminProspectReply, 'staff'],
   ['PUT', /^\/api\/admin\/leads\/(\d+)$/, adminLeadStatus, 'staff'],
   ['GET', /^\/api\/admin\/shops$/, adminShops, 'staff'],
   ['POST', /^\/api\/admin\/shops\/(\d+)\/plan$/, adminShopPlan, 'staff'],
@@ -2936,6 +3317,7 @@ export async function handle(req, ctx) {
   const canon = canonicalRedirect(c);
   if (canon) return canon;
   try {
+    if (p === '/api/wa/webhook') return await waWebhook(c);
     if (p.startsWith('/api/')) return await api(c);
     if (p.startsWith('/apple/v1/')) return await appleService(c);
     if (req.method !== 'GET' && req.method !== 'HEAD') return notFound(c);

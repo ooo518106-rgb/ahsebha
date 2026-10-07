@@ -732,6 +732,29 @@ html[dir=ltr] .ai-msg.bot { align-self: flex-start; }
 .ai-form { display: flex; gap: 8px; padding: 10px 16px; border-top: 1px solid var(--border); }
 .ai-form input { flex: 1; min-width: 0; }
 .ai-note { margin: 0; padding: 0 16px calc(10px + env(safe-area-inset-bottom)); text-align: center; }
+.ai-msg a { color: inherit; font-weight: 600; text-decoration: underline; text-underline-offset: 3px; }
+.ai-cta { display: flex; gap: 8px; padding: 0 16px 10px; }
+.ai-cta .btn { flex: 1; }
+.offer-banner { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 18px; padding: 10px 14px; border-radius: 16px; background: color-mix(in srgb, var(--brand) 14%, transparent); border: 1px solid color-mix(in srgb, var(--brand) 40%, transparent); font-weight: 600; }
+.offer-banner span { flex: 1; min-width: 200px; }
+/* 🎯 المبيعات بصفحة المنصة */
+.sales-list { display: grid; gap: 10px; }
+.prospect { padding: 12px 14px; border: 1px solid var(--border); border-radius: 16px; background: var(--card); }
+.prospect-top { display: flex; align-items: flex-start; gap: 10px; }
+.prospect-top .grow { min-width: 0; }
+.prospect .acts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.prospect .acts .btn { min-height: 34px; padding: 4px 12px; }
+.st { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: .78rem; font-weight: 600; background: color-mix(in srgb, var(--muted) 15%, transparent); white-space: nowrap; }
+.st.hot, .st.won { background: color-mix(in srgb, #12b76a 18%, transparent); color: #067647; }
+.st.talking { background: color-mix(in srgb, var(--brand) 18%, transparent); }
+.st.failed, .st.optout, .st.lost { background: color-mix(in srgb, #f04438 14%, transparent); color: #b42318; }
+.sales-chat { display: flex; flex-direction: column; gap: 8px; max-height: 50vh; overflow-y: auto; padding: 10px; border-radius: 14px; background: color-mix(in srgb, var(--brand) 4%, var(--card)); border: 1px solid var(--border); }
+.sales-chat .ai-msg { font-size: .9rem; }
+.sales-chat .ai-msg.owner { align-self: flex-end; background: color-mix(in srgb, #12b76a 14%, var(--card)); border: 1px solid var(--border); }
+.sales-chat .ai-msg small { display: block; opacity: .6; font-size: .72rem; margin-top: 2px; }
+.steps-list { margin: 0; padding-inline-start: 20px; display: grid; gap: 6px; }
+.steps-list code { font-size: .82rem; direction: ltr; unicode-bidi: embed; overflow-wrap: anywhere; }
+
 .row.size-row > input { min-width: 0; flex: 1 1 0; }
 .row.size-row > [name=sizeName] { flex-grow: 1.4; }
 .row.size-row > .btn { flex: none; }

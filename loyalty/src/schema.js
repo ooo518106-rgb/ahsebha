@@ -247,17 +247,71 @@ export const SCHEMA = [
   )`,
   'CREATE INDEX IF NOT EXISTS menu_shop ON menu_items(shop_id, category, sort)',
   // ملف المنيو PDF: بينحفظ قطع (base64) لأنه قاعدة البيانات ما بتقبل قيمة أكبر من 2 ميغا. ver = وقت الرفع
-  // 🤖 استهلاك المساعد الذكي لكل محل باليوم (عدد الأسئلة والتوكنز، بدون المحادثات نفسها)
+  // 🤖 استهلاك وكيل المبيعات باليوم (عدد الرسائل والتوكنز وعمليات البحث). kind: web (الموقع)، wa (واتساب)، search (البحث عن محلات)
   `CREATE TABLE IF NOT EXISTS ai_usage (
-    shop_id INTEGER NOT NULL,
+    kind TEXT NOT NULL,
     day TEXT NOT NULL,
     requests INTEGER NOT NULL DEFAULT 0,
     input_tokens INTEGER NOT NULL DEFAULT 0,
     output_tokens INTEGER NOT NULL DEFAULT 0,
     cache_read INTEGER NOT NULL DEFAULT 0,
     cache_write INTEGER NOT NULL DEFAULT 0,
-    PRIMARY KEY (shop_id, day)
+    searches INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (kind, day)
   )`,
+  // 🎯 المحلات اللي الوكيل لقاها (أو اللي حكوا معه على واتساب). wa = الرقم الدولي إذا عليه واتساب
+  // status: new (لسا ما انبعتله)، sent، talking (رد)، hot (بده يحكي معك)، won (سجّل)، lost (مش مهتم)، optout (ما بده رسائل)، failed، manual (بدون واتساب)
+  `CREATE TABLE IF NOT EXISTS prospects (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    area TEXT,
+    kind TEXT,
+    phone TEXT,
+    wa TEXT,
+    instagram TEXT,
+    website TEXT,
+    why TEXT,
+    owner_name TEXT,
+    note TEXT,
+    status TEXT NOT NULL DEFAULT 'new',
+    source TEXT NOT NULL DEFAULT 'search',
+    search TEXT,
+    paused INTEGER NOT NULL DEFAULT 0,
+    error TEXT,
+    shop_id INTEGER,
+    sent_at INTEGER,
+    last_in_at INTEGER,
+    last_out_at INTEGER,
+    created_at INTEGER NOT NULL
+  )`,
+  'CREATE UNIQUE INDEX IF NOT EXISTS prospects_wa ON prospects(wa) WHERE wa IS NOT NULL',
+  'CREATE INDEX IF NOT EXISTS prospects_status ON prospects(status, id)',
+  'CREATE INDEX IF NOT EXISTS prospects_sent ON prospects(sent_at)',
+  // محادثة واتساب مع كل محل. role: in (منه)، agent (الوكيل)، owner (إنت من الصفحة)
+  `CREATE TABLE IF NOT EXISTS sales_msgs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    prospect_id INTEGER NOT NULL,
+    role TEXT NOT NULL,
+    text TEXT NOT NULL,
+    wa_id TEXT,
+    created_at INTEGER NOT NULL
+  )`,
+  'CREATE INDEX IF NOT EXISTS sales_msgs_p ON sales_msgs(prospect_id, id)',
+  'CREATE UNIQUE INDEX IF NOT EXISTS sales_msgs_wa ON sales_msgs(wa_id) WHERE wa_id IS NOT NULL',
+  // 🎁 عروض الوكيل: رابط تسجيل بتجربة مجانية أطول (بدون خصم بالسعر)
+  `CREATE TABLE IF NOT EXISTS offers (
+    code TEXT PRIMARY KEY,
+    prospect_id INTEGER,
+    shop_name TEXT,
+    trial_days INTEGER NOT NULL,
+    plan TEXT NOT NULL DEFAULT 'pro',
+    channel TEXT NOT NULL,
+    shop_id INTEGER,
+    used_at INTEGER,
+    expires_at INTEGER NOT NULL,
+    created_at INTEGER NOT NULL
+  )`,
+  'CREATE INDEX IF NOT EXISTS offers_prospect ON offers(prospect_id)',
   `CREATE TABLE IF NOT EXISTS menu_files (
     shop_id INTEGER NOT NULL REFERENCES shops(id),
     ver INTEGER NOT NULL,
@@ -345,7 +399,7 @@ export const MIGRATIONS = [
   // الباقات: أساسي أو مميز (المحلات الموجودة والتجارب على المميز)
   "ALTER TABLE shops ADD COLUMN plan TEXT NOT NULL DEFAULT 'pro'",
   "ALTER TABLE payments ADD COLUMN tier TEXT NOT NULL DEFAULT 'pro'",
-  'ALTER TABLE shops ADD COLUMN ai_on INTEGER NOT NULL DEFAULT 1',
+  'ALTER TABLE leads ADD COLUMN source TEXT',
   'ALTER TABLE credit_txns ADD COLUMN note TEXT',
   // فهارس على الأعمدة الجديدة (لازم تيجي بعد ما ينضاف العمود)
   'CREATE INDEX IF NOT EXISTS shops_reseller ON shops(reseller_id)',

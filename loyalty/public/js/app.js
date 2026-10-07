@@ -1553,13 +1553,6 @@ function offers() {
       <p class="hint">بعد الزيارة بساعة بيوصل الزبون «كيف كانت زيارتك؟». اللي بيعطي 4 أو 5 نجوم بنطلب منه يقيّم على Google، واللي أقل بيوصلك كلامه إنت بس (بتشوفه بـ 📊 النشاط).</p>
       <button class="btn" type="submit">حفظ</button>
       </form>
-      <form class="panel stack" data-perks="ai">
-      <h2>🤖 المساعد الذكي للزبائن</h2>
-      <label class="check"><input type="checkbox" name="aiOn" ${p.aiOn ? 'checked' : ''}> مفعّل</label>
-      <p class="hint">زر «🤖 اسأل المساعد» على بطاقة الزبون وصفحة المنيو. بينصحه من منيوك بالأحجام والأسعار، وبيجاوبه عن نقاطه ومكافأته وكوبوناته، بلهجته. بيعتمد على معلومات محلك بس، وما بيقدر يغيّر إشي بالبطاقة.</p>
-      ${state.me.ai && state.me.ai.ready ? html`<p class="small muted">أسئلة زبائنك هالشهر: <b class="num">${fmt(state.me.ai.monthQuestions)}</b></p>` : html`<p class="alert warn small">لسا مش شغّال على المنصة. بيشتغل أول ما مدير المنصة يفعّله.</p>`}
-      <button class="btn" type="submit">حفظ</button>
-      </form>
     </div>
     <div class="grid2 group" data-group="credit">
       <form class="panel stack" data-perks="credit">
@@ -1630,7 +1623,6 @@ function offers() {
         tiers: { tiersOn: on('tiersOn'), tierSilver: f.get('tierSilver'), tierGold: f.get('tierGold') },
         credit: { creditOn: on('creditOn'), creditBonus: f.get('creditBonus') },
         expiry: { expiryMonths: f.get('expiryMonths') },
-        ai: { aiOn: on('aiOn') },
       }[kind];
       const btn = form.querySelector('button[type=submit]');
       btn.disabled = true;
@@ -1895,22 +1887,23 @@ async function admin() {
   let pay;
   let resellers;
   let stats;
+  let salesSt;
   const nav = state.nav;
   try {
-    [{ leads }, { shops, signupOpen }, appleSt, pay, { resellers }, stats] = await Promise.all([api('/api/admin/leads'), api('/api/admin/shops'), api('/api/admin/apple'), api('/api/admin/payments'), api('/api/admin/resellers'), api('/api/admin/stats')]);
+    [{ leads }, { shops, signupOpen }, appleSt, pay, { resellers }, stats, salesSt] = await Promise.all([api('/api/admin/leads'), api('/api/admin/shops'), api('/api/admin/apple'), api('/api/admin/payments'), api('/api/admin/resellers'), api('/api/admin/stats'), api('/api/admin/sales')]);
   } catch (e) { if (nav === state.nav) render(view, html`<p class="alert bad">${e.message}</p>`); return; }
   if (nav !== state.nav) return;
   const fresh = leads.filter((l) => l.status === 'new').length;
   render(view, html`
-    ${subnav('admin', [['overview', '📊 الأرقام'], ['pay', `💳 الحوالات${pay.payments.some((p) => p.status === 'pending') ? ' •' : ''}`], ['shops', `🏪 المحلات والطلبات${fresh ? ` (${fresh})` : ''}`], ['partners', '🤝 المندوبين'], ['apple', '🍎 Apple Wallet'], ['updates', `🆕 التحديثات (${stats.version})`]])}
+    ${subnav('admin', [['overview', '📊 الأرقام'], ['pay', `💳 الحوالات${pay.payments.some((p) => p.status === 'pending') ? ' •' : ''}`], ['shops', `🏪 المحلات والطلبات${fresh ? ` (${fresh})` : ''}`], ['sales', `🎯 المبيعات${salesSt.counts.hot ? ` (🔥 ${salesSt.counts.hot})` : ''}`], ['partners', '🤝 المندوبين'], ['apple', '🍎 Apple Wallet'], ['updates', `🆕 التحديثات (${stats.version})`]])}
     <div class="group" data-group="overview">
     <a class="panel version-chip" href="#admin/updates" data-goto-updates>
       <span class="badge ok num">الإصدار ${stats.version}</span>
       <span class="grow small"><b>شو الجديد:</b> ${stats.changelog[0].items[0]}</span>
       <span aria-hidden="true">←</span></a>
     ${stats.ai && stats.ai.ready
-      ? html`<p class="alert ok small">🤖 المساعد الذكي (${stats.ai.model}): <b class="num">${fmt(stats.ai.requests)}</b> سؤال هالشهر${stats.ai.costUsd != null ? html` · تكلفة تقريبية <b class="num">$${stats.ai.costUsd}</b>` : ''}</p>`
-      : html`<p class="alert warn small">🤖 المساعد الذكي مش مفعّل. بيشتغل لما تضيف مفتاح Anthropic بإعدادات Cloudflare (ANTHROPIC_API_KEY).</p>`}
+      ? html`<p class="alert ok small">🎯 وكيل المبيعات هالشهر: <b class="num">${fmt(stats.ai.requests)}</b> رسالة (الموقع ${fmt(stats.ai.byKind.web || 0)} · واتساب ${fmt(stats.ai.byKind.wa || 0)} · بحث ${fmt(stats.ai.byKind.search || 0)})${stats.ai.costUsd != null ? html` · تكلفة تقريبية <b class="num">$${stats.ai.costUsd}</b>` : ''}</p>`
+      : html`<p class="alert warn small">🎯 وكيل المبيعات مش شغّال. بيشتغل لما تضيف مفتاح Anthropic بإعدادات Cloudflare (ANTHROPIC_API_KEY).</p>`}
     ${signupOpen
       ? html`<p class="alert ok">أي محل بيقدر يسجّل ويجرّب ${14} يوم مجاناً، وبعدها بيتوقف لحاله لحد ما تفعّله من هون بـ «+ شهر» أو «+ سنة».</p>`
       : html`<p class="alert ok">التسجيل مسكّر برمز. ابعت للمحل الجديد: <span dir="ltr" class="num">${location.origin}/?code=رمزك</span></p>`}
@@ -1941,7 +1934,7 @@ async function admin() {
     <section class="panel">
       <h2>طلبات الاشتراك</h2>
       ${leads.length ? html`<ul class="list" id="leadList">${leads.map((l) => html`<li style="align-items:flex-start">
-        <div class="main"><b>${l.shopName} <span class="badge ${LEAD_STATUS[l.status][1]}">${LEAD_STATUS[l.status][0]}</span></b>
+        <div class="main"><b>${l.shopName} <span class="badge ${LEAD_STATUS[l.status][1]}">${LEAD_STATUS[l.status][0]}</span>${l.source === 'ai' ? html` <span class="badge">🤖 من المساعد</span>` : ''}</b>
           <span class="small muted">${l.name} · <span class="num">${l.phone}</span>${l.city ? ` · ${l.city}` : ''}${l.kind ? ` · ${l.kind}` : ''}${l.reseller ? ` · 🤝 ${l.reseller}` : ''} · ${ago(l.createdAt)}</span>
           ${l.note ? html`<div class="small" style="margin-top:4px">${l.note}</div>` : ''}
           <div class="row" style="margin-top:6px">
@@ -1970,6 +1963,7 @@ async function admin() {
       })}</ul>` : html`<p class="muted">ما في محلات لسا.</p>`}
     </section>
     </div>
+    <div class="group stack-panels" data-group="sales">${salesPanel(salesSt)}</div>
     <div class="group" data-group="partners">
     ${resellersPanel(resellers)}
     </div>
@@ -1982,6 +1976,7 @@ async function admin() {
   bindApple();
   bindPayments();
   bindResellers();
+  bindSales(salesSt);
   $$('[data-shop-menu]').forEach((b) => {
     const shop = shops.find((x) => String(x.id) === b.dataset.shopMenu);
     b.onclick = () => adminShopMenu(shop);
@@ -2009,6 +2004,182 @@ async function admin() {
 }
 
 
+
+// ─── 🎯 وكيل المبيعات (لوحة مدير المنصة) ───
+const PROSPECT_ST = {
+  new: ['بالدور', ''], sent: ['انبعتله', ''], talking: ['عم يحكي', 'talking'], hot: ['🔥 بده يحكي معك', 'hot'], won: ['✅ سجّل', 'won'],
+  lost: ['مش مهتم', 'lost'], optout: ['🚫 ما بده رسائل', 'optout'], failed: ['ما انبعتت', 'failed'], manual: ['بدون واتساب', ''],
+};
+const salesReady = (st) => st.ai && st.whatsapp.ready;
+
+function prospectCard(p, st) {
+  const [label, cls] = PROSPECT_ST[p.status] || [p.status, ''];
+  const queued = p.status === 'new' || p.status === 'failed';
+  return html`<div class="prospect" data-pid="${p.id}">
+    <div class="prospect-top"><div class="grow">
+      <b>${p.name}</b> <span class="st ${cls}">${label}</span>${p.paused ? html` <span class="st">✋ إنت بترد</span>` : ''}${p.offer ? html` <span class="st">🎁 ${p.offer.trialDays} يوم${p.offer.used ? ' ✓' : ''}</span>` : ''}${p.source === 'inbound' ? html` <span class="st">📥 راسلنا</span>` : ''}
+      <div class="small muted">${[p.ownerName, p.kind, p.area].filter(Boolean).join(' · ')}${p.phone ? html` · <span class="num" dir="ltr">${p.phone}</span>` : ''} · ${ago(p.lastInAt || p.lastOutAt || p.createdAt)}</div>
+      ${p.why ? html`<div class="small" style="margin-top:4px">${p.why}</div>` : ''}
+      ${p.note ? html`<div class="small" style="margin-top:4px">📝 ${p.note}</div>` : ''}
+      ${p.error ? html`<div class="small" style="margin-top:4px;color:var(--bad)">⚠️ ${p.error}</div>` : ''}
+    </div></div>
+    <div class="acts">
+      ${p.sentAt || p.lastInAt ? html`<button class="btn sm" type="button" data-chat>💬 المحادثة</button>` : ''}
+      ${salesReady(st) && p.wa && queued ? html`<button class="btn sm" type="button" data-send>📲 ابعت هلأ</button>` : ''}
+      ${!st.whatsapp.ready && p.waLink && (queued || p.status === 'manual') ? html`<a class="btn sm wa" href="${p.waLink}" target="_blank" rel="noopener" data-manual>واتساب</a>` : ''}
+      ${p.instagram ? html`<a class="btn sm ghost" href="${p.instagram}" target="_blank" rel="noopener">انستغرام</a>` : ''}
+      ${p.website ? html`<a class="btn sm ghost" href="${p.website}" target="_blank" rel="noopener">🌐 صفحته</a>` : ''}
+      ${p.phone ? html`<a class="btn sm ghost" href="tel:${p.phone}">اتصال</a>` : ''}
+      <select data-st aria-label="الحالة" style="width:auto;min-height:34px;padding:4px 8px">${Object.entries(PROSPECT_ST).map(([k, [l]]) => html`<option value="${k}" ${k === p.status ? 'selected' : ''}>${l}</option>`)}</select>
+      <button class="btn sm ghost" type="button" data-del aria-label="احذف">🗑</button>
+    </div>
+    <div class="chat-box"></div>
+  </div>`;
+}
+
+function salesPanel(st) {
+  const c = st.counts;
+  const talking = (c.talking || 0) + (c.hot || 0);
+  return html`
+  <section class="panel stack">
+    <h2>🎯 وكيل المبيعات</h2>
+    <p class="hint">بيدوّر بالإنترنت على محلات، بيبعتلهم أول رسالة على واتساب، ولما يردّوا بيحكي معهم وبيفاوض بدون ما ينزّل السعر (تجربة مجانية لحد 30 يوم، والاشتراك السنوي، والباقة الأساسية). إذا حدا بده يحكي معك بيوصلك إشعار.</p>
+    <details ${salesReady(st) && st.whatsapp.verified ? '' : 'open'}><summary><b>خطوات التشغيل</b></summary>
+      <ol class="steps-list" style="margin-top:8px">
+        <li>${st.ai ? '✅' : '⬜'} مفتاح Anthropic كـ Secret بـ Cloudflare: <code>ANTHROPIC_API_KEY</code></li>
+        <li>${st.whatsapp.ready ? '✅' : '⬜'} واتساب الرسمي من Meta: <code>WHATSAPP_TOKEN</code> و <code>WHATSAPP_PHONE_ID</code></li>
+        <li>${st.whatsapp.verified ? '✅' : '⬜'} عشان الوكيل يستلم الردود: <code>WHATSAPP_APP_SECRET</code> و <code>WHATSAPP_VERIFY_TOKEN</code>، ورابط الـ Webhook بـ Meta: <code>${st.whatsapp.webhookUrl}</code></li>
+        <li>قالب أول رسالة بـ Meta، اسمه <code>${st.whatsapp.template}</code> (Marketing، عربي)، ونصه:<div class="small" style="margin-top:4px">${st.whatsapp.templateText}</div></li>
+      </ol>
+    </details>
+    <div class="stats">
+      <div class="stat"><b class="num">${fmt(c.new || 0)}</b><span class="small muted">بالدور</span></div>
+      <div class="stat"><b class="num">${fmt(st.sentToday)}/${fmt(st.settings.daily)}</b><span class="small muted">انبعتلهم اليوم</span></div>
+      <div class="stat"><b class="num">${fmt(talking)}</b><span class="small muted">عم يحكوا${c.hot ? ` (🔥 ${c.hot})` : ''}</span></div>
+      <div class="stat"><b class="num">${fmt(st.signups)}</b><span class="small muted">سجّلوا من عروضه</span></div>
+    </div>
+  </section>
+  <form class="panel stack" id="salesSearch">
+    <h2>🔎 دوّر على محلات</h2>
+    <div class="row">
+      <div class="field grow"><label for="sq">شو بدك يدوّر؟</label><input id="sq" name="query" required maxlength="120" placeholder="كوفي شوب بعبدون"></div>
+      <div class="field"><label for="sc">كم محل</label><select id="sc" name="count"><option>5</option><option selected>10</option><option>20</option></select></div>
+    </div>
+    <button class="btn" type="submit" ${st.ai ? '' : 'disabled'}>🔎 دوّر</button>
+    <p class="hint">${st.ai ? 'بياخد دقيقة أو اتنتين. اللي إلهم رقم موبايل بيدخلوا الدور، والباقي بتحكي معهم إنت (انستغرام أو اتصال).' : 'بيشتغل بعد ما تضيف مفتاح Anthropic.'}</p>
+  </form>
+  <form class="panel stack" id="salesSettings">
+    <h2>⚙️ الإرسال التلقائي</h2>
+    <label class="check"><input type="checkbox" name="auto" ${st.settings.auto ? 'checked' : ''} ${st.whatsapp.ready ? '' : 'disabled'}> يبعت لحاله أول رسالة للمحلات اللي بالدور</label>
+    <div class="field"><label for="sd">كم محل باليوم بالكتير</label><input id="sd" name="daily" type="number" inputmode="numeric" min="1" max="200" value="${st.settings.daily}"></div>
+    <p class="hint">من 10 الصبح لـ 8 المسا (مش الجمعة)، ورسالة وحدة لكل محل. ابدأ بـ 20 باليوم: إذا ناس كتير بلّغوا عن الرسائل، واتساب بيوقف الرقم. واللي بيرد «لا» ما بنرجع نبعتله.</p>
+    <button class="btn" type="submit">حفظ</button>
+  </form>
+  <section class="panel stack">
+    <div class="row" style="justify-content:space-between"><h2 style="margin:0">المحلات (${st.prospects.length})</h2>
+      <select id="salesFilter" aria-label="فلتر" style="width:auto;min-height:34px;padding:4px 8px">
+        <option value="">الكل</option><option value="talking,hot">عم يحكوا</option><option value="new,failed">بالدور</option><option value="sent">انبعتلهم</option><option value="won">سجّلوا</option><option value="manual">بدون واتساب</option>
+      </select></div>
+    ${st.prospects.length ? html`<div class="sales-list" id="salesList">${st.prospects.map((p) => prospectCard(p, st))}</div>` : html`<p class="muted">لسا ما في محلات. دوّر فوق، أو ضيف محل بتعرفه.</p>`}
+    <details><summary>+ ضيف محل بتعرفه</summary>
+      <form class="stack" id="salesAdd" style="margin-top:10px">
+        <div class="row"><div class="field grow"><label for="pa-n">اسم المحل</label><input id="pa-n" name="name" required maxlength="60"></div>
+          <div class="field grow"><label for="pa-p">رقم الواتساب</label><input id="pa-p" name="phone" type="tel" dir="ltr" required placeholder="07xxxxxxxx"></div></div>
+        <div class="row"><div class="field grow"><label for="pa-a">المنطقة</label><input id="pa-a" name="area" maxlength="60"></div>
+          <div class="field grow"><label for="pa-k">النوع</label><input id="pa-k" name="kind" maxlength="40" placeholder="كوفي شوب"></div></div>
+        <div class="field"><label for="pa-w">ملاحظة للوكيل <span class="hint">(اختياري)</span></label><input id="pa-w" name="note" maxlength="300" placeholder="صاحبه بيعرفني، عنده فرعين"></div>
+        <button class="btn" type="submit">ضيف للدور</button>
+      </form></details>
+  </section>`;
+}
+
+async function openProspectChat(card) {
+  const box = card.querySelector('.chat-box');
+  if (box.dataset.open) { box.innerHTML = ''; delete box.dataset.open; return; }
+  box.dataset.open = '1';
+  box.innerHTML = '<p class="small muted">جاري التحميل…</p>';
+  const draw = (d) => {
+    const who = { in: 'user', agent: 'bot', owner: 'bot owner' };
+    render(box, html`<div class="stack" style="margin-top:10px">
+      <div class="sales-chat">${d.messages.length ? d.messages.map((m) => html`<div class="ai-msg ${who[m.role] || 'bot'}">${m.text}<small>${m.role === 'in' ? d.prospect.name : m.role === 'owner' ? 'إنت' : '🤖 الوكيل'} · ${ago(m.at)}</small></div>`) : html`<p class="small muted">ما في رسائل لسا.</p>`}</div>
+      <div class="row">
+        <button class="btn sm ${d.prospect.paused ? '' : 'ghost'}" type="button" data-pause>${d.prospect.paused ? '🤖 رجّع الوكيل يرد' : '✋ وقّف الوكيل، رح أرد أنا'}</button>
+      </div>
+      ${d.canReply ? html`<form class="ai-form" style="padding:0;border:0" data-reply><input name="text" maxlength="1000" required placeholder="ردّك (الوكيل بيوقف مع هالمحل)"><button class="btn" type="submit">إرسال</button></form>`
+        : html`<p class="hint">ما بتقدر تبعتله رسالة عادية هلأ: واتساب بيسمح بس خلال 24 ساعة من آخر رسالة منه.</p>`}
+    </div>`);
+    const log = box.querySelector('.sales-chat');
+    log.scrollTop = log.scrollHeight;
+    box.querySelector('[data-pause]').onclick = async () => {
+      try { draw(await api(`/api/admin/prospects/${d.prospect.id}`, { method: 'PUT', body: { paused: !d.prospect.paused } })); } catch (e) { toast(e.message, 'bad'); }
+    };
+    const form = box.querySelector('[data-reply]');
+    if (form) {
+      form.onsubmit = async (e) => {
+        e.preventDefault();
+        const btn = form.querySelector('button');
+        btn.disabled = true;
+        try { draw(await api(`/api/admin/prospects/${d.prospect.id}/reply`, { method: 'POST', body: { text: form.text.value } })); } catch (err) { toast(err.message, 'bad'); btn.disabled = false; }
+      };
+    }
+  };
+  try { draw(await api(`/api/admin/prospects/${card.dataset.pid}`)); } catch (e) { box.innerHTML = ''; delete box.dataset.open; toast(e.message, 'bad'); }
+}
+
+function bindSales(st) {
+  const redraw = (next) => { const g = $('[data-group="sales"]'); if (g) { render(g, salesPanel(next)); bindSales(next); } };
+  const search = $('#salesSearch');
+  search.onsubmit = async (e) => {
+    e.preventDefault();
+    const btn = search.querySelector('button');
+    btn.disabled = true;
+    btn.textContent = '🔎 عم بدوّر… (دقيقة أو اتنتين)';
+    try {
+      const r = await api('/api/admin/sales/search', { method: 'POST', body: { query: search.query.value, count: Number(search.count.value) } });
+      toast(r.added ? `لقى ${r.added} محل جديد ✅` : 'ما لقى محلات جديدة، جرّب منطقة تانية', r.added ? 'ok' : '');
+      redraw(r);
+    } catch (err) { toast(err.message, 'bad'); btn.disabled = false; btn.textContent = '🔎 دوّر'; }
+  };
+  const settings = $('#salesSettings');
+  settings.onsubmit = async (e) => {
+    e.preventDefault();
+    try { redraw(await api('/api/admin/sales/settings', { method: 'PUT', body: { auto: settings.auto.checked, daily: Number(settings.daily.value) } })); toast('انحفظ ✅', 'ok'); } catch (err) { toast(err.message, 'bad'); }
+  };
+  const add = $('#salesAdd');
+  add.onsubmit = async (e) => {
+    e.preventDefault();
+    try { redraw(await api('/api/admin/prospects', { method: 'POST', body: Object.fromEntries(new FormData(add)) })); toast('انضاف للدور ✅', 'ok'); } catch (err) { toast(err.message, 'bad'); }
+  };
+  const filter = $('#salesFilter');
+  filter.onchange = () => {
+    const want = filter.value ? filter.value.split(',') : null;
+    $$('#salesList .prospect').forEach((el) => {
+      const p = st.prospects.find((x) => String(x.id) === el.dataset.pid);
+      el.hidden = !!want && !want.includes(p.status);
+    });
+  };
+  $$('#salesList .prospect').forEach((card) => {
+    const id = card.dataset.pid;
+    const chatBtn = card.querySelector('[data-chat]');
+    if (chatBtn) chatBtn.onclick = () => openProspectChat(card);
+    const send = card.querySelector('[data-send]');
+    if (send) {
+      send.onclick = async () => {
+        send.disabled = true;
+        try { await api(`/api/admin/prospects/${id}/send`, { method: 'POST' }); toast('انبعتت ✅', 'ok'); redraw(await api('/api/admin/sales')); } catch (e) { toast(e.message, 'bad'); send.disabled = false; }
+      };
+    }
+    const manual = card.querySelector('[data-manual]');
+    if (manual) manual.addEventListener('click', () => { api(`/api/admin/prospects/${id}`, { method: 'PUT', body: { status: 'sent' } }).catch(() => {}); });
+    card.querySelector('[data-st]').onchange = async (e) => {
+      try { await api(`/api/admin/prospects/${id}`, { method: 'PUT', body: { status: e.target.value } }); toast('انحفظ', 'ok'); } catch (err) { toast(err.message, 'bad'); }
+    };
+    card.querySelector('[data-del]').onclick = async () => {
+      if (!confirm('تحذف هالمحل ومحادثته من القائمة؟')) return;
+      try { await api(`/api/admin/prospects/${id}`, { method: 'DELETE' }); card.remove(); } catch (e) { toast(e.message, 'bad'); }
+    };
+  });
+}
 
 // ─── المندوبين (لوحة مدير المنصة) ───
 // 📋 مدير المنصة بيرتّب منيو محل (بيرفع الـ PDF، بيستورد منيو جاهز، أو بيضيف أصناف) بدون كلمة سر المحل

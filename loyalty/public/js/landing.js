@@ -1,6 +1,7 @@
 // صفحة البيع: بطاقة تجريبية، طلب اشتراك (فورم أو واتساب)، ودخول المحلات
 import { $, $$, api, cardHTML, render } from './common.js';
 import { PLAN_DEFAULTS, featuresHTML } from './plans.js';
+import { mountSales } from './sales.js';
 
 const params = new URLSearchParams(location.search);
 const code = params.get('code');
@@ -16,6 +17,33 @@ const partner = () => {
     return v && Date.now() - v.at < 60 * 864e5 ? v.code : undefined;
   } catch { return undefined; }
 };
+// 🎁 عرض من وكيل المبيعات (?offer=…): تجربة مجانية أطول، بنحفظه أسبوعين وبيرافق التسجيل
+const OFFER_KEY = 'nq_offer';
+const keepOffer = (code) => { try { localStorage.setItem(OFFER_KEY, JSON.stringify({ code, at: Date.now() })); } catch { /* اختياري */ } };
+(() => { const o = (params.get('offer') || '').toLowerCase(); if (/^[a-z2-9]{8}$/.test(o)) keepOffer(o); })();
+const offerCode = () => {
+  try {
+    const v = JSON.parse(localStorage.getItem(OFFER_KEY) || 'null');
+    return v && Date.now() - v.at < 14 * 864e5 ? v.code : undefined;
+  } catch { return undefined; }
+};
+let offerDays = null;
+function showOffer(o) {
+  offerDays = o.trialDays;
+  let el = $('#offerBanner');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'offerBanner';
+    el.className = 'offer-banner';
+    $('.hero-copy').prepend(el);
+  }
+  el.innerHTML = '<span></span><button type="button" class="btn sm">ابدأ هلأ</button>';
+  el.querySelector('span').textContent = `🎁 ${o.shopName ? `عرض خاص لـ ${o.shopName}: ` : 'عرضك الخاص: '}تجربة مجانية ${o.trialDays} يوم بدل 14`;
+  el.querySelector('button').onclick = () => startSignup();
+  if (mode === 'signup') setMode('signup');
+}
+if (offerCode()) api(`/api/offers/${offerCode()}`).then(showOffer).catch(() => { try { localStorage.removeItem(OFFER_KEY); } catch { /* اختياري */ } });
+
 let mode = 'login';
 let signupOpen = false;
 let whatsapp = null;
@@ -93,6 +121,13 @@ api('/api/site').then((s) => {
   if (s.apple) $('#faqIphone').textContent = 'بتنحفظ البطاقة بـ Apple Wallet، وبتفتح بكبستين على الزر الجانبي، ولما يقرّب الزبون من محلك بتطلعله على شاشة القفل برسالة الترحيب تبعتك.';
   showWhatsApp();
   setupAuth();
+  if (s.sales) {
+    mountSales({
+      onStart: () => startSignup(),
+      onOffer: (o) => { keepOffer(o.code); showOffer(o); },
+      extra: () => ({ partner: partner(), offer: offerCode() }),
+    });
+  }
 }).catch(() => setupAuth());
 
 // المحل اللي مسجّل دخول بيشوف «لوحتي» بدل «دخول»
@@ -124,7 +159,7 @@ function setMode(m) {
   $$('.signup-only').forEach((el) => el.classList.toggle('hidden', m !== 'signup' || (el.id === 'codeField' && signupOpen && !code)));
   $('#password').autocomplete = m === 'signup' ? 'new-password' : 'current-password';
   $('#authBtn').textContent = m === 'signup' ? 'ابدأ تجربتي المجانية' : 'دخول';
-  $('#authTitle').textContent = m === 'signup' ? 'ابدأ تجربتك المجانية' : 'دخول المحلات';
+  $('#authTitle').textContent = m === 'signup' ? `ابدأ تجربتك المجانية${offerDays ? ` (${offerDays} يوم 🎁)` : ''}` : 'دخول المحلات';
   $('#authError').textContent = '';
 }
 
@@ -161,7 +196,7 @@ $('#auth').addEventListener('submit', async (e) => {
   $('#authError').textContent = '';
   try {
     if (mode === 'signup') {
-      await api('/api/auth/signup', { method: 'POST', body: { ...Object.fromEntries(f), partner: partner() } });
+      await api('/api/auth/signup', { method: 'POST', body: { ...Object.fromEntries(f), partner: partner(), offer: offerCode() } });
       location.href = '/app#settings';
     } else {
       await api('/api/auth/login', { method: 'POST', body: { email: f.get('email'), password: f.get('password') } });

@@ -2,7 +2,6 @@
 import { $, api, cardHTML, html, isIOS, raw, render, setBrand, toast } from './common.js';
 import { LANG, applyLang, fmtDate, ruleText, setLang, t } from './i18n.js';
 import { confetti } from './confetti.js';
-import { mountAssistant } from './assistant.js';
 
 applyLang();
 
@@ -145,7 +144,6 @@ async function load(first = false, quiet = false) {
   if (sig === lastSig) return;
   lastSig = sig;
   lastData = data;
-  if (data.assistant) mountAssistant({ token, shopName: data.shop.name });
   remember(data.shop.slug);
   draw();
 }

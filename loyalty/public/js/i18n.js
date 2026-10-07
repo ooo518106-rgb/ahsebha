@@ -61,10 +61,6 @@ const AR = {
   loading: 'جاري التحميل…',
   // المنيو
   menu: 'المنيو', menuEmpty: 'المنيو لسا فاضي.', menuJoin: '🎁 اجمع نقاط مع كل طلب واحصل على {reward}', menuJoinBtn: 'خذ بطاقة الولاء', menuOpenCard: 'افتح بطاقتي', menuPdf: 'افتح المنيو', menuPdfHint: 'المنيو الكامل (PDF)', sizeLabel: 'الحجم', seeMenu: '📋 شوف المنيو',
-  aiAsk: 'اسأل المساعد', aiTitle: 'مساعد {shop}', aiPlaceholder: 'اكتب سؤالك…', aiSend: 'إرسال', aiErr: 'صار خطأ، جرّب كمان مرة',
-  aiHello: 'أهلا! 👋 أنا مساعد {shop}. بقدر أنصحك من المنيو، أو أحكيلك عن نقاطك وعروضك.',
-  aiQ1: 'شو بتنصحني اليوم؟', aiQ2: 'كم باقيلي للمكافأة؟', aiQ3: 'شو العروض عندكم؟', aiQ4: 'بدي إشي بارد وحلو',
-  aiNote: 'المساعد بيجاوب بالذكاء الاصطناعي وممكن يغلط. النقاط والمكافآت بتنحسب عند الكاشير.',
   // كل بطاقاتي والهدايا
   myCards: '💼 بطاقاتي', myCardsEmpty: 'ما في بطاقات محفوظة على هالجهاز لسا. افتح رابط بطاقتك مرة وبتنحفظ هون.', addCardLink: 'الصق رابط بطاقة', addCard: 'ضيف', removeCard: 'شيلها من هون',
   myCardsHint: 'ضيف هالصفحة على الشاشة الرئيسية، وبتصير عندك أيقونة وحدة لكل بطاقاتك.', allCards: '💼 كل بطاقاتي',
@@ -111,10 +107,6 @@ const EN = {
   consent: 'By joining you agree to the <a href="/privacy" target="_blank" rel="noopener">privacy policy</a>. We only keep your name, number, points (and birthday if you add it), and you can delete them anytime.',
   loading: 'Loading…',
   menu: 'Menu', menuEmpty: 'The menu is empty for now.', menuJoin: '🎁 Earn points with every order and get {reward}', menuJoinBtn: 'Get the loyalty card', menuOpenCard: 'Open my card', menuPdf: 'Open the menu', menuPdfHint: 'Full menu (PDF)', sizeLabel: 'Size', seeMenu: '📋 See the menu',
-  aiAsk: 'Ask the assistant', aiTitle: '{shop} assistant', aiPlaceholder: 'Type your question…', aiSend: 'Send', aiErr: 'Something went wrong, try again',
-  aiHello: 'Hi! 👋 I’m the {shop} assistant. I can recommend something from the menu, or tell you about your points and offers.',
-  aiQ1: 'What do you recommend today?', aiQ2: 'How far am I from my reward?', aiQ3: 'Any offers?', aiQ4: 'Something cold and sweet',
-  aiNote: 'The assistant uses AI and can make mistakes. Points and rewards are handled at the counter.',
   myCards: '💼 My cards', myCardsEmpty: 'No cards saved on this device yet. Open your card link once and it will show up here.', addCardLink: 'Paste a card link', addCard: 'Add', removeCard: 'Remove from here',
   myCardsHint: 'Add this page to your home screen to get one icon for all your cards.', allCards: '💼 All my cards',
   giftBtn: '🎁 Gift credit to a friend', giftAsk: 'How much do you want to gift? ({cur})', giftMade: 'Your gift is ready 🎁 Send the link to your friend', giftText: '🎁 I gifted you {amount} {cur} of credit at {shop}! Open the link to claim it:\n{url}',

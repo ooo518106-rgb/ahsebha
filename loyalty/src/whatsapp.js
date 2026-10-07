@@ -1,0 +1,95 @@
+// 📲 واتساب الرسمي (WhatsApp Business Cloud API من Meta): وكيل المبيعات بيبعت أول رسالة (قالب موافق عليه من Meta)،
+// ولما المحل يرد، الردود بتوصل على /api/wa/webhook والوكيل بيجاوب خلال 24 ساعة من آخر رسالة إله.
+import { normPhone } from './util.js';
+
+// الأسرار من Cloudflare: WHATSAPP_TOKEN (توكن دائم)، WHATSAPP_PHONE_ID (رقم تعريف رقم الهاتف)،
+// WHATSAPP_APP_SECRET (للتأكد إنه الرسائل جاية من Meta)، WHATSAPP_VERIFY_TOKEN (كلمة بتختارها لربط الـ webhook)
+export function waConfig(env) {
+  const token = String(env.WHATSAPP_TOKEN || '').trim();
+  const phoneId = String(env.WHATSAPP_PHONE_ID || '').trim();
+  if (!token || !/^\d{5,20}$/.test(phoneId)) return null;
+  return {
+    token,
+    phoneId,
+    appSecret: String(env.WHATSAPP_APP_SECRET || '').trim(),
+    verifyToken: String(env.WHATSAPP_VERIFY_TOKEN || '').trim(),
+    template: String(env.WHATSAPP_TEMPLATE || 'nuqatak_intro').trim(),
+    lang: String(env.WHATSAPP_TEMPLATE_LANG || 'ar').trim(),
+    version: /^v\d+\.\d+$/.test(String(env.WHATSAPP_API_VERSION || '')) ? env.WHATSAPP_API_VERSION : 'v22.0',
+    fetch: env.fetch || ((...a) => fetch(...a)),
+  };
+}
+
+const CODES = { JO: '962', PS: '970', SA: '966', AE: '971', KW: '965', QA: '974', BH: '973', OM: '968', EG: '20', IQ: '964', LB: '961', SY: '963', TR: '90' };
+
+// الرقم بالشكل الدولي بدون + (962791234567)، أو null إذا مش رقم موبايل بينفع للواتساب
+export function waNumber(raw, country = 'JO') {
+  let d = normPhone(raw);
+  const code = CODES[country] || '962';
+  if (/^0\d{8,10}$/.test(d)) d = code + d.slice(1);
+  else if (country === 'JO' && /^7\d{8}$/.test(d)) d = `962${d}`;
+  if (d.startsWith('962')) return /^9627[789]\d{7}$/.test(d) ? d : null; // الأردن: موبايل بس (الأرضي 06 ما عليه واتساب)
+  return /^\d{10,15}$/.test(d) ? d : null;
+}
+
+async function graph(cfg, body) {
+  const res = await cfg.fetch(`https://graph.facebook.com/${cfg.version}/${cfg.phoneId}/messages`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${cfg.token}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ messaging_product: 'whatsapp', ...body }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const e = new Error((data.error && (data.error.error_user_msg || data.error.message)) || `WhatsApp ${res.status}`);
+    e.code = data.error && data.error.code;
+    e.status = res.status;
+    throw e;
+  }
+  return data.messages && data.messages[0] ? data.messages[0].id : null;
+}
+
+// أول رسالة: القالب، والمتغير {{1}} = اسم المحل
+export const sendTemplate = (cfg, to, shopName) => graph(cfg, {
+  to,
+  type: 'template',
+  template: {
+    name: cfg.template,
+    language: { code: cfg.lang },
+    components: [{ type: 'body', parameters: [{ type: 'text', text: String(shopName).replace(/\s+/g, ' ').slice(0, 60) }] }],
+  },
+});
+
+// رد عادي (بس خلال 24 ساعة من آخر رسالة من المحل)
+export const sendText = (cfg, to, text) => graph(cfg, { to, type: 'text', text: { body: String(text).slice(0, 4000), preview_url: true } });
+
+// Meta بتوقّع كل رسالة بـ HMAC-SHA256 بسر التطبيق (X-Hub-Signature-256)
+export async function verifySignature(appSecret, raw, header) {
+  const m = /^sha256=([0-9a-f]{64})$/i.exec(String(header || ''));
+  if (!appSecret || !m) return false;
+  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(appSecret), { name: 'HMAC', hash: 'SHA-256' }, false, ['verify']);
+  const sig = new Uint8Array(m[1].match(/../g).map((h) => parseInt(h, 16)));
+  return crypto.subtle.verify('HMAC', key, sig, new TextEncoder().encode(raw));
+}
+
+// الرسائل الواصلة من الـ webhook: [{ from, id, name, text, at }]
+export function incoming(payload, phoneId) {
+  const out = [];
+  for (const entry of (payload && payload.entry) || []) {
+    for (const ch of entry.changes || []) {
+      const v = ch.value || {};
+      if (phoneId && v.metadata && v.metadata.phone_number_id && v.metadata.phone_number_id !== phoneId) continue;
+      const names = Object.fromEntries((v.contacts || []).map((ct) => [ct.wa_id, ct.profile && ct.profile.name]));
+      for (const msg of v.messages || []) {
+        const text = msg.type === 'text' ? msg.text && msg.text.body
+          : msg.type === 'button' ? msg.button && (msg.button.text || msg.button.payload)
+            : msg.type === 'interactive' ? (msg.interactive.button_reply || msg.interactive.list_reply || {}).title
+              : null;
+        out.push({ from: normPhone(msg.from), id: msg.id, name: names[msg.from] || '', text: text ? String(text).trim().slice(0, 1000) : '', type: msg.type, at: Number(msg.timestamp) * 1000 || Date.now() });
+      }
+    }
+  }
+  return out;
+}
+
+// «لا» أو «وقف» أو «stop»: ما منرجع نبعتله
+export const isOptOut = (text) => /^\s*(لا|لأ|لا شكرا|لا شكراً|لا، شكراً|لا شكرًا|مش مهتم|مو مهتم|وقف|توقف|الغاء|إلغاء|stop|unsubscribe|no thanks?)\s*[.!🙏]*\s*$/i.test(String(text || ''));
