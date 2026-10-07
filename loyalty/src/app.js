@@ -2821,8 +2821,7 @@ async function sendIntro(c, wcfg, p, now = Date.now()) {
     }
     // مشكلة بالحساب أو القالب: بنرجّع المحل للدور وبنوقف الإرسال التلقائي لحد ما تصلّحها
     await c.db.run("UPDATE prospects SET status = 'new', sent_at = NULL, error = ? WHERE id = ?", msg, p.id);
-    await setSetting(c.db, 'sales_auto', '0');
-    await notifyAdmin(c, { title: '⚠️ وكيل المبيعات وقف الإرسال', body: msg, url: `${c.origin}/app#admin` });
+    await stopOutreach(c, msg);
     const err = new Error(msg);
     err.stop = true;
     throw err;
@@ -2837,6 +2836,8 @@ async function salesOutreachJob(c, now) {
   if (t.weekday === 5 || t.hour < 10 || t.hour >= 20) return 0;
   const daily = Number(await getSetting(c.db, 'sales_daily')) || SALES_DAILY;
   const sent = (await c.db.get('SELECT COUNT(*) AS n FROM prospects WHERE sent_at > ?', now - DAY)).n;
+  if (sent >= daily || !(await c.db.get("SELECT id FROM prospects WHERE status = 'new' AND wa IS NOT NULL AND paused = 0 LIMIT 1"))) return 0;
+  if (!(await qualityOk(c, wcfg, now))) return 0;
   let n = 0;
   for (let room = Math.min(2, daily - sent); room > 0; room--) {
     const p = await c.db.get("SELECT * FROM prospects WHERE status = 'new' AND wa IS NOT NULL AND paused = 0 ORDER BY id LIMIT 1");
@@ -2874,6 +2875,7 @@ async function waWebhook(c) {
   if (!payload) return new Response('bad json', { status: 400 });
   for (const m of wa.incoming(payload, wcfg.phoneId)) await waIncoming(c, wcfg, m);
   for (const f of wa.failures(payload, wcfg.phoneId)) await waFailed(c, f);
+  for (const ev of wa.accountEvents(payload, wcfg.wabaId)) await waAccountEvent(c, wcfg, ev);
   return new Response('ok');
 }
 
@@ -2895,10 +2897,45 @@ async function waFailed(c, f) {
     return;
   }
   await c.db.run("UPDATE prospects SET status = 'new', sent_at = NULL, error = ? WHERE id = ?", msg, p.id);
-  if ((await getSetting(c.db, 'sales_auto')) === '1') {
-    await setSetting(c.db, 'sales_auto', '0');
-    await notifyAdmin(c, { title: '⚠️ وكيل المبيعات وقف الإرسال', body: msg, url: `${c.origin}/app#admin` });
+  await stopOutreach(c, msg);
+}
+
+// بيطفي الإرسال التلقائي وبيحفظ السبب (بيبيّن بصفحة المبيعات). الإشعار بس إذا كان شغّال
+async function stopOutreach(c, why) {
+  const was = (await getSetting(c.db, 'sales_auto')) === '1';
+  await setSetting(c.db, 'sales_auto', '0');
+  await setSetting(c.db, 'sales_stop', JSON.stringify({ at: Date.now(), why: clean(why, 300) }));
+  if (was) await notifyAdmin(c, { title: '⚠️ وكيل المبيعات وقف الإرسال لحاله', body: clean(why, 140), url: `${c.origin}/app#admin` });
+}
+
+// Meta وقّفت القالب أو نزّلت تقييم الرقم (ناس حظروا أو بلّغوا): بنوقف الإرسال قبل ما الرقم يتقيّد
+const TEMPLATE_STOP = new Set(['PAUSED', 'DISABLED', 'FLAGGED', 'REJECTED', 'PENDING_DELETION']);
+const QUALITY_STOP = new Set(['FLAGGED', 'DOWNGRADE']);
+async function waAccountEvent(c, wcfg, ev) {
+  if (ev.kind === 'template' && ev.name === wcfg.template && TEMPLATE_STOP.has(ev.event)) {
+    await stopOutreach(c, `Meta وقّفت قالب أول رسالة (${ev.event})${ev.reason ? `: ${ev.reason}` : ''}. غالباً ناس بلّغوا عنه أو حظروا الرقم`);
+  } else if (ev.kind === 'quality' && QUALITY_STOP.has(ev.event)) {
+    await stopOutreach(c, `Meta نزّلت تقييم رقم الوكيل (${ev.event}) لأنه ناس حظروا أو بلّغوا. استنى كم يوم وارجع ابدأ بعدد أقل`);
   }
+}
+
+// تقييم الرقم عند Meta (أخضر، أصفر، أحمر) كل ساعة: إذا نزل عن آخر مرة، بنوقف الإرسال.
+// إذا رجّعت تشغّله وهو أصفر بنكمّل، بس إذا صار أحمر بنوقف
+const QUALITY_RANK = { GREEN: 0, UNKNOWN: 0, YELLOW: 1, RED: 2 };
+async function qualityOk(c, wcfg, now) {
+  const last = await jsonSetting(c.db, 'wa_quality');
+  if (last && now - last.at < HOUR) return true;
+  let rating;
+  try { rating = String((await wa.numberStatus(wcfg)).quality_rating || '').toUpperCase() || null; } catch { return true; } // ما قدرنا نفحص: منكمّل
+  await setSetting(c.db, 'wa_quality', JSON.stringify({ at: now, rating }));
+  const rank = QUALITY_RANK[rating] || 0;
+  if (rank >= 1 && rank > (QUALITY_RANK[last && last.rating] || 0)) {
+    await stopOutreach(c, rating === 'RED'
+      ? 'تقييم رقم الوكيل عند Meta صار أحمر (ناس كتير حظروا أو بلّغوا). وقّف كم يوم قبل ما ترجع تبعت، وإلا ممكن الرقم ينحظر'
+      : 'تقييم رقم الوكيل عند Meta صار أصفر (في ناس حظروا أو بلّغوا). استنى يوم أو يومين، ولما ترجع شغّله خلّي العدد أقل (10 باليوم)');
+    return false;
+  }
+  return true;
 }
 
 async function waIncoming(c, wcfg, m) {
@@ -3013,6 +3050,7 @@ async function salesState(c) {
     sentToday: (await c.db.get('SELECT COUNT(*) AS n FROM prospects WHERE sent_at > ?', Date.now() - DAY)).n,
     signups: (await c.db.get('SELECT COUNT(*) AS n FROM offers WHERE used_at IS NOT NULL')).n,
     settings: { auto: (await getSetting(c.db, 'sales_auto')) === '1', daily: Number(await getSetting(c.db, 'sales_daily')) || SALES_DAILY, agentWa: (await getSetting(c.db, 'sales_agent_wa')) || '' },
+    stopped: await jsonSetting(c.db, 'sales_stop'), // ليش وقف الإرسال لحاله آخر مرة
     agentWa: ctx.agentWa,
     ai: !!aiConfig(c.env),
     aiProvider: aiConfig(c.env) ? aiConfig(c.env).provider : null,
@@ -3264,6 +3302,7 @@ async function adminSalesSettings(c) {
   if (agent && !wa.waNumber(agent)) fail(400, 'رقم واتساب الوكيل مش صحيح');
   await setSetting(c.db, 'sales_agent_wa', agent ? wa.waNumber(agent) : '');
   await setSetting(c.db, 'sales_auto', auto ? '1' : '0');
+  if (auto) await setSetting(c.db, 'sales_stop', '');
   await setSetting(c.db, 'sales_daily', String(daily));
   return adminSales(c);
 }

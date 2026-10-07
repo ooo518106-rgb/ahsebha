@@ -2083,11 +2083,12 @@ function salesPanel(st) {
   </form>
   <form class="panel stack" id="salesSettings">
     <h2>⚙️ الإرسال التلقائي</h2>
+    ${!st.settings.auto && st.stopped ? html`<p class="alert bad small">⚠️ الإرسال وقف لحاله ${ago(st.stopped.at)}: ${st.stopped.why}</p>` : ''}
     <label class="check"><input type="checkbox" name="auto" ${st.settings.auto ? 'checked' : ''} ${st.whatsapp.ready ? '' : 'disabled'}> يبعت لحاله أول رسالة للمحلات اللي بالدور</label>
     <div class="field"><label for="sd">كم محل باليوم بالكتير</label><input id="sd" name="daily" type="number" inputmode="numeric" min="1" max="200" value="${st.settings.daily}"></div>
     <div class="field"><label for="sa">رقم واتساب الوكيل <span class="hint">(بعد ربط Meta)</span></label><input id="sa" name="agentWa" type="tel" dir="ltr" placeholder="07xxxxxxxx" value="${st.settings.agentWa}" ${st.whatsapp.ready ? '' : 'disabled'}>
       <div class="hint">${st.agentWa ? 'الرسالة اللي بتبعتها إنت فيها زر بيفتح محادثة مع واتساب الوكيل، وهو بيكمّل معهم هناك.' : 'لهلأ الرسالة اللي بتبعتها إنت فيها رابط صفحة خاصة بالمحل، والوكيل بيكمّل معهم بالموقع.'}</div></div>
-    <p class="hint">من 10 الصبح لـ 8 المسا (مش الجمعة)، ورسالة وحدة لكل محل. ابدأ بـ 20 باليوم: إذا ناس كتير بلّغوا عن الرسائل، واتساب بيوقف الرقم. واللي بيرد «لا» ما بنرجع نبعتله.</p>
+    <p class="hint">من 10 الصبح لـ 8 المسا (مش الجمعة)، ورسالة وحدة لكل محل. ابدأ بـ 20 باليوم: إذا ناس كتير بلّغوا عن الرسائل، واتساب بيوقف الرقم. واللي بيرد «لا» ما بنرجع نبعتله. وإذا Meta نزّلت تقييم الرقم أو وقّفت القالب، الإرسال بيوقف لحاله وبيوصلك إشعار.</p>
     <button class="btn" type="submit">حفظ</button>
   </form>
   <section class="panel stack">
@@ -2114,6 +2115,7 @@ const WA_LABELS = {
   platform: { CLOUD_API: '✅ مسجّل وجاهز', NOT_APPLICABLE: '❌ مش مسجّل لسا', ON_PREMISE: '⚠️ مسجّل على نظام قديم' },
   nameStatus: { APPROVED: '✅ موافق عليه', AVAILABLE_WITHOUT_REVIEW: '✅ موافق عليه', PENDING_REVIEW: '⏳ Meta عم تراجعه', DECLINED: '❌ مرفوض', NONE: '—', NON_EXISTS: '⏳ لسا ما انراجع (الإرسال شغّال)' },
   status: { CONNECTED: '✅ متصل', PENDING: '⏳ بيستنى', DISCONNECTED: '❌ مفصول', FLAGGED: '⚠️ عليه تحذير', RESTRICTED: '⚠️ مقيّد', BANNED: '⛔ محظور' },
+  quality: { GREEN: '✅ ممتاز', YELLOW: '⚠️ متوسط (في ناس حظروا أو بلّغوا، خفّف الإرسال)', RED: '⛔ ضعيف (وقّف الإرسال كم يوم)', UNKNOWN: '— لسا ما في تقييم', NA: '— لسا ما في تقييم' },
 };
 const TEMPLATE_LABELS = {
   APPROVED: '✅ موافق عليه وجاهز', PENDING: '⏳ Meta عم تراجعه', REJECTED: '❌ مرفوض', PAUSED: '⏸ موقوف مؤقتاً (ناس بلّغوا عنه)', DISABLED: '⛔ موقوف',
@@ -2148,7 +2150,7 @@ function waNumberHTML(d, err) {
     ${d ? html`<ul class="list small" style="margin:0">
       <li><span class="muted">الرقم</span> <b dir="ltr">${d.number || '—'}</b></li>
       <li><span class="muted">الاسم</span> <b>${d.name || '—'}</b></li>
-      ${row('nameStatus', 'موافقة الاسم')}${row('codeStatus', 'تأكيد الرقم')}${row('platform', 'التسجيل')}${row('status', 'الحالة')}
+      ${row('nameStatus', 'موافقة الاسم')}${row('codeStatus', 'تأكيد الرقم')}${row('platform', 'التسجيل')}${row('status', 'الحالة')}${row('quality', 'تقييم الرقم (من البلاغات والحظر)')}
       ${d.subscribed == null ? '' : html`<li><span class="muted">استلام الردود (Webhooks)</span> <b>${d.subscribed ? '✅ مشترك' : '❌ مش مشترك'}</b></li>`}
       ${d.wabaId ? html`<li><span class="muted">حساب الواتساب</span> <b class="num" dir="ltr">${d.wabaId}</b></li>` : ''}
       ${templateRow(d)}

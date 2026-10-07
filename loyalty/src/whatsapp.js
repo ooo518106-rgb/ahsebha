@@ -130,6 +130,23 @@ export function failures(payload, phoneId) {
   return out;
 }
 
+// إشعارات عن الحساب نفسه: حالة القالب (Meta وقّفته لأنه ناس بلّغوا)، وتقييم الرقم (FLAGGED، DOWNGRADE).
+// [{ kind: 'template'|'quality', event, name, reason }]
+export function accountEvents(payload, wabaId) {
+  const out = [];
+  for (const entry of (payload && payload.entry) || []) {
+    if (wabaId && entry.id && String(entry.id) !== wabaId) continue;
+    for (const ch of entry.changes || []) {
+      const v = ch.value || {};
+      const event = String(v.event || '').toUpperCase().slice(0, 40);
+      if (!event) continue;
+      if (ch.field === 'message_template_status_update') out.push({ kind: 'template', event, name: String(v.message_template_name || ''), reason: String(v.reason || (v.other_info && v.other_info.description) || '').slice(0, 200) });
+      else if (ch.field === 'phone_number_quality_update') out.push({ kind: 'quality', event, name: String(v.display_phone_number || ''), reason: String(v.current_limit || '').slice(0, 40) });
+    }
+  }
+  return out;
+}
+
 // ملخص إشعار للتشخيص: شو الحقول، وكم رسالة لرقمنا ولأرقام تانية، وكم رسالة إلنا فشلت
 export function hookSummary(payload, phoneId) {
   const fields = new Set();

@@ -197,7 +197,7 @@ test('واتساب: الإرسال التلقائي بأوقات الدوام و
   assert.equal((await cron(SUNDAY_NOON - 2 * 86400e3)).outreach, 0, 'الجمعة');
   assert.equal((await cron(SUNDAY_NOON)).outreach, 2);
   assert.equal((await cron(SUNDAY_NOON + 300e3)).outreach, 0, 'الحد باليوم');
-  const t = f.graph[0];
+  const t = f.graph.find((g) => g.body.type === 'template');
   assert.equal(t.url, 'https://graph.facebook.com/v26.0/1234567890/messages');
   assert.equal(t.headers.get('authorization'), 'Bearer wa-token');
   assert.equal(t.body.to, '962791000001');
@@ -217,7 +217,62 @@ test('واتساب: الإرسال التلقائي بأوقات الدوام و
   assert.equal(qs.settings.auto, false);
   assert.equal(qs.prospects[0].status, 'new');
   assert.match(qs.prospects[0].error, /Template/);
-  assert.equal(g.graph.length, 1);
+  assert.match(qs.stopped.why, /Template/, 'السبب بيبيّن بصفحة المبيعات');
+  assert.equal(g.graph.filter((x) => x.body.type === 'template').length, 1);
+});
+
+test('واتساب: إذا Meta وقّفت القالب أو نزّلت تقييم الرقم (بلاغات وحظر)، الإرسال بيوقف لحاله', async () => {
+  let quality = 'GREEN';
+  const sends = [];
+  const fetch = async (url, init = {}) => {
+    const u = String(url);
+    const ok = (d) => new Response(JSON.stringify(d), { status: 200, headers: { 'content-type': 'application/json' } });
+    if (!u.startsWith('https://graph.facebook.com/')) return new Response(null, { status: 201 });
+    if (u.includes('?fields=display_phone_number')) return ok({ quality_rating: quality, status: 'CONNECTED' });
+    sends.push(JSON.parse(init.body));
+    return ok({ messages: [{ id: `wamid.q${sends.length}` }] });
+  };
+  const p = await platform({ GEMINI_API_KEY: 'g', fetch, ...WA_ENV, WHATSAPP_WABA_ID: '5550001' });
+  for (let i = 1; i <= 8; i++) await p.admin.post('/api/admin/prospects', { name: `محل ${i}`, phone: `079100000${i}` });
+  await p.admin.put('/api/admin/sales/settings', { auto: true, daily: 20 });
+  const cron = (now) => runScheduled({ db: p.db, env: p.env, waitUntil: (x) => x }, now);
+  assert.equal((await cron(SUNDAY_NOON)).outreach, 2, 'أخضر: بيبعت');
+  // صار أصفر: بيوقف بس بعد ساعة من آخر فحص
+  quality = 'YELLOW';
+  assert.equal((await cron(SUNDAY_NOON + 300e3)).outreach, 2, 'الفحص كل ساعة');
+  assert.equal((await cron(SUNDAY_NOON + 3700e3)).outreach, 0);
+  let st = (await p.admin.get('/api/admin/sales')).data;
+  assert.equal(st.settings.auto, false);
+  assert.match(st.stopped.why, /أصفر/);
+  // إنت رجّعت شغّلته وهو أصفر: بيكمّل، وإذا صار أحمر بيوقف
+  await p.admin.put('/api/admin/sales/settings', { auto: true, daily: 20 });
+  assert.equal((await p.admin.get('/api/admin/sales')).data.stopped, null);
+  assert.equal((await cron(SUNDAY_NOON + 2 * 3700e3)).outreach, 2);
+  quality = 'RED';
+  assert.equal((await cron(SUNDAY_NOON + 3 * 3700e3)).outreach, 0);
+  st = (await p.admin.get('/api/admin/sales')).data;
+  assert.equal(st.settings.auto, false);
+  assert.match(st.stopped.why, /أحمر/);
+
+  // Meta وقّفت القالب (إشعار على الـ webhook)
+  quality = 'GREEN';
+  await p.admin.put('/api/admin/sales/settings', { auto: true, daily: 20 });
+  const meta = p.client();
+  const paused = { object: 'whatsapp_business_account', entry: [{ id: '5550001', changes: [{ field: 'message_template_status_update', value: { event: 'PAUSED', message_template_name: 'nuqatak_intro', message_template_language: 'ar', reason: 'Low quality' } }] }] };
+  assert.equal((await hook(meta, paused)).status, 200);
+  st = (await p.admin.get('/api/admin/sales')).data;
+  assert.equal(st.settings.auto, false);
+  assert.match(st.stopped.why, /وقّفت قالب أول رسالة \(PAUSED\): Low quality/);
+  // قالب تاني، أو موافقة: ما بيوقف
+  await p.admin.put('/api/admin/sales/settings', { auto: true, daily: 20 });
+  await hook(meta, { ...paused, entry: [{ id: '5550001', changes: [{ field: 'message_template_status_update', value: { event: 'APPROVED', message_template_name: 'nuqatak_intro' } }] }] });
+  await hook(meta, { ...paused, entry: [{ id: '5550001', changes: [{ field: 'message_template_status_update', value: { event: 'PAUSED', message_template_name: 'other' } }] }] });
+  assert.equal((await p.admin.get('/api/admin/sales')).data.settings.auto, true);
+  // تقييم الرقم نزل (إشعار)
+  await hook(meta, { object: 'whatsapp_business_account', entry: [{ id: '5550001', changes: [{ field: 'phone_number_quality_update', value: { display_phone_number: '962770528804', event: 'FLAGGED', current_limit: 'TIER_250' } }] }] });
+  st = (await p.admin.get('/api/admin/sales')).data;
+  assert.equal(st.settings.auto, false);
+  assert.match(st.stopped.why, /FLAGGED/);
 });
 
 test('واتساب: الـ webhook موقّع، الوكيل بيرد ويفاوض، و«لا» بتوقف الرسائل، وإنت بتقدر ترد بنفسك', async () => {
@@ -321,15 +376,16 @@ test('واتساب: الرسالة اللي بتفشل بعد ما Meta قبلت
   await p.admin.put('/api/admin/sales/settings', { auto: true, daily: 20 });
   assert.equal((await runScheduled({ db: p.db, env: p.env, waitUntil: (x) => x }, SUNDAY_NOON)).outreach, 2);
   const meta = p.client();
+  const ids = f.graph.map((g, i) => (g.body.type === 'template' ? `wamid.${i + 1}` : null)).filter(Boolean); // رقم كل رسالة من Meta الوهمية
   // الرقم الأول مش عليه واتساب: بس هالمحل
-  assert.equal((await hook(meta, statusHook('wamid.1', 131026, 'Message undeliverable'))).status, 200);
+  assert.equal((await hook(meta, statusHook(ids[0], 131026, 'Message undeliverable'))).status, 200);
   let st = (await p.admin.get('/api/admin/sales')).data;
   let one = st.prospects.find((x) => x.name === 'محل 1');
   assert.equal(one.status, 'failed');
   assert.match(one.error, /undeliverable \(131026\)/);
   assert.equal(st.settings.auto, true);
   // التاني: مشكلة بالدفع، يعني كل الرسائل رح تفشل: بيرجع للدور وبيوقف الإرسال
-  await hook(meta, statusHook('wamid.2', 131042, 'Business eligibility payment issue'));
+  await hook(meta, statusHook(ids[1], 131042, 'Business eligibility payment issue'));
   st = (await p.admin.get('/api/admin/sales')).data;
   const two = st.prospects.find((x) => x.name === 'محل 2');
   assert.equal(two.status, 'new');
