@@ -399,3 +399,91 @@ test('صفحة حذف البيانات لـ Meta بتفتح على أي عنوا
   assert.equal(r.status, 200);
   assert.match(r.data, /privacy\.html/);
 });
+
+// Gemini وهمي: قائمة الموديلات، والردود (نص أو استدعاء أداة)، وبحث Google
+function fakeGemini(reply) {
+  const calls = [];
+  const fetch = async (url, init = {}) => {
+    const u = String(url);
+    if (u.startsWith('https://graph.facebook.com/')) return new Response(JSON.stringify({ messages: [{ id: 'wamid.g' }] }), { status: 200, headers: { 'content-type': 'application/json' } });
+    if (!u.startsWith('https://generativelanguage.googleapis.com/')) return new Response(null, { status: 201 });
+    const body = init.body ? JSON.parse(init.body) : null;
+    calls.push({ url: u, headers: new Headers(init.headers), body });
+    const json = (d, s = 200) => new Response(JSON.stringify(d), { status: s, headers: { 'content-type': 'application/json' } });
+    if (u.includes('/models?')) return json({ models: [{ name: 'models/gemini-2.5-flash', supportedGenerationMethods: ['generateContent'] }, { name: 'models/gemini-3.6-flash', supportedGenerationMethods: ['generateContent'] }, { name: 'models/gemini-3.6-flash-lite', supportedGenerationMethods: ['generateContent'] }] });
+    const r = reply(body, calls.length);
+    if (r.status) return json({ error: { message: 'quota' } }, r.status);
+    const parts = [];
+    if (r.text) parts.push({ text: r.text });
+    if (r.call) parts.push({ functionCall: { name: r.call, args: r.args }, thoughtSignature: 'sig' });
+    return json({ candidates: [{ content: { role: 'model', parts }, finishReason: 'STOP', ...(r.grounded ? { groundingMetadata: { webSearchQueries: ['a', 'b'] } } : {}) }], usageMetadata: { promptTokenCount: 500, candidatesTokenCount: 40, thoughtsTokenCount: 10 } });
+  };
+  return { fetch, calls };
+}
+
+test('Gemini: بمفتاح GEMINI_API_KEY الوكيل بيحكي ويفاوض بأدواته، وبيختار أحدث Flash', async () => {
+  let n = 0;
+  const g = fakeGemini((body) => {
+    n++;
+    if (n === 1) return { call: 'make_offer', args: { trial_days: 21, plan: 'basic', reason: 'متردد' } };
+    const last = body.contents.at(-1);
+    assert.equal(last.role, 'user');
+    assert.ok(last.parts[0].functionResponse.response.link.includes('?offer='));
+    assert.equal(body.contents.at(-2).parts.at(-1).thoughtSignature, 'sig', 'رد الموديل بيرجع كما هو');
+    return { text: 'جهزتلك تجربة 21 يوم 🎁' };
+  });
+  const p = await platform({ GEMINI_API_KEY: 'g-key', fetch: g.fetch });
+  assert.equal((await p.client().get('/api/site')).data.sales, true);
+  const r = await p.client().post('/api/sales', { messages: [{ role: 'user', content: 'بدي وقت أفكر' }] });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.equal(r.data.reply, 'جهزتلك تجربة 21 يوم 🎁');
+  assert.equal(r.data.offer.trialDays, 21);
+  const gen = g.calls.find((c) => c.url.includes(':generateContent'));
+  assert.match(gen.url, /models\/gemini-3\.6-flash:generateContent$/);
+  assert.equal(gen.headers.get('x-goog-api-key'), 'g-key');
+  assert.match(gen.body.systemInstruction.parts[0].text, /ما في خصم أبداً/);
+  const decl = gen.body.tools[0].functionDeclarations;
+  assert.deepEqual(decl.map((d) => d.name), ['make_offer', 'save_contact']);
+  assert.equal(decl[0].parameters.type, 'OBJECT');
+  assert.equal(decl[0].parameters.additionalProperties, undefined);
+  assert.deepEqual(gen.body.contents[0], { role: 'user', parts: [{ text: 'بدي وقت أفكر' }] });
+  const st = (await p.admin.get('/api/admin/stats')).data.ai;
+  assert.equal(st.provider, 'gemini');
+  assert.equal(st.output, 100);
+  // الحصة خلصت
+  const q = await platform({ GEMINI_API_KEY: 'g-key', fetch: fakeGemini(() => ({ status: 429 })).fetch });
+  const e = await q.client().post('/api/sales', { messages: [{ role: 'user', content: 'مرحبا' }] });
+  assert.equal(e.status, 503);
+  assert.match(e.data.error, /مشغول/);
+});
+
+test('Gemini: البحث عن محلات بـ Google Search وبعدين ترتيبها JSON', async () => {
+  const g = fakeGemini((body) => {
+    if (body.tools) {
+      assert.deepEqual(body.tools, [{ google_search: {} }]);
+      return { text: '1) كوفي الندى، الصويفية، 0795556667، انستغرام @nada.cafe', grounded: true };
+    }
+    assert.equal(body.generationConfig.responseMimeType, 'application/json');
+    assert.equal(body.generationConfig.responseSchema.properties.shops.type, 'ARRAY');
+    return { text: JSON.stringify({ shops: [{ name: 'كوفي الندى', area: 'الصويفية', kind: 'كوفي شوب', phone: '0795556667', instagram: '@nada.cafe', website: '', why: 'جلسات حلوة', opener: 'مرحبا كوفي الندى 👋' }] }) };
+  });
+  const p = await platform({ GEMINI_API_KEY: 'g-key', fetch: g.fetch });
+  const r = await p.admin.post('/api/admin/sales/search', { query: 'كوفي بالصويفية' });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.equal(r.data.added, 1);
+  assert.equal(r.data.aiProvider, 'gemini');
+  const shop = r.data.prospects[0];
+  assert.equal(shop.wa, '962795556667');
+  assert.equal(shop.instagram, 'https://instagram.com/nada.cafe');
+  assert.match(shop.message, /^مرحبا كوفي الندى 👋/);
+  assert.equal((await p.admin.get('/api/admin/stats')).data.ai.searches, 2);
+});
+
+test('Claude أولى إذا الاتنين موجودين، إلا مع AI_PROVIDER=gemini', async () => {
+  const { aiConfig } = await import('../src/ai.js');
+  assert.equal(aiConfig({ ANTHROPIC_API_KEY: 'a', GEMINI_API_KEY: 'g' }).provider, 'anthropic');
+  assert.equal(aiConfig({ ANTHROPIC_API_KEY: 'a', GEMINI_API_KEY: 'g', AI_PROVIDER: 'gemini' }).provider, 'gemini');
+  assert.equal(aiConfig({ GEMINI_API_KEY: 'g' }).provider, 'gemini');
+  assert.equal(aiConfig({ GEMINI_API_KEY: 'g', GEMINI_MODEL: 'gemini-2.5-flash' }).model, 'gemini-2.5-flash');
+  assert.equal(aiConfig({}), null);
+});

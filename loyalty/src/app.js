@@ -9,6 +9,7 @@ import * as perks from './perks.js';
 import { DEMO_EMAIL, DEMO_VERSION, seedDemo } from './demo.js';
 import { APP_VERSION, CHANGELOG } from './changelog.js';
 import { aiConfig, aiCost, chat, cleanHistory } from './ai.js';
+import { geminiFindShops } from './gemini.js';
 import * as sales from './sales.js';
 import * as wa from './whatsapp.js';
 import { defaultLogoPng } from './png.js';
@@ -1348,7 +1349,7 @@ async function adminStats(c) {
   const cfg = aiConfig(c.env);
   return json({
     revenueMonth: month.n, revenueTotal: total.n, mrr: Math.round(mrr * 100) / 100, counts, ending, version: APP_VERSION, changelog: CHANGELOG,
-    ai: { ready: !!cfg, model: cfg ? cfg.model : null, ...ai, costUsd: cfg ? aiCost(cfg.model, ai) : null },
+    ai: { ready: !!cfg, provider: cfg ? cfg.provider : null, model: cfg ? cfg.model : null, ...ai, costUsd: cfg ? aiCost(cfg.provider === 'gemini' ? 'gemini' : cfg.model, ai) : null },
   });
 }
 
@@ -2739,7 +2740,7 @@ async function salesChat(c) {
     r = await chat(cfg, { system: await salesSystem(c, 'web', prospect, shopOffer), messages, tools: prospect ? sales.waTools() : sales.webTools(), runTool });
   } catch (e) {
     console.error('sales:', e.status || '', e.message);
-    fail(503, SALES_DOWN);
+    fail(503, e.status === 429 ? 'المساعد مشغول كتير هلأ، جرّب بعد شوي أو احكينا على واتساب' : SALES_DOWN);
   }
   await logAi(c, 'web', r.usage);
   const reply = r.refused || !r.text ? 'ما بقدر أساعد بهالسؤال 🙏 بس بقدر أحكيلك عن نقاطك وأسعارها، أو تشوف المحل التجريبي.' : r.text;
@@ -2952,6 +2953,7 @@ async function salesState(c) {
     settings: { auto: (await getSetting(c.db, 'sales_auto')) === '1', daily: Number(await getSetting(c.db, 'sales_daily')) || SALES_DAILY, agentWa: (await getSetting(c.db, 'sales_agent_wa')) || '' },
     agentWa: ctx.agentWa,
     ai: !!aiConfig(c.env),
+    aiProvider: aiConfig(c.env) ? aiConfig(c.env).provider : null,
     whatsapp: {
       ready: !!wcfg,
       verified: !!(wcfg && wcfg.appSecret && wcfg.verifyToken),
@@ -2980,29 +2982,35 @@ function instaUrl(v) {
 async function adminSalesSearch(c) {
   await requireAdmin(c);
   const cfg = aiConfig(c.env);
-  if (!cfg) fail(400, 'ضيف مفتاح Anthropic (ANTHROPIC_API_KEY) بإعدادات Cloudflare أول');
+  if (!cfg) fail(400, 'ضيف مفتاح الذكاء الاصطناعي (GEMINI_API_KEY أو ANTHROPIC_API_KEY) بإعدادات Cloudflare أول');
   const query = clean(c.body.query, 120);
   if (query.length < 3) fail(400, 'اكتب شو بدك يدوّر (مثلاً: كوفي شوب بعبدون)');
   const count = Math.min(20, Math.max(3, Number(c.body.count) || 10));
   await rateLimit(c, `search:${c.user.id}`, 20, DAY, 'دوّرت كتير اليوم، كمّل بكرا');
   const known = await c.db.all('SELECT name FROM prospects ORDER BY id DESC LIMIT 120');
   let found = [];
-  const runTool = async (name, input) => {
-    if (name !== 'save_shops') throw new Error(`أداة مش معروفة: ${name}`);
-    found = Array.isArray(input.shops) ? input.shops.slice(0, count) : [];
-    return { saved: found.length };
-  };
   let r;
   try {
-    r = await chat(cfg, {
-      system: sales.searchSystem(count),
-      messages: [{ role: 'user', content: sales.searchAsk(query, known.map((k) => k.name)) }],
-      tools: [{ type: 'web_search_20260209', name: 'web_search', max_uses: 8, user_location: { type: 'approximate', country: 'JO', city: 'Amman', timezone: 'Asia/Amman' } }, sales.SAVE_SHOPS],
-      runTool, stopOn: 'save_shops', maxTokens: 12000, effort: 'medium', timeout: 180_000, maxRounds: 8,
-    });
+    if (cfg.provider === 'gemini') {
+      // Gemini: بحث Google، وبعدين ترتيب النتايج حسب مخطط save_shops
+      r = await geminiFindShops(cfg, { system: sales.searchSystem(count), ask: sales.searchAsk(query, known.map((k) => k.name)), shopsSchema: sales.SAVE_SHOPS.input_schema });
+      found = r.shops.slice(0, count);
+    } else {
+      const runTool = async (name, input) => {
+        if (name !== 'save_shops') throw new Error(`أداة مش معروفة: ${name}`);
+        found = Array.isArray(input.shops) ? input.shops.slice(0, count) : [];
+        return { saved: found.length };
+      };
+      r = await chat(cfg, {
+        system: sales.searchSystem(count),
+        messages: [{ role: 'user', content: sales.searchAsk(query, known.map((k) => k.name)) }],
+        tools: [{ type: 'web_search_20260209', name: 'web_search', max_uses: 8, user_location: { type: 'approximate', country: 'JO', city: 'Amman', timezone: 'Asia/Amman' } }, sales.SAVE_SHOPS],
+        runTool, stopOn: 'save_shops', maxTokens: 12000, effort: 'medium', timeout: 180_000, maxRounds: 8,
+      });
+    }
   } catch (e) {
     console.error('sales search:', e.status || '', e.message);
-    fail(503, 'البحث ما زبط هلأ، جرّب كمان شوي');
+    fail(503, e.status === 429 ? 'خلصت حصة البحث المجانية لليوم، جرّب بكرا' : 'البحث ما زبط هلأ، جرّب كمان شوي');
   }
   await logAi(c, 'search', r.usage);
   const now = Date.now();

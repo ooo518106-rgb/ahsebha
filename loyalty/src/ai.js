@@ -1,5 +1,6 @@
-// 🤖 الاتصال بـ Claude (Anthropic): محادثة مع أدوات، بيستعملها وكيل المبيعات (src/sales.js)
+// 🤖 الذكاء الاصطناعي لوكيل المبيعات (src/sales.js): Claude من Anthropic، أو Gemini من Google (src/gemini.js)
 import Anthropic from '@anthropic-ai/sdk';
+import { geminiChat } from './gemini.js';
 
 export const AI_MODEL_DEFAULT = 'claude-opus-5-5';
 // الموديلات اللي بتقبل الرجوع التلقائي لموديل تاني إذا رفض الطلب (fallbacks: "default")
@@ -10,14 +11,18 @@ const NO_EFFORT = new Set(['claude-haiku-4-5']);
 export const MAX_TURNS = 16; // آخر 16 رسالة من المحادثة بس
 export const MAX_CHARS = 600;
 
-// المفتاح سري بـ Cloudflare (ANTHROPIC_API_KEY)، والموديل والحدود اختيارية من المتغيرات
+// المفتاح سري بـ Cloudflare: ANTHROPIC_API_KEY (Claude) أو GEMINI_API_KEY (Gemini). إذا الاتنين موجودين، Claude إلا إذا AI_PROVIDER=gemini
 export function aiConfig(env) {
-  const apiKey = String(env.ANTHROPIC_API_KEY || '').trim();
-  if (!apiKey) return null;
+  const claudeKey = String(env.ANTHROPIC_API_KEY || '').trim();
+  const geminiKey = String(env.GEMINI_API_KEY || '').trim();
+  const want = String(env.AI_PROVIDER || '').trim().toLowerCase();
+  const provider = want === 'gemini' && geminiKey ? 'gemini' : claudeKey ? 'anthropic' : geminiKey ? 'gemini' : null;
+  if (!provider) return null;
   const num = (v, d) => (Number.isInteger(Number(v)) && Number(v) > 0 ? Number(v) : d);
   return {
-    apiKey,
-    model: String(env.AI_MODEL || AI_MODEL_DEFAULT).trim(),
+    provider,
+    apiKey: provider === 'gemini' ? geminiKey : claudeKey,
+    model: provider === 'gemini' ? (String(env.GEMINI_MODEL || '').trim() || null) : String(env.AI_MODEL || AI_MODEL_DEFAULT).trim(),
     perVisitor: num(env.AI_VISITOR_DAILY, 30), // رسائل الزائر الواحد للمساعد بالموقع باليوم
     platform: num(env.AI_DAILY_LIMIT, 600), // كل رسائل الوكيل باليوم (موقع وواتساب)
     fetch: env.fetch,
@@ -50,7 +55,12 @@ const addUsage = (a, u = {}) => {
 
 // محادثة وحدة مع Claude: بيستعمل الأدوات (runTool بينفّذها عنا) لحد ما يخلّص جوابه.
 // بيرجّع { text, usage, refused, rounds }
-export async function chat(cfg, { system, messages, tools = [], runTool, stopOn = null, maxTokens = 4000, effort = 'low', timeout = 25_000, maxRounds = 4 }) {
+export async function chat(cfg, opts) {
+  if (cfg.provider === 'gemini') return geminiChat(cfg, { ...opts, maxTokens: Math.max(opts.maxTokens || 0, 8192) });
+  return claudeChat(cfg, opts);
+}
+
+async function claudeChat(cfg, { system, messages, tools = [], runTool, stopOn = null, maxTokens = 4000, effort = 'low', timeout = 25_000, maxRounds = 4 }) {
   const client = new Anthropic({ apiKey: cfg.apiKey, maxRetries: 1, timeout, ...(cfg.fetch ? { fetch: cfg.fetch } : {}) });
   const convo = [...messages];
   const usage = { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, web_search_requests: 0 };
@@ -96,12 +106,13 @@ export async function chat(cfg, { system, messages, tools = [], runTool, stopOn 
 
 // تقدير التكلفة بالدولار (أسعار Anthropic لكل مليون توكن: دخل، طلع، قراءة كاش، كتابة كاش 5 دقايق) + البحث 10$ لكل 1000
 const PRICES = {
+  gemini: [0.3, 2.5, 0.075, 0], // Flash بالباقة المدفوعة (بالمجانية ما في تكلفة)
   'claude-opus-5-5': [4, 20, 0.2, 5],
   'claude-sonnet-5-5': [2, 10, 0.2, 2.5],
   'claude-haiku-4-5': [1, 5, 0.1, 1.25],
 };
 export function aiCost(model, u) {
-  const p = PRICES[model];
+  const p = PRICES[/^gemini/.test(String(model || 'gemini')) ? 'gemini' : model];
   if (!p) return null;
   const usd = (u.input * p[0] + u.output * p[1] + u.cacheRead * p[2] + u.cacheWrite * p[3]) / 1e6 + (u.searches || 0) * 0.01;
   return Math.round(usd * 100) / 100;

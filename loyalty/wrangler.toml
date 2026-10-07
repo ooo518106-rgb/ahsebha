@@ -36,7 +36,7 @@ WHATSAPP_WABA_ID = "1579489446837547"
 # الأسرار بتنحط من لوحة Cloudflare (Settings ← Variables and Secrets ← Secret)، مش هون:
 #   GOOGLE_SERVICE_ACCOUNT = محتوى ملف JSON تبع حساب الخدمة
 #   SIGNUP_CODE (اختياري) = رمز بتعطيه للمحلات عشان تقدر تسجّل؛ بدونه التسجيل مفتوح للكل
-#   ANTHROPIC_API_KEY (اختياري) = مفتاح Anthropic لوكيل المبيعات؛ بدونه الوكيل مطفي
+#   GEMINI_API_KEY أو ANTHROPIC_API_KEY (اختياري) = مفتاح الذكاء الاصطناعي لوكيل المبيعات (Gemini أو Claude)؛ بدونهم الوكيل مطفي
 #   WHATSAPP_TOKEN و WHATSAPP_PHONE_ID و WHATSAPP_APP_SECRET و WHATSAPP_VERIFY_TOKEN (اختياري) = واتساب الرسمي لوكيل المبيعات
 # اختياري للوكيل (متغيرات عادية): AI_MODEL، AI_VISITOR_DAILY (30)، AI_DAILY_LIMIT (600)، WHATSAPP_TEMPLATE (nuqatak_intro)، WHATSAPP_TEMPLATE_LANG (ar)، WHATSAPP_API_VERSION (v26.0)
 

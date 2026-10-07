@@ -1903,8 +1903,8 @@ async function admin() {
       <span class="grow small"><b>شو الجديد:</b> ${stats.changelog[0].items[0]}</span>
       <span aria-hidden="true">←</span></a>
     ${stats.ai && stats.ai.ready
-      ? html`<p class="alert ok small">🎯 وكيل المبيعات هالشهر: <b class="num">${fmt(stats.ai.requests)}</b> رسالة (الموقع ${fmt(stats.ai.byKind.web || 0)} · واتساب ${fmt(stats.ai.byKind.wa || 0)} · بحث ${fmt(stats.ai.byKind.search || 0)})${stats.ai.costUsd != null ? html` · تكلفة تقريبية <b class="num">$${stats.ai.costUsd}</b>` : ''}</p>`
-      : html`<p class="alert warn small">🎯 وكيل المبيعات مش شغّال. بيشتغل لما تضيف مفتاح Anthropic بإعدادات Cloudflare (ANTHROPIC_API_KEY).</p>`}
+      ? html`<p class="alert ok small">🎯 وكيل المبيعات (${stats.ai.provider === 'gemini' ? 'Gemini' : 'Claude'}) هالشهر: <b class="num">${fmt(stats.ai.requests)}</b> رسالة (الموقع ${fmt(stats.ai.byKind.web || 0)} · واتساب ${fmt(stats.ai.byKind.wa || 0)} · بحث ${fmt(stats.ai.byKind.search || 0)})${stats.ai.costUsd != null ? html` · تكلفة تقريبية <b class="num">$${stats.ai.costUsd}</b>` : ''}</p>`
+      : html`<p class="alert warn small">🎯 وكيل المبيعات مش شغّال. بيشتغل لما تضيف مفتاح GEMINI_API_KEY أو ANTHROPIC_API_KEY بإعدادات Cloudflare.</p>`}
     ${signupOpen
       ? html`<p class="alert ok">أي محل بيقدر يسجّل ويجرّب ${14} يوم مجاناً، وبعدها بيتوقف لحاله لحد ما تفعّله من هون بـ «+ شهر» أو «+ سنة».</p>`
       : html`<p class="alert ok">التسجيل مسكّر برمز. ابعت للمحل الجديد: <span dir="ltr" class="num">${location.origin}/?code=رمزك</span></p>`}
@@ -2049,7 +2049,7 @@ function salesPanel(st) {
     <p class="hint">بيدوّر بالإنترنت على محلات، وبيكتب لكل محل رسالة خاصة فيه مع رابطه. إنت بتكبس «📲 ابعت من واتسابك»، ولما صاحب المحل يفتح الرابط، الوكيل بيكمّل معه وبيفاوض بدون ما ينزّل السعر (تجربة مجانية لحد 30 يوم، والاشتراك السنوي، والباقة الأساسية). إذا حدا بده يحكي معك بيوصلك إشعار.</p>
     <details ${salesReady(st) && st.whatsapp.verified ? '' : 'open'}><summary><b>خطوات التشغيل</b></summary>
       <ol class="steps-list" style="margin-top:8px">
-        <li>${st.ai ? '✅' : '⬜'} مفتاح Anthropic كـ Secret بـ Cloudflare: <code>ANTHROPIC_API_KEY</code></li>
+        <li>${st.ai ? '✅' : '⬜'} مفتاح الذكاء الاصطناعي كـ Secret بـ Cloudflare: <code>GEMINI_API_KEY</code> (Gemini، أرخص) أو <code>ANTHROPIC_API_KEY</code> (Claude)${st.aiProvider ? html` · شغّال على <b>${st.aiProvider === 'gemini' ? 'Gemini' : 'Claude'}</b>` : ''}</li>
         <li>${st.whatsapp.ready ? '✅' : '⬜'} واتساب الرسمي من Meta: <code>WHATSAPP_TOKEN</code> و <code>WHATSAPP_PHONE_ID</code></li>
         <li>${st.whatsapp.verified ? '✅' : '⬜'} عشان الوكيل يستلم الردود: <code>WHATSAPP_APP_SECRET</code> و <code>WHATSAPP_VERIFY_TOKEN</code>، ورابط الـ Webhook بـ Meta: <code>${st.whatsapp.webhookUrl}</code></li>
         <li>قالب أول رسالة بـ Meta، اسمه <code>${st.whatsapp.template}</code> (Marketing، عربي)، ونصه:<div class="small" style="margin-top:4px">${st.whatsapp.templateText}</div></li>
@@ -2074,7 +2074,7 @@ function salesPanel(st) {
       <div class="field"><label for="sc">كم محل</label><select id="sc" name="count"><option>5</option><option selected>10</option><option>20</option></select></div>
     </div>
     <button class="btn" type="submit" ${st.ai ? '' : 'disabled'}>🔎 دوّر</button>
-    <p class="hint">${st.ai ? 'بياخد دقيقة أو اتنتين. اللي إلهم رقم موبايل بيدخلوا الدور، والباقي بتحكي معهم إنت (انستغرام أو اتصال).' : 'بيشتغل بعد ما تضيف مفتاح Anthropic.'}</p>
+    <p class="hint">${st.ai ? 'بياخد دقيقة أو اتنتين. اللي إلهم رقم موبايل بيدخلوا الدور، والباقي بتحكي معهم إنت (انستغرام أو اتصال).' : 'بيشتغل بعد ما تضيف مفتاح الذكاء الاصطناعي (Gemini أو Claude).'}</p>
   </form>
   <form class="panel stack" id="salesSettings">
     <h2>⚙️ الإرسال التلقائي</h2>
