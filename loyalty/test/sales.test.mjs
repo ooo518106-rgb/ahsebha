@@ -494,7 +494,9 @@ test('بعد ربط Meta: رسالتك بتفتح واتساب الوكيل، و
   const f = fakes(() => ({ text: 'أهلا! أنا مساعد نقاطك، كيف بقدر أساعدك؟' }));
   const p = await platform({ ANTHROPIC_API_KEY: 'sk-test', fetch: f.fetch, ...WA_ENV });
   await p.admin.post('/api/admin/prospects', { name: 'مخبز الشام', phone: '0791000005' });
+  assert.equal((await p.client().get('/api/site')).data.whatsapp, null, 'قبل: ما في رقم');
   assert.equal((await p.admin.put('/api/admin/sales/settings', { auto: false, daily: 20, agentWa: '0790000099' })).status, 200);
+  assert.equal((await p.client().get('/api/site')).data.whatsapp, '962790000099', 'زر الواتساب بصفحة البيع لواتساب الوكيل');
   const pr = (await p.admin.get('/api/admin/sales')).data.prospects[0];
   const code = pr.link.split('?p=')[1];
   assert.match(pr.message, /https:\/\/wa\.me\/962790000099\?text=/);

@@ -1237,7 +1237,9 @@ async function deleteCard(c, token) {
 async function site(c) {
   return json({
     contactEmail: c.env.CONTACT_EMAIL || null,
-    whatsapp: /^\d{8,15}$/.test(String(c.env.WHATSAPP_NUMBER || '')) ? String(c.env.WHATSAPP_NUMBER) : null,
+    // زر الواتساب بصفحة البيع: لواتساب الوكيل إذا شغّال (بيرد لحاله وبيبلّغك)، وإلا لرقمك.
+    // المحلات المشتركة (الدفع والدعم) بيضلوا يحكوك على رقمك
+    whatsapp: (aiConfig(c.env) && await agentWa(c)) || ownerWhatsapp(c.env),
     signupOpen: !c.env.SIGNUP_CODE,
     apple: !!(await appleConfig(c, { withKey: false })),
     plans: PLANS,
