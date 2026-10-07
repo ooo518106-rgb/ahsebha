@@ -575,6 +575,8 @@ test('Gemini: بمفتاح GEMINI_API_KEY الوكيل بيحكي ويفاوض �
   const st = (await p.admin.get('/api/admin/stats')).data.ai;
   assert.equal(st.provider, 'gemini');
   assert.equal(st.output, 100);
+  assert.equal(st.model, 'gemini-3.6-flash', 'الموديل اللي اشتغل فعلاً');
+  assert.ok(st.costUsd >= 0);
   // الحصة خلصت
   const q = await platform({ GEMINI_API_KEY: 'g-key', fetch: fakeGemini(() => ({ status: 429 })).fetch });
   const e = await q.client().post('/api/sales', { messages: [{ role: 'user', content: 'مرحبا' }] });
@@ -585,6 +587,7 @@ test('Gemini: بمفتاح GEMINI_API_KEY الوكيل بيحكي ويفاوض �
   assert.equal(diag.aiLastError.status, 429);
   assert.equal(diag.aiLastOk, null);
   assert.ok((await p.admin.get('/api/admin/sales')).data.aiLastOk.at, 'الرد الناجح بينسجّل');
+  assert.equal((await p.admin.get('/api/admin/sales')).data.aiLastOk.model, 'gemini-3.6-flash');
 });
 
 test('Gemini: البحث عن محلات بـ Google Search وبعدين ترتيبها JSON', async () => {

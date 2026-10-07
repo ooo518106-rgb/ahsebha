@@ -1,6 +1,6 @@
 // 🤖 الذكاء الاصطناعي لوكيل المبيعات (src/sales.js): Claude من Anthropic، أو Gemini من Google (src/gemini.js)
 import Anthropic from '@anthropic-ai/sdk';
-import { geminiChat } from './gemini.js';
+import { geminiChat, geminiModel } from './gemini.js';
 
 export const AI_MODEL_DEFAULT = 'claude-opus-5-5';
 // الموديلات اللي بتقبل الرجوع التلقائي لموديل تاني إذا رفض الطلب (fallbacks: "default")
@@ -54,10 +54,13 @@ const addUsage = (a, u = {}) => {
 };
 
 // محادثة وحدة مع Claude: بيستعمل الأدوات (runTool بينفّذها عنا) لحد ما يخلّص جوابه.
-// بيرجّع { text, usage, refused, rounds }
+// بيرجّع { text, usage, refused, rounds, model }
 export async function chat(cfg, opts) {
-  if (cfg.provider === 'gemini') return geminiChat(cfg, { ...opts, maxTokens: Math.max(opts.maxTokens || 0, 8192) });
-  return claudeChat(cfg, opts);
+  if (cfg.provider === 'gemini') {
+    const r = await geminiChat(cfg, { ...opts, maxTokens: Math.max(opts.maxTokens || 0, 8192) });
+    return { ...r, model: await geminiModel(cfg) }; // الموديل محفوظ من أول طلب، فما في طلب زيادة
+  }
+  return { ...(await claudeChat(cfg, opts)), model: cfg.model };
 }
 
 async function claudeChat(cfg, { system, messages, tools = [], runTool, stopOn = null, maxTokens = 4000, effort = 'low', timeout = 25_000, maxRounds = 4 }) {
@@ -104,16 +107,24 @@ async function claudeChat(cfg, { system, messages, tools = [], runTool, stopOn =
   return { text, usage, refused: false, rounds: maxRounds };
 }
 
-// تقدير التكلفة بالدولار (أسعار Anthropic لكل مليون توكن: دخل، طلع، قراءة كاش، كتابة كاش 5 دقايق) + البحث 10$ لكل 1000
+// تقدير التكلفة بالدولار لكل مليون توكن: دخل، طلع، قراءة كاش، كتابة كاش (5 دقايق)، وسعر البحث الواحد.
+// Gemini بالباقة المدفوعة (بالمجانية ما في تكلفة، بس في حد باليوم). الأسعار بتتغير، فهاد تقدير
 const PRICES = {
-  gemini: [0.3, 2.5, 0.075, 0], // Flash بالباقة المدفوعة (بالمجانية ما في تكلفة)
-  'claude-opus-5-5': [4, 20, 0.2, 5],
-  'claude-sonnet-5-5': [2, 10, 0.2, 2.5],
-  'claude-haiku-4-5': [1, 5, 0.1, 1.25],
+  'claude-opus-5-5': [4, 20, 0.2, 5, 0.01],
+  'claude-sonnet-5-5': [2, 10, 0.2, 2.5, 0.01],
+  'claude-haiku-4-5': [1, 5, 0.1, 1.25, 0.01],
 };
+const GEMINI_PRICES = [
+  [/^gemini-2\.5-flash-lite/, [0.1, 0.4, 0.025, 0, 0.035]],
+  [/^gemini-2\.5-flash/, [0.3, 2.5, 0.03, 0, 0.035]],
+  [/^gemini-3-flash/, [0.5, 3, 0.05, 0, 0.014]],
+  [/^gemini-3\.5-flash/, [1.5, 9, 0.15, 0, 0.014]],
+  [/^gemini-3\.6-flash/, [0.75, 3.75, 0.075, 0, 0.014]],
+];
 export function aiCost(model, u) {
-  const p = PRICES[/^gemini/.test(String(model || 'gemini')) ? 'gemini' : model];
+  const m = String(model || 'gemini');
+  const p = /^gemini/.test(m) ? ((GEMINI_PRICES.find(([re]) => re.test(m)) || [])[1] || [0.5, 3, 0.05, 0, 0.014]) : PRICES[m];
   if (!p) return null;
-  const usd = (u.input * p[0] + u.output * p[1] + u.cacheRead * p[2] + u.cacheWrite * p[3]) / 1e6 + (u.searches || 0) * 0.01;
+  const usd = (u.input * p[0] + u.output * p[1] + u.cacheRead * p[2] + u.cacheWrite * p[3]) / 1e6 + (u.searches || 0) * p[4];
   return Math.round(usd * 100) / 100;
 }

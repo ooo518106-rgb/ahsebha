@@ -1903,7 +1903,7 @@ async function admin() {
       <span class="grow small"><b>شو الجديد:</b> ${stats.changelog[0].items[0]}</span>
       <span aria-hidden="true">←</span></a>
     ${stats.ai && stats.ai.ready
-      ? html`<p class="alert ok small">🎯 وكيل المبيعات (${stats.ai.provider === 'gemini' ? 'Gemini' : 'Claude'}) هالشهر: <b class="num">${fmt(stats.ai.requests)}</b> رسالة (الموقع ${fmt(stats.ai.byKind.web || 0)} · واتساب ${fmt(stats.ai.byKind.wa || 0)} · بحث ${fmt(stats.ai.byKind.search || 0)})${stats.ai.costUsd != null ? html` · تكلفة تقريبية <b class="num">$${stats.ai.costUsd}</b>` : ''}</p>`
+      ? html`<p class="alert ok small">🎯 وكيل المبيعات (${stats.ai.provider === 'gemini' ? 'Gemini' : 'Claude'}${stats.ai.model ? html` <span dir="ltr">${stats.ai.model}</span>` : ''}) هالشهر: <b class="num">${fmt(stats.ai.requests)}</b> رسالة (الموقع ${fmt(stats.ai.byKind.web || 0)} · واتساب ${fmt(stats.ai.byKind.wa || 0)} · بحث ${fmt(stats.ai.byKind.search || 0)})${stats.ai.costUsd != null ? html` · تكلفة تقريبية <b class="num">$${stats.ai.costUsd}</b>` : ''}</p>`
       : html`<p class="alert warn small">🎯 وكيل المبيعات مش شغّال. بيشتغل لما تضيف مفتاح GEMINI_API_KEY أو ANTHROPIC_API_KEY بإعدادات Cloudflare.</p>`}
     ${signupOpen
       ? html`<p class="alert ok">أي محل بيقدر يسجّل ويجرّب ${14} يوم مجاناً، وبعدها بيتوقف لحاله لحد ما تفعّله من هون بـ «+ شهر» أو «+ سنة».</p>`
@@ -2057,7 +2057,7 @@ function salesPanel(st) {
       </ol>
     </details>
     ${st.aiLastError && (!st.aiLastOk || st.aiLastError.at > st.aiLastOk.at) ? html`<p class="alert bad small">⚠️ آخر خطأ من ${st.aiLastError.provider === 'gemini' ? 'Gemini' : 'Claude'} (${ago(st.aiLastError.at)}): <span dir="ltr">${st.aiLastError.message || ''}${st.aiLastError.status ? ` [${st.aiLastError.status}]` : ''}</span></p>` : ''}
-    ${st.aiLastOk ? html`<p class="small muted">✅ آخر رد ناجح من الوكيل: ${ago(st.aiLastOk.at)}</p>` : ''}
+    ${st.aiLastOk ? html`<p class="small muted">✅ آخر رد ناجح من الوكيل: ${ago(st.aiLastOk.at)}${st.aiLastOk.model ? html` · الموديل <span dir="ltr">${st.aiLastOk.model}</span>` : ''}</p>` : ''}
     <div class="stats">
       <div class="stat"><b class="num">${fmt(c.new || 0)}</b><span class="small muted">بالدور</span></div>
       <div class="stat"><b class="num">${fmt(st.sentToday)}/${fmt(st.settings.daily)}</b><span class="small muted">انبعتلهم اليوم</span></div>

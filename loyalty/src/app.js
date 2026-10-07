@@ -1351,9 +1351,11 @@ async function adminStats(c) {
   ending.sort((a, b) => a.daysLeft - b.daysLeft);
   const ai = await aiMonth(c.db);
   const cfg = aiConfig(c.env);
+  // Gemini بيختار الموديل لحاله: منعرفه من آخر رد ناجح
+  const aiModel = cfg ? (cfg.provider === 'gemini' ? cfg.model || ((await jsonSetting(c.db, 'ai_last_ok')) || {}).model || null : cfg.model) : null;
   return json({
     revenueMonth: month.n, revenueTotal: total.n, mrr: Math.round(mrr * 100) / 100, counts, ending, version: APP_VERSION, changelog: CHANGELOG,
-    ai: { ready: !!cfg, provider: cfg ? cfg.provider : null, model: cfg ? cfg.model : null, ...ai, costUsd: cfg ? aiCost(cfg.provider === 'gemini' ? 'gemini' : cfg.model, ai) : null },
+    ai: { ready: !!cfg, provider: cfg ? cfg.provider : null, model: aiModel, ...ai, costUsd: cfg ? aiCost(aiModel || cfg.provider, ai) : null },
   });
 }
 
@@ -2599,9 +2601,9 @@ async function publicMenu(c, slug) {
 
 // ─── 🎯 وكيل المبيعات: بيدوّر على محلات، بيبعتلهم على واتساب، بيحكي معهم وبيفاوض (بدون خصم) ───
 // للتشخيص بصفحة المبيعات: آخر خطأ من الذكاء الاصطناعي، وآخر رد ناجح
-async function noteAi(c, ok, e = null) {
+async function noteAi(c, ok, e = null, model = null) {
   const cfg = aiConfig(c.env);
-  const v = { at: Date.now(), provider: cfg ? cfg.provider : null, ...(ok ? {} : { status: e && e.status, message: clean(e && e.message, 300) }) };
+  const v = { at: Date.now(), provider: cfg ? cfg.provider : null, ...(model ? { model: clean(model, 60) } : {}), ...(ok ? {} : { status: e && e.status, message: clean(e && e.message, 300) }) };
   try { await setSetting(c.db, ok ? 'ai_last_ok' : 'ai_last_error', JSON.stringify(v)); } catch { /* التشخيص ما بيوقف الشغل */ }
 }
 
@@ -2755,7 +2757,7 @@ async function salesChat(c) {
     fail(503, e.status === 429 ? 'المساعد مشغول كتير هلأ، جرّب بعد شوي أو احكينا على واتساب' : SALES_DOWN);
   }
   await logAi(c, 'web', r.usage);
-  await noteAi(c, true);
+  await noteAi(c, true, null, r.model);
   const reply = r.refused || !r.text ? 'ما بقدر أساعد بهالسؤال 🙏 بس بقدر أحكيلك عن نقاطك وأسعارها، أو تشوف المحل التجريبي.' : r.text;
   if (prospect) {
     const now = Date.now();
@@ -2961,7 +2963,7 @@ async function waReply(c, wcfg, prospectId, msgId) {
   const runTool = prospectTools(c, p, 'wa');
   const r = await chat(cfg, { system: await salesSystem(c, 'wa', p, offer), messages, tools: sales.waTools(), runTool, maxTokens: 3000 });
   await logAi(c, 'wa', r.usage);
-  await noteAi(c, true);
+  await noteAi(c, true, null, r.model);
   if (r.refused || !r.text) return;
   let id;
   try {
