@@ -13,6 +13,7 @@ import { geminiFindShops } from './gemini.js';
 import * as sales from './sales.js';
 import * as wa from './whatsapp.js';
 import { defaultLogoPng } from './png.js';
+import { stripImages } from './strip.js';
 import { earnFor, progress, rewardCost, rewardRule, stampsLine, unitLabel, unitWord } from '../public/js/rules.js';
 import { FEATURES } from '../public/js/plans.js';
 import { b64ToBytes, bytesToB64, clean, fail, HttpError, isUniqueError, json, normPhone, randomDigits, randomToken, sha256Hex } from './util.js';
@@ -232,17 +233,23 @@ async function appleConfig(c, { withKey = true } = {}) {
   };
 }
 
+// وقت آخر تغيير بشكل البطاقة: البطاقات القديمة على الآيفونات بتعتبر حالها قديمة وبتنزّل الشكل الجديد لما تتحدّث
+const PASS_DESIGN_AT = Date.UTC(2026, 9, 8, 18, 0);
+
 async function passImages(c, shop) {
   const row = await c.db.get('SELECT mime, data FROM shop_logos WHERE shop_id = ?', shop.id);
   const png = row && row.mime === 'image/png' ? b64ToBytes(row.data) : await defaultLogoPng(shop.color, 180);
-  return { 'icon.png': png, 'icon@2x.png': png, 'logo.png': png, 'logo@2x.png': png };
+  const hasLogo = !!(shop.custom_logo && row && row.mime === 'image/png'); // شعار رفعه المحل (مش الدائرة الافتراضية)
+  return { hasLogo, images: { 'icon.png': png, 'icon@2x.png': png, 'logo.png': png, 'logo@2x.png': png } };
 }
 
 async function pkpassFor(c, cfg, member) {
   const shop = await shopRow(c.db, member.shop_id);
-  const passJson = apple.buildPassJson(shop, member, { ...cfg, origin: c.origin, authToken: await apple.authTokenFor(cfg.authSecret, member.token), menuUrl: await menuUrlOf(c, shop) });
-  const bytes = await apple.buildPkpass({ passJson, images: await passImages(c, shop), ...cfg });
-  const updated = Math.max(member.updated_at || member.created_at, shop.updated_at || shop.created_at);
+  const { hasLogo, images } = await passImages(c, shop);
+  const passJson = apple.buildPassJson(shop, member, { ...cfg, origin: c.origin, authToken: await apple.authTokenFor(cfg.authSecret, member.token), menuUrl: await menuUrlOf(c, shop), hasLogo });
+  const all = { ...images, ...(await stripImages(shop, member.balance)), 'ar.lproj/pass.strings': apple.AR_STRINGS };
+  const bytes = await apple.buildPkpass({ passJson, images: all, ...cfg });
+  const updated = Math.max(member.updated_at || member.created_at, shop.updated_at || shop.created_at, PASS_DESIGN_AT);
   return { bytes, updated };
 }
 
@@ -333,7 +340,7 @@ async function appleService(c) {
       `SELECT m.token AS serial, MAX(COALESCE(m.updated_at, m.created_at), COALESCE(s.updated_at, s.created_at)) AS upd
        FROM apple_regs r JOIN members m ON m.token = r.serial JOIN shops s ON s.id = m.shop_id WHERE r.device_id = ?`, device,
     );
-    const changed = rows.filter((r) => r.upd > since);
+    const changed = rows.map((r) => ({ ...r, upd: Math.max(r.upd, PASS_DESIGN_AT) })).filter((r) => r.upd > since);
     if (!changed.length) return new Response(null, { status: 204 });
     return json({ serialNumbers: changed.map((r) => r.serial), lastUpdated: String(Math.max(...changed.map((r) => r.upd))) });
   }

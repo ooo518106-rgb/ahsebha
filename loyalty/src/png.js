@@ -55,12 +55,17 @@ export async function defaultLogoPng(hex, size = 256) {
       raw[i + 2] = Math.round(255 + (b - 255) * a);
     }
   }
+  return encodePng(size, size, raw);
+}
+
+// PNG من بكسلات جاهزة (كل سطر أوله بايت الفلتر 0): RGB، أو أرقام ألوان إذا في لوحة ألوان (plte: RGB لكل لون)
+export async function encodePng(w, h, raw, plte = null) {
   const ihdr = new Uint8Array(13);
   const v = new DataView(ihdr.buffer);
-  v.setUint32(0, size);
-  v.setUint32(4, size);
-  ihdr.set([8, 2, 0, 0, 0], 8); // 8 بت، RGB
-  const parts = [new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]), chunk('IHDR', ihdr), chunk('IDAT', await deflate(raw)), chunk('IEND', new Uint8Array(0))];
+  v.setUint32(0, w);
+  v.setUint32(4, h);
+  ihdr.set([8, plte ? 3 : 2, 0, 0, 0], 8); // 8 بت، RGB أو لوحة ألوان
+  const parts = [new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]), chunk('IHDR', ihdr), ...(plte ? [chunk('PLTE', plte)] : []), chunk('IDAT', await deflate(raw)), chunk('IEND', new Uint8Array(0))];
   const out = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
   let o = 0;
   for (const p of parts) { out.set(p, o); o += p.length; }

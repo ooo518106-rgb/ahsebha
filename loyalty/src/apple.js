@@ -5,7 +5,7 @@
 import { NULL, children, concat, ctx, int, octets, oid, oidToString, pemToDer, read, seq, set, setOf, utcTime } from '../public/js/asn1.js';
 export { generateKeyAndCsr } from '../public/js/csr.js';
 import { crc32, hexToRgb } from './png.js';
-import { progress, rewardRule, stampsLine, unitWord } from '../public/js/rules.js';
+import { progress, rewardRule, unitWord } from '../public/js/rules.js';
 
 const OID = {
   rsaEncryption: '1.2.840.113549.1.1.1',
@@ -190,7 +190,16 @@ export function shopLinks(shop) {
 }
 const link = (url, text) => `<a href="${url}">${String(text).replace(/[<>&"]/g, '')}</a>`;
 
-export function buildPassJson(shop, member, { passTypeId, teamId, origin, authToken, menuUrl = null }) {
+// ملف ترجمة عربي فاضي تقريباً: وجوده بيخلّي Wallet تعرض البطاقة عربي (من اليمين لليسار) على الآيفونات العربية
+export const AR_STRINGS = (() => {
+  const text = '"nuqatak" = "نقاطك";\n';
+  const out = new Uint8Array(2 + text.length * 2);
+  out.set([0xff, 0xfe]); // UTF-16LE
+  for (let i = 0; i < text.length; i++) { out[2 + i * 2] = text.charCodeAt(i) & 255; out[3 + i * 2] = text.charCodeAt(i) >> 8; }
+  return out;
+})();
+
+export function buildPassJson(shop, member, { passTypeId, teamId, origin, authToken, menuUrl = null, hasLogo = false }) {
   const p = progress(shop, member.balance);
   const stamps = shop.program_type === 'stamps';
   const light = isLight(shop.color);
@@ -206,7 +215,8 @@ export function buildPassJson(shop, member, { passTypeId, teamId, origin, authTo
     webServiceURL: `${origin}/apple`,
     organizationName: shop.name,
     description: `بطاقة ولاء ${shop.name}`,
-    logoText: shop.name,
+    // الشعار فيه اسم المحل، والاسم المكتوب جنبه بينقص («Mocha Coffee Hous…»): بنكتبه بس إذا ما في شعار
+    ...(hasLogo ? {} : { logoText: shop.name }),
     backgroundColor: rgb(shop.color),
     foregroundColor: light ? 'rgb(31, 26, 23)' : 'rgb(255, 255, 255)',
     labelColor: light ? 'rgb(90, 80, 72)' : 'rgb(235, 225, 215)',
@@ -218,27 +228,27 @@ export function buildPassJson(shop, member, { passTypeId, teamId, origin, authTo
         value: stamps ? `${p.available && !p.toward ? p.cost : p.toward}/${p.cost}` : member.balance,
         changeMessage: stamps ? 'صار عندك %@ أختام' : 'رصيدك صار %@ نقطة',
       }],
-      primaryFields: [{
-        key: 'reward',
-        label: shop.reward_name,
-        value: p.available ? (p.available > 1 ? `🎁 ${p.available} مكافآت جاهزة` : '🎁 جاهزة') : `باقي ${p.remaining} ${unitWord(shop, p.remaining)}`,
-        changeMessage: '%@',
-      }],
+      // الوجه: صورة الدواير (strip.png) مكان الحقل الكبير، وتحتها سطر واحد.
+      // العناوين إيموجي لأنه Wallet بتباعد حروف العناوين الصغيرة فبينمطّ الكلام العربي («الـبـطـاقـة»)
       secondaryFields: [
-        { key: 'name', label: 'الاسم', value: member.name },
-        { key: 'card', label: 'رقم البطاقة', value: member.card_no },
+        {
+          key: 'status',
+          label: p.available ? '🎉' : '⏳',
+          value: p.available ? (p.available > 1 ? `${p.available} مكافآت جاهزة` : 'مكافأتك جاهزة') : `باقي ${p.remaining} ${unitWord(shop, p.remaining)}`,
+          changeMessage: '%@',
+        },
+        { key: 'reward', label: '🎁', value: shop.reward_name },
       ],
-      auxiliaryFields: [
-        ...(stamps ? [{ key: 'stamps', label: 'التقدّم', value: stampsLine(shop, member.balance) }] : []),
-        // Apple ما بتسمح بروابط على وجه البطاقة، فبنقول للزبون وين يلاقي المنيو (أول إشي على الضهر)
-        ...(menuUrl ? [{ key: 'menuHint', label: '📋 المنيو', value: 'اكبس ⋯ وافتحه' }] : []),
-      ],
+      // Apple ما بتسمح بروابط على وجه البطاقة، فبنقول للزبون وين يلاقي المنيو (أول إشي على الضهر)
+      auxiliaryFields: menuUrl ? [{ key: 'menuHint', label: '📋', value: 'اكبس ⋯ للمنيو' }] : [],
       backFields: [
         ...(menuUrl ? [{ key: 'menu', label: '📋 المنيو', value: menuUrl, attributedValue: link(menuUrl, 'افتح المنيو') }] : []),
         // التقييم ما بيصير جوّا المحفظة: الرابط بيفتح البطاقة على الويب عند النجوم
         ...(shop.review_on ? [{ key: 'rate', label: 'التقييم', value: `${cardUrl}#rate`, attributedValue: link(`${cardUrl}#rate`, '⭐ قيّم زيارتك') }] : []),
         ...shopLinks(shop).map((l) => ({ key: `link-${l.key}`, label: l.label, value: l.url, attributedValue: link(l.url, l.text) })),
         { key: 'rule', label: 'المكافأة', value: rewardRule(shop) },
+        { key: 'name', label: 'الاسم', value: member.name },
+        { key: 'card', label: 'رقم البطاقة', value: member.card_no },
         { key: 'web', label: 'بطاقتي على الويب', value: cardUrl, attributedValue: link(cardUrl, 'افتح البطاقة') },
         { key: 'privacy', label: 'الخصوصية', value: `${origin}/privacy`, attributedValue: link(`${origin}/privacy`, 'سياسة الخصوصية') },
         { key: 'by', label: '', value: 'بطاقات الولاء من نقاطك' },

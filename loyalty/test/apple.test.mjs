@@ -89,14 +89,20 @@ test('Apple Wallet من الإعداد للبطاقة الموقّعة وخدم�
   assert.equal(res.status, 200);
   assert.equal(res.headers.get('content-type'), 'application/vnd.apple.pkpass');
   const files = unzipAll(Buffer.from(res.data));
-  for (const f of ['pass.json', 'manifest.json', 'signature', 'icon.png', 'icon@2x.png', 'logo.png']) assert.ok(files[f], f);
+  for (const f of ['pass.json', 'manifest.json', 'signature', 'icon.png', 'icon@2x.png', 'logo.png', 'strip.png', 'strip@2x.png', 'strip@3x.png', 'ar.lproj/pass.strings']) assert.ok(files[f], f);
+  assert.deepEqual([...files['strip@3x.png'].subarray(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10], 'صورة الدواير PNG');
+  assert.equal(files['strip@3x.png'].readUInt32BE(16), 1125, 'عرضها 3x');
+  assert.deepEqual([...files['ar.lproj/pass.strings'].subarray(0, 2)], [0xff, 0xfe], 'ترجمة عربي UTF-16 (من اليمين لليسار)');
   const pass = JSON.parse(files['pass.json']);
   assert.equal(pass.passTypeIdentifier, 'pass.com.nuqatak.test');
   assert.equal(pass.teamIdentifier, 'ABCDE12345');
   assert.equal(pass.serialNumber, token);
   assert.equal(pass.organizationName, 'موكا كوفي هاوس');
   assert.equal(pass.webServiceURL, 'https://loyalty.test/apple');
-  assert.deepEqual(pass.barcodes[0], { format: 'PKBarcodeFormatQR', message: token, messageEncoding: 'iso-8859-1', altText: pass.storeCard.secondaryFields[1].value });
+  assert.deepEqual(pass.barcodes[0], { format: 'PKBarcodeFormatQR', message: token, messageEncoding: 'iso-8859-1', altText: pass.storeCard.backFields.find((f) => f.key === 'card').value });
+  assert.equal(pass.logoText, 'موكا كوفي هاوس', 'بدون شعار مرفوع: الاسم مكتوب');
+  assert.equal(pass.storeCard.primaryFields, undefined, 'مكان الحقل الكبير للدواير');
+  assert.deepEqual(pass.storeCard.secondaryFields.map((f) => [f.label, f.value]), [['⏳', 'باقي 100 نقطة'], ['🎁', 'مشروب مجاني']]);
   assert.deepEqual(pass.locations, [{ latitude: 31.7167, longitude: 35.7939, relevantText: 'موكا كوفي هاوس ترحب بكم ☕' }]);
   assert.equal(pass.storeCard.headerFields[0].value, 0);
   // manifest = SHA-1 لكل ملف، والتوقيع صحيح بالسلسلة
@@ -169,4 +175,14 @@ test('بطاقة Apple: رابط المنيو على ضهر البطاقة إذ�
   assert.match(full.backFields[1].attributedValue, /#rate">⭐ قيّم زيارتك</);
   assert.match(full.backFields[2].attributedValue, />@mocha\.jo</);
   assert.ok(full.auxiliaryFields.some((f) => f.key === 'menuHint'));
+});
+
+test('صورة الدواير على بطاقة الآيفون: كم دايرة وكم مليانة', async () => {
+  const { stripState } = await import('../src/strip.js');
+  const pts = { program_type: 'points', reward_threshold: 10, points_per_unit: 1 };
+  assert.deepEqual(stripState(pts, 4), { slots: 10, filled: 4, ready: false });
+  assert.deepEqual(stripState(pts, 9), { slots: 10, filled: 9, ready: false });
+  assert.deepEqual(stripState(pts, 12), { slots: 10, filled: 10, ready: true }, 'جاهزة: كله مليان والهدية ذهبية');
+  assert.deepEqual(stripState({ ...pts, reward_threshold: 100 }, 45), { slots: 10, filled: 4, ready: false }, 'نقاط كتير: 10 دواير = نسبة');
+  assert.deepEqual(stripState({ program_type: 'stamps', stamps_required: 8 }, 3), { slots: 8, filled: 3, ready: false });
 });
