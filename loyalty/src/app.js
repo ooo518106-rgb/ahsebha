@@ -3079,18 +3079,20 @@ const PROMO_IMAGE = '/img/promo-card.jpg';
 async function introTemplate(c, wcfg, now = Date.now()) {
   let st = await jsonSetting(c.db, 'wa_tpl2');
   if (wcfg.wabaId && (!st || now - st.at > HOUR) && !(st && st.status === 'ERROR' && now - st.at < 6 * HOUR)) {
-    let status = 'MISSING';
-    let lang = wcfg.lang;
     try {
-      // بأي لغة انعمل (العربي أول، وإلا أي نسخة موافق عليها: مثلاً انعمل English بالغلط)
-      const list = ((await wa.templates(wcfg, wcfg.template2)).data || []).filter((x) => x.name === wcfg.template2);
-      const t = list.find((x) => x.language === wcfg.lang && x.status === 'APPROVED') || list.find((x) => x.status === 'APPROVED') || list.find((x) => x.language === wcfg.lang) || list[0];
-      if (t) { status = t.status; lang = t.language || wcfg.lang; }
-    } catch { status = (st && st.status) || 'MISSING'; lang = (st && st.lang) || wcfg.lang; }
-    st = { at: now, status, lang };
+      const t = await pickIntro2(wcfg);
+      st = { at: now, status: t ? t.status : 'MISSING', name: t ? t.name : wcfg.templates2[0], lang: t ? t.language : wcfg.lang };
+    } catch { st = { ...(st || { status: 'MISSING', name: wcfg.templates2[0], lang: wcfg.lang }), at: now }; }
     await setSetting(c.db, 'wa_tpl2', JSON.stringify(st));
   }
-  return st && st.status === 'APPROVED' ? { v: 2, name: wcfg.template2, image: `${c.origin}${PROMO_IMAGE}`, lang: st.lang || wcfg.lang } : { v: 1, name: wcfg.template };
+  return st && st.status === 'APPROVED' ? { v: 2, name: st.name, image: `${c.origin}${PROMO_IMAGE}`, lang: st.lang || wcfg.lang } : { v: 1, name: wcfg.template };
+}
+
+// القالب الجديد: العربي الموافق عليه أول، بعدين أي نسخة موافق عليها، وإلا أول واحد موجود (عشان نعرض حالته)
+async function pickIntro2(wcfg) {
+  const all = [];
+  for (const name of wcfg.templates2) all.push(...((await wa.templates(wcfg, name)).data || []).filter((x) => x.name === name));
+  return all.find((x) => x.status === 'APPROVED' && x.language === wcfg.lang) || all.find((x) => x.status === 'APPROVED') || all.find((x) => x.language === wcfg.lang) || all[0] || null;
 }
 
 async function sendIntro(c, wcfg, p, now = Date.now()) {
@@ -3786,7 +3788,10 @@ async function adminWaNumber(c) {
       try { subscribed = ((await wa.subscribedApps(wcfg)).data || []).length > 0; } catch { subscribed = null; }
       template = await tplStatus(wcfg.template);
       alertTemplate = await tplStatus(wcfg.alertTemplate);
-      intro2 = await tplStatus(wcfg.template2);
+      try {
+        const t = await pickIntro2(wcfg);
+        intro2 = t ? { status: t.status, language: t.language, name: t.name, reason: t.rejected_reason && t.rejected_reason !== 'NONE' ? clean(t.rejected_reason, 80) : null } : { status: 'MISSING', name: wcfg.templates2[0] };
+      } catch { intro2 = null; }
     }
     // هل في إشي مانع الإرسال (الدفع، الحساب، الرقم)
     let sending = null;
@@ -3809,7 +3814,7 @@ async function adminWaNumber(c) {
       alertTemplate,
       alertTemplateName: wcfg.alertTemplate,
       intro2,
-      intro2Name: wcfg.template2,
+      intro2Name: intro2 ? intro2.name : wcfg.templates2[0],
       alertLast: await jsonSetting(c.db, 'wa_alert_last'),
       ownerWa: ownerWhatsapp(c.env),
       wabaId: wcfg.wabaId,

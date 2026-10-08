@@ -15,7 +15,8 @@ export function waConfig(env) {
     verifyToken: String(env.WHATSAPP_VERIFY_TOKEN || '').trim(),
     wabaId: /^\d{5,20}$/.test(String(env.WHATSAPP_WABA_ID || '')) ? String(env.WHATSAPP_WABA_ID) : null,
     template: String(env.WHATSAPP_TEMPLATE || 'nuqatak_intro').trim(),
-    template2: String(env.WHATSAPP_TEMPLATE2 || 'nuqatak_intro2').trim(), // أول رسالة الجديدة: صورة + أزرار (بتنبعت لما Meta توافق)
+    // أول رسالة الجديدة (صورة + أزرار): أول اسم موافق عليه من هالقائمة (العربي أول)، ولحد هداك القديمة
+    templates2: String(env.WHATSAPP_TEMPLATE2 || 'nuqatak_intro_ar,nuqatak_intro2').split(',').map((x) => x.trim()).filter(Boolean),
     alertTemplate: String(env.WHATSAPP_ALERT_TEMPLATE || 'nuqatak_alert').trim(), // تنبيه لصاحب المنصة على رقمه
     lang: String(env.WHATSAPP_TEMPLATE_LANG || 'ar').trim(),
     version: /^v\d+\.\d+$/.test(String(env.WHATSAPP_API_VERSION || '')) ? env.WHATSAPP_API_VERSION : 'v26.0',
