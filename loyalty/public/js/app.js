@@ -2087,7 +2087,7 @@ function prospectCard(p, st) {
   return html`<div class="prospect" data-pid="${p.id}">
     <div class="prospect-top"><div class="grow">
       <b>${p.name}</b> <span class="st ${cls}">${label}</span>${p.paused ? html` <span class="st">✋ إنت بترد</span>` : ''}${p.offer ? html` <span class="st">🎁 ${p.offer.trialDays} يوم${p.offer.used ? ' ✓' : ''}</span>` : ''}${p.source === 'inbound' ? html` <span class="st">📥 راسلنا</span>` : ''}${p.openedAt ? html` <span class="st">👀 فتح رابطه</span>` : ''}
-      <div class="small muted">${[p.ownerName, p.kind, p.area].filter(Boolean).join(' · ')}${p.phone ? html` · <span class="num" dir="ltr">${localPhone(p.phone)}</span>` : ''} · ${ago(p.lastInAt || p.lastOutAt || p.createdAt)}</div>
+      <div class="small muted">${[p.ownerName, p.kind, p.area].filter(Boolean).join(' · ')}${p.phone ? html` · <span class="num" dir="ltr">${localPhone(p.phone)}</span>` : ''} · ${ago(p.lastInAt || p.lastOutAt || p.createdAt)}${!p.lastInAt && p.readAt ? ' · 👀 قرأ وما رد' : !p.lastInAt && p.deliveredAt ? ' · ✓✓ وصلته' : ''}</div>
       ${p.why ? html`<div class="small" style="margin-top:4px">${p.why}</div>` : ''}
       ${p.note ? html`<div class="small" style="margin-top:4px">📝 ${p.note}</div>` : ''}
       ${p.guide ? html`<div class="small" style="margin-top:4px">📌 توجيهك للوكيل: ${p.guide}</div>` : ''}
@@ -2131,6 +2131,7 @@ function salesPanel(st) {
       <div class="stat"><b class="num">${fmt(talking)}</b><span class="small muted">عم يحكوا${c.hot ? ` (🔥 ${c.hot})` : ''}</span></div>
       <div class="stat"><b class="num">${fmt(st.signups)}</b><span class="small muted">سجّلوا من عروضه</span></div>
     </div>
+    ${funnelHTML(st.funnel, st.intro)}
   </section>
   ${st.whatsapp.ready ? html`<section class="panel stack" id="waNumber">
     <h2>📞 رقم الإيجنت عند Meta</h2>
@@ -2210,6 +2211,14 @@ function templateRow(d) {
   return html`<li><span class="muted">قالب أول رسالة (<span dir="ltr">${d.templateName}</span>)</span> <b>${label}${t.reason ? ` · ${t.reason}` : ''}${t.language && t.language !== 'ar' ? ` · اللغة ${t.language} (لازم العربية ar)` : ''}${t.category && t.category !== 'MARKETING' ? ` · الفئة ${t.category}` : ''}</b></li>`;
 }
 // 🔔 تنبيهاتك على واتسابك: قالبها، وآخر تنبيه انبعتلك
+// 📊 آخر 30 يوم: انبعت ← وصل ← قرأ ← رد، وأي رسالة أولى عم تنبعت
+function funnelHTML(f, intro) {
+  if (!f || !f.sent) return '';
+  const pct = (n) => `${Math.round((n / f.sent) * 100)}%`;
+  return html`<p class="small" style="margin:0">📊 آخر 30 يوم: انبعت <b class="num">${fmt(f.sent)}</b> ← وصل <b class="num">${fmt(f.delivered)}</b> ← قرأ <b class="num">${fmt(f.read)}</b> (${pct(f.read)}) ← رد <b class="num">${fmt(f.replied)}</b> (${pct(f.replied)})</p>
+    <p class="hint" style="margin:0">أول رسالة هلأ: ${intro && intro.status === 'APPROVED' ? '🖼 الجديدة (صورة + أزرار)' : 'القديمة (كلام بس)'}${intro && intro.status === 'ERROR' ? html` · ⚠️ الجديدة فيها مشكلة: <span dir="ltr">${intro.error}</span>` : ''}</p>`;
+}
+
 function alertRows(d) {
   if (!d.ownerWa) return html`<li><span class="muted">🔔 تنبيهاتك على واتسابك</span> <b>⚠️ حط رقمك WHATSAPP_NUMBER بإعدادات Cloudflare</b></li>`;
   const t = d.alertTemplate;
@@ -2230,6 +2239,7 @@ function waNumberHTML(d, err) {
       ${d.subscribed == null ? '' : html`<li><span class="muted">استلام الردود (Webhooks)</span> <b>${d.subscribed ? '✅ مشترك' : '❌ مش مشترك'}</b></li>`}
       ${d.wabaId ? html`<li><span class="muted">حساب الواتساب</span> <b class="num" dir="ltr">${d.wabaId}</b></li>` : ''}
       ${templateRow(d)}
+      ${d.intro2 ? html`<li><span class="muted">🖼 قالب أول رسالة الجديد (<span dir="ltr">${d.intro2Name}</span>)</span> <b>${d.intro2.status === 'MISSING' ? '⚠️ لسا ما انعمل (لحد ما يتوافق عليه بتنبعت الرسالة القديمة)' : TEMPLATE_LABELS[d.intro2.status] || d.intro2.status}${d.intro2.reason ? ` · ${d.intro2.reason}` : ''}</b></li>` : ''}
       ${alertRows(d)}
       ${d.sending ? html`<li><span class="muted">الإرسال</span> <b>${SENDING_LABELS[d.sending.can] || d.sending.can}</b>${d.sending.errors.map((e) => html`<div class="small" dir="auto" style="color:var(--bad)">${e}</div>`)}</li>` : ''}
       <li><span class="muted">آخر إشعار من Meta</span> <b>${!d.lastHook ? 'لسا ما وصل ولا إشي' : html`${ago(d.lastHook.at)} · ${d.lastHook.signed ? '✅ موقّع' : '❌ التوقيع غلط (تأكد من WHATSAPP_APP_SECRET)'}${d.lastHook.fields && d.lastHook.fields.length ? ` · ${d.lastHook.fields.join('، ')}` : ''}${d.lastHook.ours ? ` · ${d.lastHook.ours} رسالة لرقم الإيجنت` : ''}${d.lastHook.other ? ` · ${d.lastHook.other} رسالة لرقم تاني` : ''}${d.lastHook.failed ? ` · ⚠️ ${d.lastHook.failed} رسالة فشلت` : ''}`}</b></li>

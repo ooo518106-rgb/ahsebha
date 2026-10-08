@@ -10,6 +10,12 @@ const COUNTRIES_AR = { JO: 'الأردن', PS: 'فلسطين', SA: 'السعود
 export const TEMPLATE_TEXT = 'مرحبا {{1}} 👋 معك مساعد «نقاطك». عنا بطاقة ولاء لمحلك بتنحفظ بمحفظة جوال الزبون، بدون تطبيق وبدون كروت ورق، وبتذكّره فيك لما يقرّب من المحل. بتحب أحكيلك كيف ممكن ترجّع زبائنك أكتر؟ وفي تجربة 14 يوم ببلاش.';
 export const templateFor = (shopName) => TEMPLATE_TEXT.replace('{{1}}', () => shopName); // دالة: عشان «$» بالاسم ما تنقرأ كرمز
 
+// أول رسالة الجديدة (nuqatak_intro2): صورة البطاقة فوق، نص أقصر، و3 أزرار بكبسة وحدة
+export const TEMPLATE2_TEXT = 'مرحبا {{1}} 👋\nبنعمل لمحلك بطاقة ولاء بمحفظة جوال زبائنك، بدون تطبيق. كل زيارة بيجمعوا نقاط وبيرجعولك.\nأول 14 يوم ببلاش 🎁\nبتحب أوريك كيف رح تطلع بطاقة محلك؟';
+export const TEMPLATE2_BUTTONS = ['👍 أيوه احكيلي', '🖼 وريني كيف بتطلع', '🙏 مش هلأ'];
+export const template2For = (shopName) => `🖼 [صورة البطاقة]\n${TEMPLATE2_TEXT.replace('{{1}}', () => shopName)}\n[${TEMPLATE2_BUTTONS.join(' · ')}]`;
+export const SHOW_ME_RE = /وريني|كيف بتطلع|بدي اشوف|بدي أشوف|ابعتلي صور/;
+
 // الرسالة اللي بتبعتها إنت من واتسابك: أول جملة كتبها الوكيل لهالمحل، ورابطه الخاص (بالموقع، أو لواتساب الوكيل بعد ربط Meta)
 export const openerFor = (p) => p.opener || `مرحبا ${p.name} 👋 معك «نقاطك»: بطاقة ولاء لمحلك بتنحفظ بمحفظة جوال الزبون، بدون تطبيق وبدون كروت ورق، وبتذكّره فيك لما يقرّب من المحل.`;
 export function outreachText(p, { origin, agentWa }) {
@@ -38,6 +44,10 @@ export function salesRules({ plans, features, apple, signupOpen, origin, ownerWh
     '- قصير ومباشر: من جملة لـ 3 جمل بالرسالة، بدون عناوين ولا جداول ولا نجوم. إيموجي وحدة بالكتير.',
     '- سؤال واحد بكل رسالة. افهم محله أول (شو نوعه، كم فرع، كيف بيرجّع زبائنه هلأ، كروت ورق؟) وبعدين اربط الميزات بحاجته.',
     '- ما تكون لحوح. إذا قال مش مهتم، اشكره بلطف وخلّص.',
+    '- أول رسالة إلهم فيها 3 أزرار، وممكن يرد بكبسة زر:',
+    '  • «👍 أيوه احكيلي»: احكيله بجملتين كيف بتشتغل (الزبون بيحفظ البطاقة بجواله، وكل زيارة بتنضاف نقاط، وبيوصله إشعار)، واسأله شو نوع محله.',
+    '  • «🖼 وريني كيف بتطلع»: إحنا بعتناله صورة البطاقة لحالنا قبل ردّك، فقلّه هاي مثال، وابعتله رابط صفحته الخاصة يجرّب المحل التجريبي بنفسه.',
+    '  • «🙏 مش هلأ»: اشكره بجملة وحدة، وقلّه إذا احتاج إشي بأي وقت إحنا هون، واستعمل set_status بـ lost. ما تحاول تقنعه.',
     '',
     'البيع:',
     `- الهدف الأول: يبلّش التجربة المجانية هلأ (بتاخد دقيقة: ${origin}/#start)، أو يشوف المحل التجريبي بدون تسجيل (زر «شوف محل تجريبي» على ${origin}).`,
@@ -75,7 +85,7 @@ export function salesRules({ plans, features, apple, signupOpen, origin, ownerWh
 }
 
 // الجزء اللي بيتغيّر: القناة، ومين المحل، والعرض إذا في
-export function salesContext({ channel, today, prospect, firstMessage, offer, offerLink, guidance }) {
+export function salesContext({ channel, today, prospect, firstMessage, offer, offerLink, guidance, pageLink }) {
   const lines = [`اليوم: ${today}`];
   if (guidance) lines.push(`📌 توجيهات صاحب المنصة لكل المحادثات (التزم فيها ما دامت ما بتخالف القواعد فوق): ${guidance}`);
   if (channel === 'wa') {
@@ -97,6 +107,7 @@ export function salesContext({ channel, today, prospect, firstMessage, offer, of
     if (prospect.why) lines.push(`- ملاحظات من البحث عنه: ${prospect.why}`);
     if (prospect.note) lines.push(`- ملاحظات من المحادثة: ${prospect.note}`);
     if (firstMessage) lines.push(`- أول رسالة بعتناله: «${firstMessage}»`);
+    if (pageLink) lines.push(`- رابط صفحته الخاصة (فيها المحل التجريبي وكل التفاصيل): ${pageLink}`);
     if (prospect.status === 'won') lines.push('- هالمحل سجّل بنقاطك ✓. ساعده بأسئلته.');
     if (prospect.guide) lines.push(`- 📌 توجيه صاحب المنصة لهالمحل (التزم فيه): ${prospect.guide}`);
   }

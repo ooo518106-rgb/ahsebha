@@ -15,6 +15,7 @@ export function waConfig(env) {
     verifyToken: String(env.WHATSAPP_VERIFY_TOKEN || '').trim(),
     wabaId: /^\d{5,20}$/.test(String(env.WHATSAPP_WABA_ID || '')) ? String(env.WHATSAPP_WABA_ID) : null,
     template: String(env.WHATSAPP_TEMPLATE || 'nuqatak_intro').trim(),
+    template2: String(env.WHATSAPP_TEMPLATE2 || 'nuqatak_intro2').trim(), // أول رسالة الجديدة: صورة + أزرار (بتنبعت لما Meta توافق)
     alertTemplate: String(env.WHATSAPP_ALERT_TEMPLATE || 'nuqatak_alert').trim(), // تنبيه لصاحب المنصة على رقمه
     lang: String(env.WHATSAPP_TEMPLATE_LANG || 'ar').trim(),
     version: /^v\d+\.\d+$/.test(String(env.WHATSAPP_API_VERSION || '')) ? env.WHATSAPP_API_VERSION : 'v26.0',
@@ -70,16 +71,22 @@ export const templates = (cfg, name = cfg.template) => call(cfg, `${cfg.wabaId}/
 // بيقدر يبعت؟ (Meta بتقول إذا في إشي مانع: الدفع، الحساب، الرقم) { can_send_message, entities: [{ errors }] }
 export const health = (cfg) => call(cfg, `${cfg.phoneId}?fields=health_status`, { method: 'GET' });
 
-// أول رسالة: القالب، والمتغير {{1}} = اسم المحل
-export const sendTemplate = (cfg, to, shopName) => graph(cfg, {
+// أول رسالة: القالب، والمتغير {{1}} = اسم المحل. image: رابط صورة الرأس (للقالب اللي فوقه صورة)
+export const sendTemplate = (cfg, to, shopName, { name = cfg.template, image = null } = {}) => graph(cfg, {
   to,
   type: 'template',
   template: {
-    name: cfg.template,
+    name,
     language: { code: cfg.lang },
-    components: [{ type: 'body', parameters: [{ type: 'text', text: String(shopName).replace(/\s+/g, ' ').slice(0, 60) }] }],
+    components: [
+      ...(image ? [{ type: 'header', parameters: [{ type: 'image', image: { link: image } }] }] : []),
+      { type: 'body', parameters: [{ type: 'text', text: String(shopName).replace(/\s+/g, ' ').slice(0, 60) }] },
+    ],
   },
 });
+
+// صورة (بس خلال 24 ساعة من آخر رسالة منه)
+export const sendImage = (cfg, to, link, caption = '') => graph(cfg, { to, type: 'image', image: { link, ...(caption ? { caption: String(caption).slice(0, 1000) } : {}) } });
 
 // تنبيه لصاحب المنصة (قالب {{1}} مين، {{2}} رقمه، {{3}} شو بده). Meta بترفض متغير فاضي أو فيه سطر جديد
 const param = (v) => ({ type: 'text', text: String(v || '').replace(/\s+/g, ' ').trim().slice(0, 200) || '—' });
@@ -119,6 +126,19 @@ export function incoming(payload, phoneId) {
           : msg.type === 'interactive' ? ((msg.interactive && (msg.interactive.button_reply || msg.interactive.list_reply)) || {}).title
             : null;
       out.push({ from: normPhone(msg.from), id: msg.id, name: names[msg.from] || '', text: text ? String(text).trim().slice(0, 1000) : '', type: msg.type, at: Number(msg.timestamp) * 1000 || Date.now() });
+    }
+  }
+  return out;
+}
+
+// رسائلنا وصلت (delivered) أو انقرت (read): [{ id, status, at }]
+export function statuses(payload, phoneId) {
+  const out = [];
+  for (const { ch } of changesOf(payload)) {
+    const v = ch.value || {};
+    if (phoneId && v.metadata && v.metadata.phone_number_id && v.metadata.phone_number_id !== phoneId) continue;
+    for (const st of list(v.statuses)) {
+      if (st && (st.status === 'delivered' || st.status === 'read') && st.id) out.push({ id: String(st.id), status: st.status, at: Number(st.timestamp) * 1000 || Date.now() });
     }
   }
   return out;

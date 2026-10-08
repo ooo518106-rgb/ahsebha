@@ -2921,7 +2921,7 @@ async function salesSystem(c, channel, prospect, offer) {
   const today = `${t.year}-${String(t.month).padStart(2, '0')}-${String(t.day).padStart(2, '0')}`;
   return [
     { type: 'text', text: rules, cache_control: { type: 'ephemeral' } },
-    { type: 'text', text: sales.salesContext({ channel, today, prospect, firstMessage: first && first.text, offer, offerLink: offer ? offerLink(c, offer.code) : null, guidance: await getSetting(c.db, 'sales_guidance') }) },
+    { type: 'text', text: sales.salesContext({ channel, today, prospect, firstMessage: first && first.text, offer, offerLink: offer ? offerLink(c, offer.code) : null, guidance: await getSetting(c.db, 'sales_guidance'), pageLink: prospect && prospect.code ? `${c.origin}/?p=${prospect.code}` : null }) },
   ];
 }
 
@@ -3074,12 +3074,38 @@ async function saveSalesMsg(db, prospectId, role, text, waId = null, at = Date.n
 }
 
 // أول رسالة (القالب). بيرجّع true إذا انبعتت
+// أول رسالة: الجديدة (صورة + أزرار) إذا Meta وافقت عليها، وإلا القديمة. منفحص حالتها مرة بالساعة
+const PROMO_IMAGE = '/img/promo-card.jpg';
+async function introTemplate(c, wcfg, now = Date.now()) {
+  let st = await jsonSetting(c.db, 'wa_tpl2');
+  if (wcfg.wabaId && (!st || now - st.at > HOUR) && !(st && st.status === 'ERROR' && now - st.at < 6 * HOUR)) {
+    let status = 'MISSING';
+    try {
+      const t = ((await wa.templates(wcfg, wcfg.template2)).data || []).find((x) => x.name === wcfg.template2 && x.language === wcfg.lang);
+      if (t) status = t.status;
+    } catch { status = (st && st.status) || 'MISSING'; }
+    st = { at: now, status };
+    await setSetting(c.db, 'wa_tpl2', JSON.stringify(st));
+  }
+  return st && st.status === 'APPROVED' ? { v: 2, name: wcfg.template2, image: `${c.origin}${PROMO_IMAGE}` } : { v: 1, name: wcfg.template };
+}
+
 async function sendIntro(c, wcfg, p, now = Date.now()) {
   const claim = await c.db.run("UPDATE prospects SET status = 'sent', sent_at = ?, error = NULL WHERE id = ? AND status IN ('new', 'failed') AND wa IS NOT NULL", now, p.id);
   if (!claim.changes) return false;
   try {
-    const id = await wa.sendTemplate(wcfg, p.wa, p.name);
-    await saveSalesMsg(c.db, p.id, 'agent', sales.templateFor(p.name), id, now);
+    let tpl = await introTemplate(c, wcfg, now);
+    let id;
+    try {
+      id = await wa.sendTemplate(wcfg, p.wa, p.name, tpl);
+    } catch (e) {
+      // القالب الجديد مش مزبوط (مثلاً انعمل بدون صورة، أو انوقف): منسجّل السبب ومنبعت القديم
+      if (tpl.v !== 2 || !String(e.code || '').startsWith('132')) throw e;
+      await setSetting(c.db, 'wa_tpl2', JSON.stringify({ at: now, status: 'ERROR', error: clean(`${e.message} (${e.code})`, 200) }));
+      tpl = { v: 1, name: wcfg.template };
+      id = await wa.sendTemplate(wcfg, p.wa, p.name, tpl);
+    }
+    await saveSalesMsg(c.db, p.id, 'agent', tpl.v === 2 ? sales.template2For(p.name) : sales.templateFor(p.name), id, now);
     await c.db.run('UPDATE prospects SET last_out_at = ? WHERE id = ?', now, p.id);
     return true;
   } catch (e) {
@@ -3158,8 +3184,17 @@ async function waWebhook(c) {
   if (!payload) return new Response('bad json', { status: 400 });
   for (const m of wa.incoming(payload, wcfg.phoneId)) await waIncoming(c, wcfg, m);
   for (const f of wa.failures(payload, wcfg.phoneId)) await waFailed(c, f);
+  for (const st of wa.statuses(payload, wcfg.phoneId)) await waStatus(c, st);
   for (const ev of wa.accountEvents(payload, wcfg.wabaId)) await waAccountEvent(c, wcfg, ev);
   return new Response('ok');
+}
+
+// 📊 رسالتنا وصلت أو انقرت: بنسجّل أول مرة لكل محل (عشان نعرف مين بيقرأ وما بيرد)
+async function waStatus(c, st) {
+  const sent = await c.db.get('SELECT prospect_id FROM sales_msgs WHERE wa_id = ?', st.id);
+  if (!sent) return;
+  const col = st.status === 'read' ? 'read_at' : 'delivered_at';
+  await c.db.run(`UPDATE prospects SET ${col} = COALESCE(${col}, ?)${col === 'read_at' ? ', delivered_at = COALESCE(delivered_at, ?)' : ''} WHERE id = ?`, ...(col === 'read_at' ? [st.at, st.at] : [st.at]), sent.prospect_id);
 }
 
 // رسالة إلنا فشلت بعد ما Meta قبلتها. إذا كانت أول رسالة (القالب): نفس اللي بنعمله لما Meta ترفض فوراً،
@@ -3257,6 +3292,13 @@ async function waIncoming(c, wcfg, m) {
     event: !p.last_in_at ? (p.source === 'inbound' ? 'حدا جديد راسل الوكيل' : 'رد على الوكيل') : p.paused || !aiConfig(c.env) ? 'رسالة جديدة، رد عليه إنت' : 'رسالة جديدة',
     who: p.name, phone: `+${from}`, about: text, key: `c:${p.id}`, every: HOUR,
   });
+  // كبس «🖼 وريني كيف بتطلع»: بنبعتله صورة البطاقة فوراً، والوكيل بيكمّل بعدها
+  if (m.type === 'button' && sales.SHOW_ME_RE.test(text)) {
+    try {
+      const caption = 'هيك بتطلع بطاقة محلك بجوال الزبون 👆 بلونك وشعارك، والنقاط بتتحدّث لحالها مع كل زيارة';
+      await saveSalesMsg(c.db, p.id, 'agent', `🖼 [صورة البطاقة] ${caption}`, await wa.sendImage(wcfg, from, `${c.origin}${PROMO_IMAGE}`, caption));
+    } catch (e) { console.error('wa promo:', e.message); }
+  }
   if (p.paused || !aiConfig(c.env)) return;
   c.waitUntil(waReply(c, wcfg, p.id, ins.lastId).catch(async (e) => {
     console.error('wa reply:', e.status || '', e.message);
@@ -3490,7 +3532,7 @@ function prospectView(p, offer, ctx) {
   return {
     id: p.id, name: p.name, area: p.area, kind: p.kind, phone: p.phone, wa: p.wa, instagram: p.instagram, website: p.website, why: p.why,
     ownerName: p.owner_name, note: p.note, guide: p.guide || null, status: p.status, source: p.source, paused: !!p.paused, error: p.error, shopId: p.shop_id,
-    sentAt: p.sent_at, lastInAt: p.last_in_at, lastOutAt: p.last_out_at, openedAt: p.opened_at, createdAt: p.created_at,
+    sentAt: p.sent_at, lastInAt: p.last_in_at, lastOutAt: p.last_out_at, openedAt: p.opened_at, createdAt: p.created_at, deliveredAt: p.delivered_at || null, readAt: p.read_at || null,
     message, link: `${ctx.origin}/?p=${p.code}`,
     waLink: p.wa ? `https://wa.me/${p.wa}?text=${encodeURIComponent(message)}` : null,
     offer: offer ? { trialDays: offer.trial_days, code: offer.code, used: !!offer.used_at } : null,
@@ -3517,6 +3559,9 @@ async function salesState(c) {
     prospects: rows.map((p) => prospectView(p, offerOf.get(p.id), ctx)),
     counts,
     sentToday: (await c.db.get('SELECT COUNT(*) AS n FROM prospects WHERE sent_at > ?', Date.now() - DAY)).n,
+    // آخر 30 يوم: انبعت ← وصل ← قرأ ← رد
+    funnel: await c.db.get('SELECT COUNT(*) AS sent, COUNT(delivered_at) AS delivered, COUNT(read_at) AS read, COUNT(last_in_at) AS replied FROM prospects WHERE sent_at > ?', Date.now() - 30 * DAY),
+    intro: await jsonSetting(c.db, 'wa_tpl2'),
     signups: (await c.db.get('SELECT COUNT(*) AS n FROM offers WHERE used_at IS NOT NULL')).n,
     settings: { auto: (await getSetting(c.db, 'sales_auto')) === '1', daily: Number(await getSetting(c.db, 'sales_daily')) || SALES_DAILY, agentWa: (await getSetting(c.db, 'sales_agent_wa')) || '' },
     stopped: await jsonSetting(c.db, 'sales_stop'), // ليش وقف الإرسال لحاله آخر مرة
@@ -3723,6 +3768,7 @@ async function adminWaNumber(c) {
     let subscribed = null;
     let template = null;
     let alertTemplate = null;
+    let intro2 = null;
     // حالة القالب عند Meta، أو MISSING إذا مش على هالحساب
     const tplStatus = async (name) => {
       try {
@@ -3737,6 +3783,7 @@ async function adminWaNumber(c) {
       try { subscribed = ((await wa.subscribedApps(wcfg)).data || []).length > 0; } catch { subscribed = null; }
       template = await tplStatus(wcfg.template);
       alertTemplate = await tplStatus(wcfg.alertTemplate);
+      intro2 = await tplStatus(wcfg.template2);
     }
     // هل في إشي مانع الإرسال (الدفع، الحساب، الرقم)
     let sending = null;
@@ -3758,6 +3805,8 @@ async function adminWaNumber(c) {
       templateName: wcfg.template,
       alertTemplate,
       alertTemplateName: wcfg.alertTemplate,
+      intro2,
+      intro2Name: wcfg.template2,
       alertLast: await jsonSetting(c.db, 'wa_alert_last'),
       ownerWa: ownerWhatsapp(c.env),
       wabaId: wcfg.wabaId,

@@ -433,4 +433,7 @@ export const MIGRATIONS = [
   'ALTER TABLE apple_config ADD COLUMN apns_key TEXT',
   'ALTER TABLE apple_config ADD COLUMN apns_key_id TEXT',
   'ALTER TABLE apple_config ADD COLUMN apns_last TEXT',
+  // 📊 أول رسالة: وصلت؟ انقرت؟ (إشعارات الحالة من Meta)
+  'ALTER TABLE prospects ADD COLUMN delivered_at INTEGER',
+  'ALTER TABLE prospects ADD COLUMN read_at INTEGER',
 ];

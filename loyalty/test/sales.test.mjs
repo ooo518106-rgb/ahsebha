@@ -856,3 +856,68 @@ test('توجّه الوكيل من واتسابك: رسالة لمحل، توج�
   await meta.flush();
   assert.equal(f.graph.filter((g) => g.body.to === '962798900911' && g.body.type === 'text').at(-1).body.text.body, 'ما لقيته، أي محل قصدك؟');
 });
+
+test('أول رسالة الجديدة: صورة + أزرار لما Meta توافق (وإلا القديمة)، وكبسة «وريني» بتبعت صورة، ومنعرف مين قرأ', async () => {
+  const graph = [];
+  let tpl2 = 'PENDING';
+  let breakTpl2 = false;
+  const fetch = async (url, init = {}) => {
+    const u = String(url);
+    if (!u.startsWith('https://graph.facebook.com/')) return new Response(null, { status: 201 });
+    const body = init.body ? JSON.parse(init.body) : {};
+    graph.push({ url: u, method: init.method || 'POST', body });
+    const ok = (d) => new Response(JSON.stringify(d), { status: 200, headers: { 'content-type': 'application/json' } });
+    if (u.includes('/message_templates')) return ok({ data: u.includes('nuqatak_intro2') ? [{ name: 'nuqatak_intro2', status: tpl2, language: 'ar' }] : [] });
+    if (u.includes('?fields=')) return ok({ quality_rating: 'GREEN' });
+    if (breakTpl2 && body.template && body.template.name === 'nuqatak_intro2') return new Response(JSON.stringify({ error: { message: 'Number of parameters does not match', code: 132000 } }), { status: 400 });
+    return ok({ messages: [{ id: `wamid.${graph.length}` }] });
+  };
+  const p = await platform({ fetch, ...WA_ENV, WHATSAPP_WABA_ID: '5550001' });
+  await p.admin.put('/api/admin/sales/settings', { auto: true, daily: 20 });
+  for (const [i, n] of ['كوفي الورد', 'مخبز النور', 'حلويات السعادة'].entries()) await p.admin.post('/api/admin/prospects', { name: n, phone: `079100000${i + 1}` });
+  const ctx = { db: p.db, env: p.env, waitUntil: (x) => x };
+  const sends = () => graph.filter((g) => g.body.type === 'template');
+
+  // لسا عند Meta: بتنبعت القديمة
+  await runScheduled(ctx, SUNDAY_NOON);
+  assert.equal(sends()[0].body.template.name, 'nuqatak_intro');
+  assert.equal(sends()[0].body.template.components.length, 1);
+
+  // وافقت: الجديدة بصورة الرأس
+  tpl2 = 'APPROVED';
+  await p.db.run("DELETE FROM platform_settings WHERE k = 'wa_tpl2'");
+  await runScheduled(ctx, SUNDAY_NOON + 10 * 60e3);
+  const t2 = sends().find((g) => g.body.template.name === 'nuqatak_intro2');
+  assert.ok(t2, 'انبعتت الجديدة');
+  assert.deepEqual(t2.body.template.components[0], { type: 'header', parameters: [{ type: 'image', image: { link: 'https://nuqatak.test/img/promo-card.jpg' } }] });
+  const st = (await p.admin.get('/api/admin/sales')).data;
+  assert.equal(st.intro.status, 'APPROVED');
+  const shop = st.prospects.find((x) => x.wa === t2.body.to);
+  const chat = (await p.admin.get(`/api/admin/prospects/${shop.id}`)).data.messages;
+  assert.match(chat[0].text, /وريني كيف بتطلع/);
+
+  // انقرت (إشعار حالة من Meta) ← بتنحسب
+  const wamid = `wamid.${graph.indexOf(t2) + 1}`;
+  await hook(p.client(), { object: 'whatsapp_business_account', entry: [{ changes: [{ field: 'messages', value: { metadata: { phone_number_id: '1234567890' }, statuses: [{ id: wamid, status: 'read', timestamp: '1760000000', recipient_id: t2.body.to }] } }] }] });
+  const st2 = (await p.admin.get('/api/admin/sales')).data;
+  assert.equal(st2.funnel.read, 1);
+  assert.equal(st2.funnel.delivered, 1, 'انقرت يعني وصلت');
+  assert.ok(st2.prospects.find((x) => x.id === shop.id).readAt);
+
+  // كبس زر «🖼 وريني كيف بتطلع» ← صورة البطاقة فوراً
+  const meta = p.client();
+  await hook(meta, { object: 'whatsapp_business_account', entry: [{ changes: [{ field: 'messages', value: { metadata: { phone_number_id: '1234567890' }, contacts: [{ wa_id: t2.body.to, profile: { name: 'x' } }], messages: [{ from: t2.body.to, id: 'wamid.btn1', timestamp: '1760000000', type: 'button', button: { text: '🖼 وريني كيف بتطلع', payload: 'x' } }] } }] }] });
+  await meta.flush();
+  const img = graph.find((g) => g.body.type === 'image');
+  assert.equal(img.body.to, t2.body.to);
+  assert.equal(img.body.image.link, 'https://nuqatak.test/img/promo-card.jpg');
+
+  // الجديدة انعملت غلط (بدون صورة): بنسجّل السبب وبنبعت القديمة لنفس المحل
+  breakTpl2 = true;
+  await p.admin.post('/api/admin/prospects', { name: 'مطعم البيت', phone: '0791000009' });
+  const before = sends().length;
+  await runScheduled(ctx, SUNDAY_NOON + 20 * 60e3);
+  const after = sends().slice(before);
+  assert.deepEqual(after.map((g) => g.body.template.name), ['nuqatak_intro2', 'nuqatak_intro']);
+  assert.equal((await p.admin.get('/api/admin/sales')).data.intro.status, 'ERROR');
+});
