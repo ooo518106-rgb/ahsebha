@@ -181,6 +181,16 @@
             <div class="signup-only field hidden" id="codeField"><label for="code">رمز التسجيل</label><input id="code" name="code" dir="ltr"><div class="hint">الرمز اللي وصلك منّا.</div></div>
             <p class="error" id="authError" role="alert"></p>
             <button class="btn big block" type="submit" id="authBtn">دخول</button>
+            <p class="center small login-only"><button type="button" class="linkish" id="forgotBtn">نسيت كلمة السر؟</button></p>
+            <div class="alert ok small hidden" id="forgotMsg" role="status"></div>
+            <p class="center small muted signup-only hidden">بالتسجيل إنت موافق على <a href="/terms">الشروط والأحكام</a> و<a href="/privacy">سياسة الخصوصية</a>.</p>
+          </form>
+          <form id="resetForm" class="stack hidden" style="margin-top:14px" novalidate>
+            <p class="small muted">كلمة سر جديدة لحساب <b dir="ltr" id="resetEmail"></b></p>
+            <div class="field"><label for="newPw">كلمة السر الجديدة</label><input id="newPw" name="password" type="password" autocomplete="new-password" dir="ltr" minlength="8" required><div class="hint">8 حروف على الأقل.</div></div>
+            <div class="field"><label for="newPw2">اكتبها كمان مرة</label><input id="newPw2" type="password" autocomplete="new-password" dir="ltr" minlength="8" required></div>
+            <p class="error" id="resetError" role="alert"></p>
+            <button class="btn big block" type="submit">احفظ وادخل</button>
           </form>
         </div>
       </section>
@@ -191,6 +201,7 @@
     <div class="wrap row">
       <span class="brand small"><img src="/img/nuqatak-logo.png" alt="" width="26" height="26">نقاطك</span>
       <span class="grow"></span>
+      <a href="/terms">الشروط والأحكام</a>
       <a href="/privacy">سياسة الخصوصية</a>
       <a href="#login">دخول المحلات</a>
       <a class="hidden" data-wa target="_blank" rel="noopener">واتساب</a>

@@ -1959,7 +1959,8 @@ async function admin() {
       ${shops.length ? html`<ul class="list" id="shopList">${shops.map((s) => {
         const [label, cls] = SUB_BADGE[s.subscription.state](s.subscription);
         const tierBadge = s.subscription.state === 'active' ? html` <span class="badge">${s.plan.tier === 'basic' ? '⭐ أساسي' : '💎 مميز'}</span>` : '';
-        return html`<li style="align-items:flex-start"><div class="main"><b>${s.name} <span class="badge ${cls}">${label}</span>${tierBadge}</b>
+        const askedReset = s.resetAskedAt && Date.now() - s.resetAskedAt < 7 * 864e5 ? html` <span class="badge warn">🔑 نسي كلمة السر</span>` : '';
+        return html`<li style="align-items:flex-start"><div class="main"><b>${s.name} <span class="badge ${cls}">${label}</span>${tierBadge}${askedReset}</b>
           <span class="small muted"><span dir="ltr">${s.ownerEmail || ''}</span> · ${fmt(s.members)} زبون · من ${fmtDate(s.createdAt)} · آخر حركة ${ago(s.lastActivity)}${s.reseller ? ` · 🤝 ${s.reseller}` : ''}</span>
           <div class="row" style="margin-top:6px">
             ${s.subscription.state === 'owner' ? '' : html`<select class="tier-sel" data-tier-for="${s.id}" aria-label="الباقة" style="width:auto;min-height:34px;padding:4px 8px">
@@ -1969,7 +1970,8 @@ async function admin() {
             ${s.subscription.state === 'active' ? html`<button class="btn sm ghost" type="button" data-plan="${s.plan.chosen === 'basic' ? 'pro' : 'basic'}" data-shop="${s.id}">⇄ ${s.plan.chosen === 'basic' ? 'رقّي للمميز' : 'نزّل للأساسي'}</button>` : ''}
             ${s.subscription.state === 'expired' ? '' : html`<button class="btn sm ghost" type="button" data-plan="stop" data-shop="${s.id}">إيقاف</button>`}`}
             <button class="btn sm ghost" type="button" data-shop-menu="${s.id}">📋 المنيو</button>
-          </div></div></li>`;
+            ${s.subscription.state === 'owner' ? '' : html`<button class="btn sm ghost" type="button" data-reset-link="${s.id}">🔑 رابط كلمة سر</button>`}
+          </div><div class="reset-box"></div></div></li>`;
       })}</ul>` : html`<p class="muted">ما في محلات لسا.</p>`}
     </section>
     </div>
@@ -1990,6 +1992,26 @@ async function admin() {
   $$('[data-shop-menu]').forEach((b) => {
     const shop = shops.find((x) => String(x.id) === b.dataset.shopMenu);
     b.onclick = () => adminShopMenu(shop);
+  });
+  // 🔑 رابط كلمة سر جديدة لصاحب المحل (لمرة وحدة، 24 ساعة): بتنسخه أو بتبعته واتساب
+  $$('[data-reset-link]').forEach((b) => {
+    b.onclick = async () => {
+      const shop = shops.find((x) => String(x.id) === b.dataset.resetLink);
+      if (!confirm(`تعمل رابط كلمة سر جديدة لـ ${shop.name}؟ الرابط القديم (إذا في) بيبطل.`)) return;
+      try {
+        const r = await api(`/api/admin/shops/${shop.id}/reset-link`, { method: 'POST' });
+        const text = `مرحبا 👋 هاد رابط كلمة سر جديدة لحسابك بنقاطك (${r.email})، صالح ${r.hours} ساعة ولمرة وحدة:\n${r.url}`;
+        const box = b.closest('li').querySelector('.reset-box');
+        render(box, html`<div class="alert ok small stack" style="margin-top:8px"><b>🔑 الرابط جاهز (صالح ${r.hours} ساعة، لمرة وحدة)</b>
+          <input readonly dir="ltr" value="${r.url}" data-reset-url>
+          <div class="row"><a class="btn sm wa" target="_blank" rel="noopener" href="https://wa.me/?text=${encodeURIComponent(text)}">ابعته واتساب</a>
+            <button class="btn sm ghost" type="button" data-copy-reset>📋 انسخ</button></div></div>`);
+        box.querySelector('[data-reset-url]').onclick = (e) => e.target.select();
+        box.querySelector('[data-copy-reset]').onclick = async () => {
+          try { await navigator.clipboard.writeText(text); toast('انسخ ✅', 'ok'); } catch { prompt('انسخ الرسالة:', text); }
+        };
+      } catch (e) { toast(e.message, 'bad'); }
+    };
   });
   $$('[data-plan]').forEach((b) => {
     b.onclick = async () => {

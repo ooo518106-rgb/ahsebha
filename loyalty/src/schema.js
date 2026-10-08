@@ -41,6 +41,14 @@ export const SCHEMA = [
     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     expires_at INTEGER NOT NULL
   )`,
+  // روابط كلمة السر الجديدة (مدير المنصة بيعملها وبيبعتها لصاحب المحل)، لمرة وحدة ولـ 24 ساعة
+  `CREATE TABLE IF NOT EXISTS password_resets (
+    token_hash TEXT PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    expires_at INTEGER NOT NULL,
+    used_at INTEGER,
+    created_at INTEGER NOT NULL
+  )`,
   `CREATE TABLE IF NOT EXISTS members (
     id INTEGER PRIMARY KEY,
     shop_id INTEGER NOT NULL REFERENCES shops(id),
@@ -413,4 +421,5 @@ export const MIGRATIONS = [
   'CREATE INDEX IF NOT EXISTS members_referrer ON members(referred_by)',
   'CREATE INDEX IF NOT EXISTS members_visit ON members(shop_id, last_visit)',
   'CREATE INDEX IF NOT EXISTS members_bday ON members(shop_id, birthday)',
+  'ALTER TABLE users ADD COLUMN reset_asked_at INTEGER',
 ];

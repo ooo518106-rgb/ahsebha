@@ -185,6 +185,8 @@ function setMode(m) {
   mode = m;
   $$('#authTabs button').forEach((b) => b.classList.toggle('on', b.dataset.mode === m));
   $$('.signup-only').forEach((el) => el.classList.toggle('hidden', m !== 'signup' || (el.id === 'codeField' && signupOpen && !code)));
+  $$('.login-only').forEach((el) => el.classList.toggle('hidden', m !== 'login'));
+  $('#forgotMsg').classList.add('hidden');
   $('#password').autocomplete = m === 'signup' ? 'new-password' : 'current-password';
   $('#authBtn').textContent = m === 'signup' ? 'ابدأ تجربتي المجانية' : 'دخول';
   $('#authTitle').textContent = m === 'signup' ? `ابدأ تجربتك المجانية${offerDays ? ` (${offerDays} يوم 🎁)` : ''}` : 'دخول المحلات';
@@ -215,6 +217,59 @@ function setupAuth() {
 }
 
 $$('#authTabs button').forEach((b) => b.addEventListener('click', () => setMode(b.dataset.mode)));
+
+// 🔑 نسيت كلمة السر: الطلب بيوصل لفريق نقاطك، وبنبعتله رابط كلمة سر جديدة
+$('#forgotBtn').addEventListener('click', async () => {
+  const email = $('#email').value.trim();
+  const msg = $('#forgotMsg');
+  if (!email) { $('#authError').textContent = 'اكتب إيميلك فوق، وبعدين اكبس «نسيت كلمة السر؟»'; $('#email').focus(); return; }
+  $('#authError').textContent = '';
+  try {
+    const r = await api('/api/auth/forgot', { method: 'POST', body: { email } });
+    const wa = r.whatsapp ? `https://wa.me/${r.whatsapp}?text=${encodeURIComponent(`مرحبا، نسيت كلمة السر لحسابي بنقاطك: ${email}`)}` : null;
+    msg.innerHTML = '<span></span>';
+    msg.querySelector('span').textContent = 'وصلنا طلبك ✅ رح نبعتلك رابط لكلمة سر جديدة بأقرب وقت.';
+    if (wa) {
+      const a = document.createElement('a');
+      a.className = 'btn sm wa';
+      a.style.marginTop = '8px';
+      a.href = wa;
+      a.target = '_blank';
+      a.rel = 'noopener';
+      a.textContent = 'مستعجل؟ احكينا واتساب';
+      msg.append(document.createElement('br'), a);
+    }
+    msg.classList.remove('hidden');
+  } catch (err) { $('#authError').textContent = err.message; }
+});
+
+// رابط كلمة السر الجديدة (/?reset=…): فورم لحاله بدل الدخول
+const resetToken = params.get('reset');
+if (resetToken) {
+  const showReset = (email) => {
+    $('#auth').classList.add('hidden');
+    $('#authTabs').classList.add('hidden');
+    $('#resetForm').classList.remove('hidden');
+    $('#authTitle').textContent = 'كلمة سر جديدة';
+    $('#resetEmail').textContent = email;
+    $('#login').scrollIntoView({ behavior: 'smooth' });
+  };
+  api(`/api/auth/reset?token=${encodeURIComponent(resetToken)}`).then((r) => showReset(r.email)).catch((e) => {
+    $('#authError').textContent = e.message;
+    $('#login').scrollIntoView({ behavior: 'smooth' });
+  });
+  $('#resetForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const pw = $('#newPw').value;
+    if (pw !== $('#newPw2').value) { $('#resetError').textContent = 'كلمتين السر مش نفس الإشي'; return; }
+    const btn = e.target.querySelector('button');
+    btn.disabled = true;
+    try {
+      await api('/api/auth/reset', { method: 'POST', body: { token: resetToken, password: pw } });
+      location.href = '/app';
+    } catch (err) { $('#resetError').textContent = err.message; btn.disabled = false; }
+  });
+}
 
 $('#auth').addEventListener('submit', async (e) => {
   e.preventDefault();

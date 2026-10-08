@@ -15,7 +15,7 @@ import * as wa from './whatsapp.js';
 import { defaultLogoPng } from './png.js';
 import { earnFor, progress, rewardCost, rewardRule, stampsLine, unitLabel, unitWord } from '../public/js/rules.js';
 import { FEATURES } from '../public/js/plans.js';
-import { b64ToBytes, bytesToB64, clean, fail, HttpError, isUniqueError, json, normPhone, randomDigits, randomToken } from './util.js';
+import { b64ToBytes, bytesToB64, clean, fail, HttpError, isUniqueError, json, normPhone, randomDigits, randomToken, sha256Hex } from './util.js';
 
 const COLOR_RE = /^#[0-9a-f]{6}$/i;
 const SLUG_RE = /^[a-z0-9][a-z0-9-]{1,38}[a-z0-9]$/;
@@ -1333,6 +1333,7 @@ async function adminShops(c) {
        (SELECT COUNT(*) FROM members m WHERE m.shop_id = s.id) AS members,
        (SELECT MAX(t.created_at) FROM txns t WHERE t.shop_id = s.id) AS lastActivity,
        (SELECT u.email FROM users u WHERE u.shop_id = s.id AND u.role = 'owner' ORDER BY u.id LIMIT 1) AS ownerEmail,
+       (SELECT MAX(u.reset_asked_at) FROM users u WHERE u.shop_id = s.id AND u.role = 'owner') AS resetAskedAt,
        (SELECT r.name FROM resellers r WHERE r.id = s.reseller_id) AS reseller
      FROM shops s WHERE s.demo = 0 ORDER BY s.created_at DESC LIMIT 500`,
   );
@@ -1580,6 +1581,64 @@ async function loginRoute(c) {
 async function logout(c) {
   await auth.endSession(c.db, c.req);
   return json({ ok: true }, 200, { 'set-cookie': auth.sessionCookie(null, c.req) });
+}
+
+// ─── 🔑 نسيت كلمة السر ───
+// ما في إيميل بالمنصة: صاحب المحل بيطلب من صفحة الدخول، بيوصلك إشعار، وإنت بتعمل رابط لمرة وحدة وبتبعتله ياه (واتساب)
+const RESET_HOURS = 24;
+async function forgotPassword(c) {
+  await rateLimit(c, `forgot:${c.ip}`, 5, 60 * MIN, 'طلبات كتير، جرّب بعد ساعة');
+  const email = String(c.body.email || '').trim().toLowerCase();
+  if (!EMAIL_RE.test(email)) fail(400, 'اكتب إيميلك اللي سجّلت فيه');
+  const user = await c.db.get("SELECT u.id, u.reset_asked_at, s.name AS shop FROM users u JOIN shops s ON s.id = u.shop_id WHERE u.email = ? AND u.role = 'owner' AND s.demo = 0", email);
+  // نفس الرد سواء الإيميل موجود أو لأ (ما بنكشف مين مسجّل)، والإشعار مرة باليوم لكل حساب
+  if (user && !(user.reset_asked_at > Date.now() - DAY)) {
+    await c.db.run('UPDATE users SET reset_asked_at = ? WHERE id = ?', Date.now(), user.id);
+    await notifyAdmin(c, { title: `🔑 ${user.shop} نسي كلمة السر`, body: `${email} · اعمله رابط من 👑 المنصة ← المحلات`, url: `${c.origin}/app#admin` });
+  }
+  return json({ ok: true, whatsapp: ownerWhatsapp(c.env) });
+}
+
+async function adminResetLink(c, shopId) {
+  await requireAdmin(c);
+  const user = await c.db.get("SELECT u.id, u.email FROM users u JOIN shops s ON s.id = u.shop_id WHERE s.id = ? AND u.role = 'owner' AND s.demo = 0 ORDER BY u.id LIMIT 1", Number(shopId));
+  if (!user) fail(404, 'ما لقينا صاحب المحل');
+  const token = randomToken(32);
+  const now = Date.now();
+  await c.db.run('DELETE FROM password_resets WHERE user_id = ? OR expires_at < ?', user.id, now); // الرابط الجديد بيلغي القديم
+  await c.db.run('INSERT INTO password_resets (token_hash, user_id, expires_at, created_at) VALUES (?, ?, ?, ?)', await sha256Hex(token), user.id, now + RESET_HOURS * HOUR, now);
+  await c.db.run('UPDATE users SET reset_asked_at = NULL WHERE id = ?', user.id);
+  return json({ url: `${c.origin}/?reset=${token}#login`, email: user.email, hours: RESET_HOURS });
+}
+
+async function resetRow(c, token) {
+  const t = String(token || '');
+  if (!/^[a-z2-9]{32}$/.test(t)) return null;
+  return c.db.get('SELECT r.*, u.email FROM password_resets r JOIN users u ON u.id = r.user_id WHERE r.token_hash = ? AND r.used_at IS NULL AND r.expires_at > ?', await sha256Hex(t), Date.now());
+}
+const RESET_GONE = 'الرابط خلص أو انستعمل. اطلب رابط جديد';
+
+async function resetInfo(c) {
+  await rateLimit(c, `reset:${c.ip}`, 30, 60 * MIN);
+  const r = await resetRow(c, c.url.searchParams.get('token'));
+  if (!r) fail(404, RESET_GONE);
+  return json({ email: r.email });
+}
+
+async function resetPassword(c) {
+  await rateLimit(c, `reset:${c.ip}`, 30, 60 * MIN);
+  auth.checkPasswordStrength(c.body.password);
+  const r = await resetRow(c, c.body.token);
+  if (!r) fail(404, RESET_GONE);
+  const used = await c.db.run('UPDATE password_resets SET used_at = ? WHERE token_hash = ? AND used_at IS NULL', Date.now(), r.token_hash);
+  if (!used.changes) fail(404, RESET_GONE);
+  // كلمة السر الجديدة بتطلّع أي حدا كان داخل بالقديمة
+  await c.db.batch([
+    ['UPDATE users SET pw_hash = ?, failed = 0, locked_until = 0 WHERE id = ?', [await auth.hashPassword(c.body.password), r.user_id]],
+    ['DELETE FROM sessions WHERE user_id = ?', [r.user_id]],
+  ]);
+  const session = await auth.createSession(c.db, r.user_id);
+  return json({ ok: true }, 200, { 'set-cookie': auth.sessionCookie(session, c.req) });
 }
 
 async function me(c) {
@@ -3519,6 +3578,10 @@ const API = [
   ['POST', /^\/api\/auth\/login$/, loginRoute],
   ['POST', /^\/api\/demo\/login$/, demoLogin],
   ['POST', /^\/api\/auth\/logout$/, logout],
+  ['POST', /^\/api\/auth\/forgot$/, forgotPassword],
+  ['GET', /^\/api\/auth\/reset$/, resetInfo],
+  ['POST', /^\/api\/auth\/reset$/, resetPassword],
+  ['POST', /^\/api\/admin\/shops\/(\d+)\/reset-link$/, adminResetLink, 'staff'],
   ['GET', /^\/api\/me$/, me, 'staff'],
   ['PUT', /^\/api\/me\/password$/, changePassword, 'staff'],
   ['POST', /^\/api\/me\/push$/, userPushSubscribe, 'staff'],
@@ -3619,7 +3682,7 @@ async function page(c, file) {
 
 // 🌐 الدومين الرسمي (PUBLIC_URL، مثلاً https://nuqatak.com): صفحات العنوان القديم (workers.dev) و www بتتحوّل لحالها.
 // الـ API وخدمة Apple والصور و sw.js بيضلوا شغّالين على كل العناوين، عشان البطاقات اللي بالمحافظ والإشعارات اللي انبعتت قبل
-const PAGE_RE = /^\/(?:$|index\.html$|app\/?$|privacy\/?$|cards\/?$|(?:j|m|print)\/[a-z0-9-]{3,40}\/?$|(?:c|g|partner)\/[a-z2-9]{20}\/?$)/;
+const PAGE_RE = /^\/(?:$|index\.html$|app\/?$|privacy\/?$|terms\/?$|cards\/?$|(?:j|m|print)\/[a-z0-9-]{3,40}\/?$|(?:c|g|partner)\/[a-z2-9]{20}\/?$)/;
 function canonicalRedirect(c) {
   if (!c.env.PUBLIC_URL || (c.req.method !== 'GET' && c.req.method !== 'HEAD')) return null;
   let canon;
@@ -3649,6 +3712,7 @@ export async function handle(req, ctx) {
     if (p === '/cards' || p === '/cards/') return await page(c, '/cards.html');
     if (p === '/' || p === '/index.html') return await page(c, '/index.html');
     if (p === '/privacy' || p === '/privacy/') return await page(c, '/privacy.html');
+    if (p === '/terms' || p === '/terms/') return await page(c, '/terms.html');
     // نفس صفحة الخصوصية لـ Meta (تعليمات حذف البيانات): ما بتتحوّل للدومين، لأنه زاحف Meta ما بيعدّي حماية البوتات عليه
     if (p === '/data-deletion' || p === '/data-deletion/') return await page(c, '/privacy.html');
     if (/^\/partner\/[a-z2-9]{20}\/?$/.test(p)) return await page(c, '/partner.html');
