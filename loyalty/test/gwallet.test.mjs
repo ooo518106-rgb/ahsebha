@@ -158,7 +158,7 @@ test('رابط المنيو بالمحفظة: بيطلع أول ما يصير ف
   let r = await c.post('/api/menu', { name: 'لاتيه', price: 2.75 });
   await c.flush();
   assert.equal(classCalls().length, 2);
-  assert.deepEqual(classCalls().at(-1).body.linksModuleData.uris, [{ id: 'menu', uri: `https://loyalty.test/m/${shop.slug}`, description: 'المنيو' }]);
+  assert.deepEqual(classCalls().at(-1).body.linksModuleData.uris, [{ id: 'menu', uri: `https://loyalty.test/m/${shop.slug}`, description: '📋 المنيو' }]);
   r = await c.post('/api/menu', { name: 'موكا', price: 3 });
   await c.flush();
   assert.equal(classCalls().length, 2);

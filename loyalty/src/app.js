@@ -2424,6 +2424,8 @@ async function updateLinks(c) {
   const links = normalizeLinks(c.body, c.shop.country);
   await c.db.run('UPDATE shops SET links = ?, updated_at = ? WHERE id = ?', JSON.stringify(links), Date.now(), c.shop.id);
   const shop = await shopRow(c.db, c.shop.id);
+  // الروابط على بطاقات Google Wallet (Apple بتاخدها لما البطاقة تتحدّث)
+  if (shop.gw_synced_at) c.waitUntil(syncClass(c, shop));
   return json({ shop: shopView(shop, c.origin) });
 }
 

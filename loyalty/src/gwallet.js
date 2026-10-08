@@ -4,6 +4,7 @@
 // - merchantLocations (لحد 10 مواقع) هي اللي بتخلي الجوال يطلّع البطاقة لما يقرّب الزبون من المحل.
 import { progress, rewardRule, stampsLine, unitWord } from '../public/js/rules.js';
 import { b64ToBytes, b64url, b64urlText } from './util.js';
+import { shopLinks } from './apple.js';
 
 const TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const API = 'https://walletobjects.googleapis.com/walletobjects/v1';
@@ -66,7 +67,11 @@ export function buildClass(cfg, shop, origin, { menuUrl = null } = {}) {
   if (locations.length) cls.merchantLocations = locations.map((l) => ({ latitude: l.lat, longitude: l.lng }));
   // رابط المنيو على مستوى الفئة: بيطلع بتفاصيل كل بطاقات المحل مرة وحدة (جنب رابط البطاقة تبع كل زبون).
   // التحديث عند Google بـ PATCH، فلازم نبعت القائمة فاضية لما ينشال المنيو عشان ينمسح الرابط
-  cls.linksModuleData = { uris: menuUrl ? [{ id: 'menu', uri: menuUrl, description: 'المنيو' }] : [] };
+  // المنيو أول إشي، وبعده روابط المحل (إنستغرام، واتساب…)
+  cls.linksModuleData = { uris: [
+    ...(menuUrl ? [{ id: 'menu', uri: menuUrl, description: '📋 المنيو' }] : []),
+    ...shopLinks(shop).map((l) => ({ id: `link-${l.key}`, uri: l.url, description: `${l.label}: ${l.text}` })),
+  ] };
   return cls;
 }
 
@@ -87,7 +92,10 @@ export function buildObject(cfg, shop, member, origin) {
       ? { label: 'مكافآت جاهزة', balance: { int: p.available } }
       : { label: 'باقي للمكافأة', balance: { int: p.remaining } },
     textModulesData: [{ id: 'progress', header: shop.reward_name, body: stamps ? stampsLine(shop, member.balance) : `${p.toward} / ${p.cost} ${unitWord(shop, p.cost)}` }],
-    linksModuleData: { uris: [{ id: 'card', uri: `${origin}/c/${member.token}`, description: 'بطاقتي على الويب' }] },
+    linksModuleData: { uris: [
+      ...(shop.review_on ? [{ id: 'rate', uri: `${origin}/c/${member.token}#rate`, description: '⭐ قيّم زيارتك' }] : []),
+      { id: 'card', uri: `${origin}/c/${member.token}`, description: 'بطاقتي على الويب' },
+    ] },
   };
   return obj;
 }

@@ -368,6 +368,13 @@ root.addEventListener('click', async (e) => {
 
 await detectPush();
 await load(true);
+// جاي من «⭐ قيّم زيارتك» بالمحفظة: بننزل للنجوم، وإذا ما في زيارة لسا بنقله إمتى بيقدر
+if (location.hash === '#rate') {
+  const panel = $('#ratePanel');
+  if (panel) panel.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  else toast(t('rateLater'));
+  history.replaceState(null, '', location.pathname + location.search);
+}
 if (params.has('gift')) toast(t('giftClaimed'), 'ok');
 if (params.has('new') || params.has('gift')) setTimeout(() => confetti({ count: 180 }), 350);
 if (params.has('new') || params.has('gw') || params.has('apple') || params.has('gift')) history.replaceState(null, '', location.pathname);

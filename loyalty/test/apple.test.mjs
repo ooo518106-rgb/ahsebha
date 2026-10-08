@@ -162,4 +162,11 @@ test('بطاقة Apple: رابط المنيو على ضهر البطاقة إذ�
   const menu = buildPassJson(shop, member, { ...opts, menuUrl: 'https://x.test/m/mocha' }).storeCard.backFields.find((f) => f.key === 'menu');
   assert.equal(menu.value, 'https://x.test/m/mocha');
   assert.match(menu.attributedValue, /<a href="https:\/\/x\.test\/m\/mocha">/);
+  // المنيو أول إشي على الضهر، وبعده التقييم وروابط المحل. وعلى الوجه سطر بيقول وين المنيو
+  const full = buildPassJson({ ...shop, review_on: 1, links: JSON.stringify({ instagram: 'https://instagram.com/mocha.jo', whatsapp: 'https://wa.me/962791234567', website: 'javascript:alert(1)' }) }, member, { ...opts, menuUrl: 'https://x.test/m/mocha' }).storeCard;
+  assert.deepEqual(full.backFields.map((f) => f.key).slice(0, 4), ['menu', 'rate', 'link-instagram', 'link-whatsapp']);
+  assert.ok(!full.backFields.some((f) => f.key === 'link-website'), 'بس روابط https');
+  assert.match(full.backFields[1].attributedValue, /#rate">⭐ قيّم زيارتك</);
+  assert.match(full.backFields[2].attributedValue, />@mocha\.jo</);
+  assert.ok(full.auxiliaryFields.some((f) => f.key === 'menuHint'));
 });

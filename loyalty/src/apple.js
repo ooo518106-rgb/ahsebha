@@ -176,6 +176,20 @@ export function zip(files, date = new Date()) {
 const rgb = (hex) => { const [r, g, b] = hexToRgb(hex); return `rgb(${r}, ${g}, ${b})`; };
 const isLight = (hex) => { const [r, g, b] = hexToRgb(hex); return (0.299 * r + 0.587 * g + 0.114 * b) / 255 > 0.7; };
 
+// روابط المحل (إنستغرام، واتساب…) على ضهر البطاقة. الرابط محفوظ كامل (https) من إعدادات الروابط
+const LINK_AR = { instagram: 'إنستغرام', snapchat: 'سناب شات', tiktok: 'تيك توك', facebook: 'فيسبوك', whatsapp: 'واتساب', website: 'الموقع' };
+export function shopLinks(shop) {
+  let l;
+  try { l = JSON.parse(shop.links || '{}') || {}; } catch { return []; }
+  return Object.keys(LINK_AR).filter((k) => /^https:\/\/[^\s"<>]+$/.test(String(l[k] || ''))).map((k) => {
+    const url = String(l[k]);
+    const handle = decodeURIComponent(url.replace(/\/+$/, '').split('/').pop() || '').replace(/^@/, '');
+    const text = k === 'whatsapp' ? 'راسلنا على واتساب' : k === 'website' ? new URL(url).hostname : k === 'facebook' ? handle : `@${handle}`;
+    return { key: k, label: LINK_AR[k], url, text };
+  });
+}
+const link = (url, text) => `<a href="${url}">${String(text).replace(/[<>&"]/g, '')}</a>`;
+
 export function buildPassJson(shop, member, { passTypeId, teamId, origin, authToken, menuUrl = null }) {
   const p = progress(shop, member.balance);
   const stamps = shop.program_type === 'stamps';
@@ -214,12 +228,19 @@ export function buildPassJson(shop, member, { passTypeId, teamId, origin, authTo
         { key: 'name', label: 'الاسم', value: member.name },
         { key: 'card', label: 'رقم البطاقة', value: member.card_no },
       ],
-      auxiliaryFields: stamps ? [{ key: 'stamps', label: 'التقدّم', value: stampsLine(shop, member.balance) }] : [],
+      auxiliaryFields: [
+        ...(stamps ? [{ key: 'stamps', label: 'التقدّم', value: stampsLine(shop, member.balance) }] : []),
+        // Apple ما بتسمح بروابط على وجه البطاقة، فبنقول للزبون وين يلاقي المنيو (أول إشي على الضهر)
+        ...(menuUrl ? [{ key: 'menuHint', label: '📋 المنيو', value: 'اكبس ⋯ وافتحه' }] : []),
+      ],
       backFields: [
+        ...(menuUrl ? [{ key: 'menu', label: '📋 المنيو', value: menuUrl, attributedValue: link(menuUrl, 'افتح المنيو') }] : []),
+        // التقييم ما بيصير جوّا المحفظة: الرابط بيفتح البطاقة على الويب عند النجوم
+        ...(shop.review_on ? [{ key: 'rate', label: 'التقييم', value: `${cardUrl}#rate`, attributedValue: link(`${cardUrl}#rate`, '⭐ قيّم زيارتك') }] : []),
+        ...shopLinks(shop).map((l) => ({ key: `link-${l.key}`, label: l.label, value: l.url, attributedValue: link(l.url, l.text) })),
         { key: 'rule', label: 'المكافأة', value: rewardRule(shop) },
-        ...(menuUrl ? [{ key: 'menu', label: 'المنيو', value: menuUrl, attributedValue: `<a href="${menuUrl}">افتح المنيو</a>` }] : []),
-        { key: 'web', label: 'بطاقتي على الويب', value: cardUrl, attributedValue: `<a href="${cardUrl}">افتح البطاقة</a>` },
-        { key: 'privacy', label: 'الخصوصية', value: `${origin}/privacy`, attributedValue: `<a href="${origin}/privacy">سياسة الخصوصية</a>` },
+        { key: 'web', label: 'بطاقتي على الويب', value: cardUrl, attributedValue: link(cardUrl, 'افتح البطاقة') },
+        { key: 'privacy', label: 'الخصوصية', value: `${origin}/privacy`, attributedValue: link(`${origin}/privacy`, 'سياسة الخصوصية') },
         { key: 'by', label: '', value: 'بطاقات الولاء من نقاطك' },
       ],
     },
