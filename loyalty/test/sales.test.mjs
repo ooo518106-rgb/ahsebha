@@ -725,27 +725,28 @@ test('Gemini على الموقع الحقيقي: بيستعمل fetch العاد
   }
 });
 
-test('تنبيهك على واتسابك: لما حدا بده يحكي معك أو ترك طلب، رقم الإيجنت بيبعتلك (قالب، أو نص إذا راسلته آخر 24 ساعة)', async () => {
+test('تنبيهك على واتسابك: حدا راسل الوكيل، رسالة جديدة، بده يحكي معك، أو ترك طلب (قالب، أو نص إذا راسلت رقم الإيجنت آخر 24 ساعة)', async () => {
   let step = 0;
-  const f = fakes(() => (++step % 2 ? { tool: 'call_owner', input: { reason: 'بده\nيحكي عن فرعين' } } : { text: 'تمام، رح يحكي معك 🙏' }), (body) => (body.template && body.template.name === 'nuqatak_alert' && step > 4 ? { status: 400, message: 'Template name does not exist', code: 132001 } : { status: 200 }));
+  const forOwner = (body) => JSON.stringify(body.system).includes('مساعد صاحب منصة');
+  const f = fakes((body) => (forOwner(body) ? { text: '🔥 أبو أحمد بده يحكي معك، اتصل فيه' } : ++step % 2 ? { tool: 'call_owner', input: { reason: 'بده\nيحكي عن فرعين' } } : { text: 'تمام، رح يحكي معك 🙏' }), (body) => (body.template && body.template.name === 'nuqatak_alert' && step > 4 ? { status: 400, message: 'Template name does not exist', code: 132001 } : { status: 200 }));
   const p = await platform({ ANTHROPIC_API_KEY: 'sk-test', fetch: f.fetch, ...WA_ENV, WHATSAPP_NUMBER: '962798900911' });
   const meta = p.client();
   const alerts = () => f.graph.filter((g) => g.body.to === '962798900911');
 
   await hook(meta, incomingMsg('962791000001', 'بدي أحكي مع المدير', 'wamid.x1'));
   await meta.flush();
-  assert.equal(alerts().length, 1);
-  const t = alerts()[0].body;
-  assert.equal(t.type, 'template');
-  assert.equal(t.template.name, 'nuqatak_alert');
-  assert.deepEqual(t.template.components[0].parameters.map((x) => x.text), ['أبو أحمد', '+962791000001', 'بده يحكي عن فرعين'], 'بدون سطر جديد');
-  // نفس المحل كمان مرة: ما بنعيد التنبيه (مرة كل 3 ساعات)
+  assert.equal(alerts().length, 2, 'محادثة جديدة + بده يحكي معك');
+  assert.ok(alerts().every((g) => g.body.type === 'template' && g.body.template.name === 'nuqatak_alert'));
+  const params = alerts().map((g) => g.body.template.components[0].parameters.map((x) => x.text));
+  assert.deepEqual(params.find((x) => /راسل/.test(x[0])), ['أبو أحمد · حدا جديد راسل الوكيل', '+962791000001', 'بدي أحكي مع المدير']);
+  assert.deepEqual(params.find((x) => /بده يحكي معك/.test(x[0])), ['أبو أحمد · بده يحكي معك', '+962791000001', 'بده يحكي عن فرعين'], 'بدون سطر جديد');
+  // نفس المحل كمان مرة: ما بنعيد (رسالة جديدة مرة بالساعة، بده يحكي معك مرة كل 3 ساعات)
   await hook(meta, incomingMsg('962791000001', 'وين المدير؟', 'wamid.x2'));
   await meta.flush();
-  assert.equal(alerts().length, 1);
+  assert.equal(alerts().length, 2);
   // التنبيه ما وصل (Meta بعتت failed على رقمه)
   const failed = (id) => ({ object: 'whatsapp_business_account', entry: [{ changes: [{ field: 'messages', value: { metadata: { phone_number_id: '1234567890' }, statuses: [{ id, status: 'failed', timestamp: '1760000000', recipient_id: '962798900911', errors: [{ code: 131026, title: 'Message undeliverable', error_data: { details: 'Message undeliverable' } }] }] } }] }] });
-  await hook(meta, failed(`wamid.${f.graph.indexOf(alerts()[0]) + 1}`));
+  await hook(meta, failed(`wamid.${f.graph.indexOf(alerts().at(-1)) + 1}`));
   let num = (await p.admin.get('/api/admin/wa/number')).data;
   assert.equal(num.ownerWa, '962798900911');
   assert.equal(num.alertTemplateName, 'nuqatak_alert');
@@ -753,11 +754,23 @@ test('تنبيهك على واتسابك: لما حدا بده يحكي معك �
   assert.match(num.alertLast.message, /131026/);
 
   // راسلت رقم الإيجنت من رقمك: 24 ساعة التنبيهات بتوصل نص عادي فيه كل التفاصيل
-  await hook(meta, incomingMsg('962798900911', 'مرحبا', 'wamid.o1'));
+  // وبتسأله «شو الأخبار؟»: بيجاوبك من بيانات المنصة (مش كأنك محل)
+  await hook(meta, incomingMsg('962798900911', 'شو الأخبار؟ في محلات بدها تشترك؟', 'wamid.o1'));
+  await hook(meta, incomingMsg('962798900911', 'شو الأخبار؟ في محلات بدها تشترك؟', 'wamid.o1')); // Meta عادتها
   await meta.flush();
+  const toOwner = f.claude.filter((x) => forOwner(x.body));
+  assert.equal(toOwner.length, 1);
+  assert.equal(toOwner[0].body.tools, undefined, 'بدون أدوات البيع');
+  const sys = toOwner[0].body.system;
+  assert.match(sys, /🔥 بدهم يحكوا معك \(1\):\n- أبو أحمد · \+962791000001/);
+  assert.match(sys, /آخر رسالة: «وين المدير؟»/);
+  assert.match(sys, /📩 طلبات اشتراك لسا ما حكيتهم \(0\)/);
+  assert.equal(lastUser(toOwner[0]).content, 'شو الأخبار؟ في محلات بدها تشترك؟');
+  assert.equal(alerts().at(-1).body.text.body, '🔥 أبو أحمد بده يحكي معك، اتصل فيه');
+  assert.ok(!(await p.admin.get('/api/admin/sales')).data.prospects.some((x) => x.wa === '962798900911'), 'رقمك مش محل');
   const before = alerts().length;
-  assert.equal((await p.client().post('/api/leads', { shopName: 'مخبز السعادة', name: 'سامي', phone: '0791000002', kind: 'مخبز وحلويات', city: 'إربد' })).status, 201);
-  await p.client().flush();
+  assert.equal((await meta.post('/api/leads', { shopName: 'مخبز السعادة', name: 'سامي', phone: '0791000002', kind: 'مخبز وحلويات', city: 'إربد' })).status, 201);
+  await meta.flush();
   const txt = alerts().slice(before).find((g) => g.body.type === 'text');
   assert.ok(txt, 'انبعت نص');
   assert.match(txt.body.text.body, /طلب اشتراك جديد/);
@@ -777,4 +790,18 @@ test('تنبيهك على واتسابك: لما حدا بده يحكي معك �
   num = (await p.admin.get('/api/admin/wa/number')).data;
   assert.equal(num.alertLast.ok, true);
   assert.equal(num.alertLast.via, 'template');
+});
+
+test('بدون ذكاء اصطناعي: لما تراسل رقم الإيجنت من رقمك بيوصلك تقرير الوضع كما هو', async () => {
+  const f = fakes();
+  const p = await platform({ fetch: f.fetch, ...WA_ENV, WHATSAPP_NUMBER: '962798900911' });
+  const meta = p.client();
+  await meta.post('/api/leads', { shopName: 'حلويات النور', name: 'رامي', phone: '0791000003', kind: 'مخبز وحلويات' });
+  await hook(meta, incomingMsg('962798900911', 'شو الوضع', 'wamid.o9'));
+  await meta.flush();
+  const r = f.graph.filter((g) => g.body.to === '962798900911' && g.body.type === 'text').at(-1);
+  assert.match(r.body.text.body, /^📋 الوضع هلأ:/);
+  assert.match(r.body.text.body, /📩 طلبات اشتراك لسا ما حكيتهم \(1\):\n- حلويات النور · رامي · 0791000003 · مخبز وحلويات/);
+  assert.match(r.body.text.body, /🎯 وكيل المبيعات: الإرسال لحاله موقّف/);
+  assert.match(r.body.text.body, /🏪 المحلات: 0/);
 });

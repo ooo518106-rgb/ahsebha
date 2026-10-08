@@ -2182,6 +2182,7 @@ function alertRows(d) {
   const a = d.alertLast;
   const label = !t ? '' : t.status === 'MISSING' ? '⚠️ لسا ما انعمل. اعمله بنفس الاسم عشان توصلك التنبيهات على واتسابك' : TEMPLATE_LABELS[t.status] || t.status;
   return html`${t ? html`<li><span class="muted">🔔 قالب تنبيهاتك (<span dir="ltr">${d.alertTemplateName}</span>)</span> <b>${label}${t.reason ? ` · ${t.reason}` : ''}${t.language && t.language !== 'ar' ? ` · اللغة ${t.language} (لازم العربية ar)` : ''}</b></li>` : ''}
+    <li><span class="muted">💬 من رقمك</span> <b>راسل رقم الإيجنت «شو الأخبار؟» وبيرد عليك بالوضع كامل</b></li>
     <li><span class="muted">آخر تنبيه على واتسابك (<span class="num" dir="ltr">+${d.ownerWa}</span>)</span> <b>${!a ? 'لسا ما انبعت ولا تنبيه' : html`${a.ok ? '✅ انبعت' : '❌ ما وصل'} · ${ago(a.at)}`}</b>
       ${a && !a.ok ? html`<div class="small" style="color:var(--bad)">${waHint(a.message) || ''} <span dir="ltr">${a.message}</span></div>` : ''}</li>`;
 }

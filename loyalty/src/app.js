@@ -1291,7 +1291,7 @@ async function saveLead(c, b, source) {
   );
   await notifyAdmin(c, { title: source === 'ai' ? '🤖 طلب اشتراك من مساعد المبيعات' : '📩 طلب اشتراك جديد', body: `${shopName} · ${name}${kind ? ` · ${kind}` : ''}`, url: `${c.origin}/app#admin` });
   await alertOwnerWa(c, {
-    title: source === 'ai' ? 'طلب اشتراك من مساعد المبيعات' : 'طلب اشتراك جديد',
+    event: source === 'ai' ? 'طلب اشتراك من مساعد المبيعات' : 'طلب اشتراك جديد',
     who: `${shopName} · ${name}`, phone, about: [kind, clean(b.city, 40), clean(b.note, 140)].filter(Boolean).join(' · ') || 'بده يشترك', key: `l:${phone}`,
   });
 }
@@ -2801,7 +2801,7 @@ function prospectTools(c, p, channel) {
     if (name === 'call_owner') {
       await c.db.run("UPDATE prospects SET status = 'hot' WHERE id = ? AND status <> 'won'", p.id);
       await notifyAdmin(c, { title: `🙋 ${p.name} بده يحكي معك`, body: clean(input.reason, 140), url: `${c.origin}/app#admin` });
-      await alertOwnerWa(c, { title: `${p.name} بده يحكي معك`, who: p.name, phone: p.wa ? `+${p.wa}` : p.phone, about: clean(input.reason, 140), key: `p:${p.id}` });
+      await alertOwnerWa(c, { event: 'بده يحكي معك', who: p.name, phone: p.wa ? `+${p.wa}` : p.phone, about: clean(input.reason, 140), key: `p:${p.id}` });
       return { notified: true };
     }
     if (name === 'set_status') {
@@ -2863,6 +2863,7 @@ async function salesChat(c) {
     await saveSalesMsg(c.db, prospect.id, 'agent', reply, null, now + 1, 'web');
     await c.db.run(`UPDATE prospects SET last_in_at = ?, last_out_at = ?, status = CASE WHEN status IN ${TALKING_FROM} THEN 'talking' ELSE status END WHERE id = ?`, now, now, prospect.id);
     if (!prospect.last_in_at) await notifyAdmin(c, { title: `💬 ${prospect.name} عم يحكي مع وكيل المبيعات`, body: messages[messages.length - 1].content.slice(0, 120), url: `${c.origin}/app#admin` });
+    await alertOwnerWa(c, { event: prospect.last_in_at ? 'رسالة جديدة بالموقع' : 'بلّش يحكي مع الوكيل بالموقع', who: prospect.name, phone: prospect.wa ? `+${prospect.wa}` : prospect.phone, about: messages[messages.length - 1].content, key: `c:${prospect.id}`, every: HOUR });
   }
   return json({ reply, lead, offer: made ? { code: made.code, trialDays: made.trialDays } : null });
 }
@@ -3046,7 +3047,7 @@ async function waIncoming(c, wcfg, m) {
   const from = wa.waNumber(m.from) || m.from;
   if (!/^\d{8,15}$/.test(from)) return;
   const now = Date.now();
-  if (from === ownerWhatsapp(c.env)) await setSetting(c.db, 'owner_wa_in', now); // راسلت رقم الإيجنت: تنبيهاتك 24 ساعة بتوصل رسالة عادية
+  if (from === ownerWhatsapp(c.env)) return ownerMessaged(c, wcfg, from, now, m);
   let p = await c.db.get('SELECT * FROM prospects WHERE wa = ?', from);
   // جاي من رابط رسالتك («… #رمز»): بنربطه بمحله، حتى لو راسل من رقم غير اللي لقيناه
   const code = !p && /#([a-z2-9]{8})(?![a-z2-9])/i.exec(m.text || '');
@@ -3074,6 +3075,10 @@ async function waIncoming(c, wcfg, m) {
   await c.db.run(`UPDATE prospects SET last_in_at = ?, status = CASE WHEN status IN ${TALKING_FROM} THEN 'talking' ELSE status END WHERE id = ?`, now, p.id);
   if (!p.last_in_at) await notifyAdmin(c, { title: p.source === 'inbound' ? '💬 حدا جديد راسل وكيل المبيعات' : `💬 ${p.name} رد على وكيل المبيعات`, body: text.slice(0, 120), url: `${c.origin}/app#admin` });
   else if (p.paused || !aiConfig(c.env)) await notifyAdmin(c, { title: `💬 ${p.name}`, body: text.slice(0, 120), url: `${c.origin}/app#admin` });
+  await alertOwnerWa(c, {
+    event: !p.last_in_at ? (p.source === 'inbound' ? 'حدا جديد راسل الوكيل' : 'رد على الوكيل') : p.paused || !aiConfig(c.env) ? 'رسالة جديدة، رد عليه إنت' : 'رسالة جديدة',
+    who: p.name, phone: `+${from}`, about: text, key: `c:${p.id}`, every: HOUR,
+  });
   if (p.paused || !aiConfig(c.env)) return;
   c.waitUntil(waReply(c, wcfg, p.id, ins.lastId).catch(async (e) => {
     console.error('wa reply:', e.status || '', e.message);
@@ -3081,6 +3086,7 @@ async function waIncoming(c, wcfg, m) {
     if (e.wa) await c.db.run('UPDATE prospects SET error = ? WHERE id = ?', clean(`واتساب: ${e.message}`, 200), p.id);
     else await noteAi(c, false, e);
     await notifyAdmin(c, { title: `⚠️ الوكيل ما قدر يرد على ${p.name}`, body: `${text.slice(0, 80)} · رد عليه إنت من 🎯 المبيعات`, url: `${c.origin}/app#admin` });
+    await alertOwnerWa(c, { event: 'الوكيل ما قدر يرد عليه، رد إنت', who: p.name, phone: `+${from}`, about: text, key: `s:${p.id}` });
   }).catch((e) => console.error('wa reply alert:', e.message)));
 }
 
@@ -3088,28 +3094,122 @@ async function waIncoming(c, wcfg, m) {
 async function agentSilent(c, p, why) {
   try { await rateLimit(c, `ai:wa:silent:${p.id}`, 1, DAY); } catch { return; }
   await notifyAdmin(c, { title: `⚠️ الوكيل ما رد على ${p.name}`, body: `${why} · رد عليه إنت من 🎯 المبيعات`, url: `${c.origin}/app#admin` });
+  await alertOwnerWa(c, { event: 'الوكيل ما رد عليه، رد إنت', who: p.name, phone: p.wa ? `+${p.wa}` : p.phone, about: why, key: `s:${p.id}` });
 }
 
-// 📲 تنبيه على واتسابك (WHATSAPP_NUMBER) من رقم الإيجنت لما حدا بده يحكي معك أو ترك طلب اشتراك.
-// إذا راسلت رقم الإيجنت آخر 24 ساعة بيوصلك نص عادي، وإلا بالقالب (nuqatak_alert) لأنه واتساب ما بيسمح غير هيك
+// 📲 تنبيه على واتسابك (WHATSAPP_NUMBER) من رقم الإيجنت: حدا راسل الوكيل، رسالة جديدة بمحادثة، بده يحكي معك، ترك طلب، أو الوكيل ما رد.
+// إذا راسلت رقم الإيجنت آخر 24 ساعة بيوصلك نص عادي، وإلا بالقالب (nuqatak_alert) لأنه واتساب ما بيسمح غير هيك.
+// a: { event (شو صار)، who، phone، about (الرسالة أو التفاصيل)، key (نفس الإشي ما بيتكرر قبل every) }
 async function alertOwnerWa(c, a) {
   const wcfg = wa.waConfig(c.env);
   const to = ownerWhatsapp(c.env);
   if (!wcfg || !to) return;
   try {
-    if (a.key) await rateLimit(c, `walert:${a.key}`, 1, 3 * HOUR); // نفس المحل: مرة كل 3 ساعات
-    await rateLimit(c, 'walert:all', 30, DAY);
+    if (a.key) await rateLimit(c, `walert:${a.key}`, 1, a.every || 3 * HOUR);
+    await rateLimit(c, 'walert:all', 60, DAY);
   } catch { return; }
   c.waitUntil(sendOwnerAlert(c, wcfg, to, a).catch((e) => console.error('wa alert:', e.message)));
 }
+
+// 🧑‍💼 رقمك راسل رقم الإيجنت: مش محل. الوكيل بيصير مساعدك: «شو الأخبار؟ مين بده يشترك؟» وبيرد بتقرير من بيانات المنصة.
+// كمان بيفتح 24 ساعة التنبيهات فيها نص عادي ببلاش
+async function ownerMessaged(c, wcfg, from, now, m) {
+  await setSetting(c.db, 'owner_wa_in', now);
+  const text = clean(m.text, 1000);
+  if (!text) return;
+  if (m.id && (await getSetting(c.db, 'owner_last_msg')) === m.id) return; // Meta بتعيد نفس الرسالة أحياناً
+  await setSetting(c.db, 'owner_last_msg', m.id || '');
+  c.waitUntil(ownerReply(c, wcfg, from, text, now).catch((e) => console.error('wa owner:', e.status || '', e.message)));
+}
+
+async function ownerReply(c, wcfg, to, text, now) {
+  const report = await ownerReport(c, now);
+  const cfg = aiConfig(c.env);
+  let reply = null;
+  if (cfg) {
+    try {
+      await rateLimit(c, 'ai:owner', 60, DAY);
+      const history = ((await jsonSetting(c.db, 'owner_chat')) || []).filter((x) => now - x.at < DAY).slice(-8);
+      const messages = cleanHistory([...history.map(({ role, content }) => ({ role, content })), { role: 'user', content: text }]);
+      const t = perks.localTime('JO', now);
+      const when = `${t.year}-${String(t.month).padStart(2, '0')}-${String(t.day).padStart(2, '0')} ${String(t.hour).padStart(2, '0')}:${String(t.minute).padStart(2, '0')}`;
+      const r = await chat(cfg, { system: sales.ownerSystem({ report, now: when, origin: c.origin }), messages, maxTokens: 3000 });
+      await logAi(c, 'owner', r.usage);
+      await noteAi(c, true, null, r.model);
+      if (!r.refused && r.text) {
+        reply = r.text;
+        await setSetting(c.db, 'owner_chat', JSON.stringify([...history, { role: 'user', content: text, at: now }, { role: 'assistant', content: clean(reply, 1000), at: Date.now() }].slice(-8)));
+      }
+    } catch (e) {
+      if (!(e instanceof HttpError)) await noteAi(c, false, e);
+    }
+  }
+  await wa.sendText(wcfg, to, reply || `📋 الوضع هلأ:\n\n${report}`);
+}
+
+// الوضع كله بنص واحد (للوكيل يجاوبك منه، أو بيوصلك هو نفسه إذا الذكاء مش شغّال)
+const agoAr = (ms) => (ms < HOUR ? `قبل ${Math.max(1, Math.round(ms / MIN))} دقيقة` : ms < DAY ? `قبل ${Math.round(ms / HOUR)} ساعة` : `قبل ${Math.round(ms / DAY)} يوم`);
+async function ownerReport(c, now = Date.now()) {
+  const L = [];
+  const lastIn = (id) => c.db.get("SELECT text FROM sales_msgs WHERE prospect_id = ? AND role = 'in' ORDER BY id DESC LIMIT 1", id);
+  const phoneOf = (p) => (p.wa ? `+${p.wa}` : p.phone || 'بدون رقم');
+
+  const hot = await c.db.all("SELECT * FROM prospects WHERE status = 'hot' ORDER BY COALESCE(last_in_at, created_at) DESC LIMIT 10");
+  L.push(`🔥 بدهم يحكوا معك (${hot.length}):`);
+  for (const p of hot) L.push(`- ${p.name} · ${phoneOf(p)}${p.last_in_at ? ` · ${agoAr(now - p.last_in_at)}` : ''}${p.note ? ` · ${clean(p.note, 120)}` : ''} · آخر رسالة: «${clean((await lastIn(p.id) || {}).text, 120)}»`);
+  if (!hot.length) L.push('- ولا حدا');
+
+  const leads = await c.db.all("SELECT * FROM leads WHERE status = 'new' ORDER BY created_at DESC LIMIT 10");
+  L.push('', `📩 طلبات اشتراك لسا ما حكيتهم (${leads.length}):`);
+  for (const l of leads) L.push(`- ${l.shop_name} · ${l.name} · ${l.phone}${l.kind ? ` · ${l.kind}` : ''}${l.city ? ` · ${l.city}` : ''} · ${agoAr(now - l.created_at)}${l.note ? ` · ${clean(l.note, 100)}` : ''}`);
+  if (!leads.length) L.push('- ولا طلب');
+
+  const pay = await c.db.all("SELECT p.amount, p.payer, p.plan, p.created_at, s.name FROM payments p JOIN shops s ON s.id = p.shop_id WHERE p.status = 'pending' ORDER BY p.created_at DESC LIMIT 10");
+  L.push('', `💳 حوالات CliQ بتستنى تأكيدك (${pay.length}):`);
+  for (const x of pay) L.push(`- ${x.name} · ${x.amount} دينار (${x.plan === 'year' ? 'سنة' : 'شهر'}) من ${x.payer} · ${agoAr(now - x.created_at)}`);
+  if (!pay.length) L.push('- ولا حوالة');
+
+  const talks = await c.db.all("SELECT * FROM prospects WHERE last_in_at > ? AND status <> 'hot' ORDER BY last_in_at DESC LIMIT 10", now - DAY);
+  L.push('', `💬 محادثات آخر 24 ساعة (${talks.length}):`);
+  for (const p of talks) L.push(`- ${p.name} · ${phoneOf(p)} · ${PROSPECT_STATUS_AR[p.status] || p.status} · ${agoAr(now - p.last_in_at)} · آخر رسالة: «${clean((await lastIn(p.id) || {}).text, 120)}»${p.paused ? ' · (الوكيل موقّف معه، رد إنت)' : ''}${p.error ? ` · ⚠️ ${clean(p.error, 80)}` : ''}`);
+  if (!talks.length) L.push('- ما في');
+
+  const counts = Object.fromEntries((await c.db.all('SELECT status, COUNT(*) AS n FROM prospects GROUP BY status')).map((r) => [r.status, r.n]));
+  const sent = (await c.db.get('SELECT COUNT(*) AS n FROM prospects WHERE sent_at > ?', now - DAY)).n;
+  const auto = (await getSetting(c.db, 'sales_auto')) === '1';
+  const stop = await jsonSetting(c.db, 'sales_stop');
+  L.push('', `🎯 وكيل المبيعات: الإرسال لحاله ${auto ? 'شغّال' : 'موقّف'}${!auto && stop && stop.why ? ` (وقف لحاله ${agoAr(now - stop.at)}: ${stop.why})` : ''} · انبعت لـ ${sent} محل آخر 24 ساعة · بالدور ${counts.new || 0} · عم يحكوا ${counts.talking || 0} · سجّلوا ${counts.won || 0} · مش مهتمين ${counts.lost || 0} · ما بدهم رسائل ${counts.optout || 0} · فشلت ${counts.failed || 0}`);
+
+  const platformShop = await platformShopId(c.db);
+  const shops = await c.db.all('SELECT * FROM shops WHERE demo = 0 AND id <> ?', platformShop ?? 0);
+  const st = { active: 0, trial: 0, expired: 0 };
+  const ending = [];
+  for (const sh of shops) {
+    const sub = subscriptionOf(sh, platformShop);
+    st[sub.state] = (st[sub.state] || 0) + 1;
+    if ((sub.state === 'trial' || sub.state === 'active') && sub.daysLeft <= 7) ending.push(`${sh.name} (${sub.state === 'trial' ? 'تجربة' : 'اشتراك'} · ${sub.daysLeft} يوم)`);
+  }
+  const week = shops.filter((sh) => sh.created_at > now - 7 * DAY);
+  const t = perks.localTime('JO', now);
+  const month = (await c.db.get("SELECT COALESCE(SUM(amount), 0) AS n FROM payments WHERE status = 'approved' AND decided_at >= ?", Date.UTC(t.year, t.month - 1, 1) - 3 * HOUR)).n;
+  L.push('', `🏪 المحلات: ${shops.length} · مشتركين ${st.active} · بالتجربة ${st.trial} · خلصت ${st.expired} · سجّلوا آخر 7 أيام ${week.length}${week.length ? ` (${week.slice(0, 5).map((x) => x.name).join('، ')})` : ''} · دخل هالشهر ${month} دينار`);
+  if (ending.length) L.push(`⏳ بيخلصوا خلال أسبوع: ${ending.slice(0, 8).join('، ')}`);
+
+  const resets = await c.db.all("SELECT u.email, s.name FROM users u JOIN shops s ON s.id = u.shop_id WHERE u.reset_asked_at > ?", now - 3 * DAY);
+  if (resets.length) L.push(`🔑 نسيوا كلمة السر: ${resets.map((r) => r.name).join('، ')} (اعملهم رابط من 👑 المنصة ← المحلات)`);
+  const aiErr = await jsonSetting(c.db, 'ai_last_error');
+  if (aiErr && aiErr.at && now - aiErr.at < DAY) L.push(`⚠️ الذكاء الاصطناعي فشل ${agoAr(now - aiErr.at)}: ${clean(aiErr.message, 120)}`);
+  return L.join('\n');
+}
+const PROSPECT_STATUS_AR = { new: 'بالدور', sent: 'انبعتله', talking: 'عم يحكي', hot: 'بده يحكي معك', won: 'سجّل', lost: 'مش مهتم', optout: 'ما بده رسائل', failed: 'فشلت', manual: 'بدون واتساب' };
 
 async function sendOwnerAlert(c, wcfg, to, a) {
   const via = Date.now() - (Number(await getSetting(c.db, 'owner_wa_in')) || 0) < 23 * HOUR ? 'text' : 'template';
   let last;
   try {
     const id = via === 'text'
-      ? await wa.sendText(wcfg, to, [`🔔 ${a.title}`, a.who, a.phone && `📞 ${a.phone}`, a.about, `${c.origin}/app#admin`].filter(Boolean).join('\n'))
-      : await wa.sendAlert(wcfg, to, { who: a.who, phone: a.phone, about: a.about });
+      ? await wa.sendText(wcfg, to, [`🔔 ${a.event}`, a.who, a.phone && `📞 ${a.phone}`, a.about && `💬 ${clean(a.about, 300)}`, `${c.origin}/app#admin`].filter(Boolean).join('\n'))
+      : await wa.sendAlert(wcfg, to, { who: `${a.who} · ${a.event}`, phone: a.phone, about: a.about });
     last = { at: Date.now(), ok: true, via, id };
   } catch (e) {
     last = { at: Date.now(), ok: false, via, message: clean(`${e.message}${e.code ? ` (${e.code})` : ''}`, 200) };
@@ -3380,7 +3480,7 @@ async function adminWaNumber(c) {
       } else if (b.action === 'alert') {
         const to = ownerWhatsapp(c.env);
         if (!to) fail(400, 'حط رقمك WHATSAPP_NUMBER بإعدادات Cloudflare أول');
-        const r = await sendOwnerAlert(c, wcfg, to, { title: 'تجربة تنبيه', who: 'محل تجربة', phone: '+962790000000', about: 'هيك رح يوصلك التنبيه لما حدا بده يحكي معك' });
+        const r = await sendOwnerAlert(c, wcfg, to, { event: 'تجربة تنبيه', who: 'محل تجربة', phone: '+962790000000', about: 'هيك رح يوصلك التنبيه لما حدا يراسل الوكيل أو بده يحكي معك' });
         if (!r.ok) fail(400, `ما انبعت: ${r.message}`);
       } else if (b.action === 'register') {
         const pin = String(b.pin || '').replace(/\D/g, '');
