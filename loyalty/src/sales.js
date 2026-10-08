@@ -12,7 +12,7 @@ export const templateFor = (shopName) => TEMPLATE_TEXT.replace('{{1}}', () => sh
 
 // أول رسالة الجديدة (nuqatak_intro2): صورة البطاقة فوق، نص أقصر، و3 أزرار بكبسة وحدة
 export const TEMPLATE2_TEXT = 'مرحبا {{1}} 👋\nبنعمل لمحلك بطاقة ولاء بمحفظة جوال زبائنك، بدون تطبيق. كل زيارة بيجمعوا نقاط وبيرجعولك.\nأول 14 يوم ببلاش 🎁\nبتحب أوريك كيف رح تطلع بطاقة محلك؟';
-export const TEMPLATE2_BUTTONS = ['👍 أيوه احكيلي', '🖼 وريني كيف بتطلع', '🙏 مش هلأ'];
+export const TEMPLATE2_BUTTONS = ['وريني كيف بتطلع', 'أيوه احكيلي', 'مش هلأ']; // متل ما انعملت بـ Meta
 export const template2For = (shopName) => `🖼 [صورة البطاقة]\n${TEMPLATE2_TEXT.replace('{{1}}', () => shopName)}\n[${TEMPLATE2_BUTTONS.join(' · ')}]`;
 export const SHOW_ME_RE = /وريني|كيف بتطلع|بدي اشوف|بدي أشوف|ابعتلي صور/;
 

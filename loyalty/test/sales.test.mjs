@@ -867,7 +867,7 @@ test('أول رسالة الجديدة: صورة + أزرار لما Meta توا
     const body = init.body ? JSON.parse(init.body) : {};
     graph.push({ url: u, method: init.method || 'POST', body });
     const ok = (d) => new Response(JSON.stringify(d), { status: 200, headers: { 'content-type': 'application/json' } });
-    if (u.includes('/message_templates')) return ok({ data: u.includes('nuqatak_intro2') ? [{ name: 'nuqatak_intro2', status: tpl2, language: 'ar' }] : [] });
+    if (u.includes('/message_templates')) return ok({ data: u.includes('nuqatak_intro2') ? [{ name: 'nuqatak_intro2', status: tpl2, language: 'en' }] : [] });
     if (u.includes('?fields=')) return ok({ quality_rating: 'GREEN' });
     if (breakTpl2 && body.template && body.template.name === 'nuqatak_intro2') return new Response(JSON.stringify({ error: { message: 'Number of parameters does not match', code: 132000 } }), { status: 400 });
     return ok({ messages: [{ id: `wamid.${graph.length}` }] });
@@ -890,6 +890,7 @@ test('أول رسالة الجديدة: صورة + أزرار لما Meta توا
   const t2 = sends().find((g) => g.body.template.name === 'nuqatak_intro2');
   assert.ok(t2, 'انبعتت الجديدة');
   assert.deepEqual(t2.body.template.components[0], { type: 'header', parameters: [{ type: 'image', image: { link: 'https://nuqatak.test/img/promo-card.jpg' } }] });
+  assert.equal(t2.body.template.language.code, 'en', 'بلغة القالب اللي وافقت عليه Meta (انعمل English بالغلط)');
   const st = (await p.admin.get('/api/admin/sales')).data;
   assert.equal(st.intro.status, 'APPROVED');
   const shop = st.prospects.find((x) => x.wa === t2.body.to);

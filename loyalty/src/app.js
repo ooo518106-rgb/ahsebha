@@ -3080,14 +3080,17 @@ async function introTemplate(c, wcfg, now = Date.now()) {
   let st = await jsonSetting(c.db, 'wa_tpl2');
   if (wcfg.wabaId && (!st || now - st.at > HOUR) && !(st && st.status === 'ERROR' && now - st.at < 6 * HOUR)) {
     let status = 'MISSING';
+    let lang = wcfg.lang;
     try {
-      const t = ((await wa.templates(wcfg, wcfg.template2)).data || []).find((x) => x.name === wcfg.template2 && x.language === wcfg.lang);
-      if (t) status = t.status;
-    } catch { status = (st && st.status) || 'MISSING'; }
-    st = { at: now, status };
+      // بأي لغة انعمل (العربي أول، وإلا أي نسخة موافق عليها: مثلاً انعمل English بالغلط)
+      const list = ((await wa.templates(wcfg, wcfg.template2)).data || []).filter((x) => x.name === wcfg.template2);
+      const t = list.find((x) => x.language === wcfg.lang && x.status === 'APPROVED') || list.find((x) => x.status === 'APPROVED') || list.find((x) => x.language === wcfg.lang) || list[0];
+      if (t) { status = t.status; lang = t.language || wcfg.lang; }
+    } catch { status = (st && st.status) || 'MISSING'; lang = (st && st.lang) || wcfg.lang; }
+    st = { at: now, status, lang };
     await setSetting(c.db, 'wa_tpl2', JSON.stringify(st));
   }
-  return st && st.status === 'APPROVED' ? { v: 2, name: wcfg.template2, image: `${c.origin}${PROMO_IMAGE}` } : { v: 1, name: wcfg.template };
+  return st && st.status === 'APPROVED' ? { v: 2, name: wcfg.template2, image: `${c.origin}${PROMO_IMAGE}`, lang: st.lang || wcfg.lang } : { v: 1, name: wcfg.template };
 }
 
 async function sendIntro(c, wcfg, p, now = Date.now()) {

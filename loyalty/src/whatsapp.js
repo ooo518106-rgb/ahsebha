@@ -72,12 +72,12 @@ export const templates = (cfg, name = cfg.template) => call(cfg, `${cfg.wabaId}/
 export const health = (cfg) => call(cfg, `${cfg.phoneId}?fields=health_status`, { method: 'GET' });
 
 // أول رسالة: القالب، والمتغير {{1}} = اسم المحل. image: رابط صورة الرأس (للقالب اللي فوقه صورة)
-export const sendTemplate = (cfg, to, shopName, { name = cfg.template, image = null } = {}) => graph(cfg, {
+export const sendTemplate = (cfg, to, shopName, { name = cfg.template, image = null, lang = cfg.lang } = {}) => graph(cfg, {
   to,
   type: 'template',
   template: {
     name,
-    language: { code: cfg.lang },
+    language: { code: lang },
     components: [
       ...(image ? [{ type: 'header', parameters: [{ type: 'image', image: { link: image } }] }] : []),
       { type: 'body', parameters: [{ type: 'text', text: String(shopName).replace(/\s+/g, ' ').slice(0, 60) }] },
