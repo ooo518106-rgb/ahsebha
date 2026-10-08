@@ -422,4 +422,5 @@ export const MIGRATIONS = [
   'CREATE INDEX IF NOT EXISTS members_visit ON members(shop_id, last_visit)',
   'CREATE INDEX IF NOT EXISTS members_bday ON members(shop_id, birthday)',
   'ALTER TABLE users ADD COLUMN reset_asked_at INTEGER',
+  'ALTER TABLE prospects ADD COLUMN guide TEXT', // 📌 توجيهك للوكيل مع هالمحل (من واتسابك)
 ];

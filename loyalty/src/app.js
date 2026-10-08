@@ -2743,7 +2743,7 @@ async function salesSystem(c, channel, prospect, offer) {
   const today = `${t.year}-${String(t.month).padStart(2, '0')}-${String(t.day).padStart(2, '0')}`;
   return [
     { type: 'text', text: rules, cache_control: { type: 'ephemeral' } },
-    { type: 'text', text: sales.salesContext({ channel, today, prospect, firstMessage: first && first.text, offer, offerLink: offer ? offerLink(c, offer.code) : null }) },
+    { type: 'text', text: sales.salesContext({ channel, today, prospect, firstMessage: first && first.text, offer, offerLink: offer ? offerLink(c, offer.code) : null, guidance: await getSetting(c.db, 'sales_guidance') }) },
   ];
 }
 
@@ -3133,7 +3133,7 @@ async function ownerReply(c, wcfg, to, text, now) {
       const messages = cleanHistory([...history.map(({ role, content }) => ({ role, content })), { role: 'user', content: text }]);
       const t = perks.localTime('JO', now);
       const when = `${t.year}-${String(t.month).padStart(2, '0')}-${String(t.day).padStart(2, '0')} ${String(t.hour).padStart(2, '0')}:${String(t.minute).padStart(2, '0')}`;
-      const r = await chat(cfg, { system: sales.ownerSystem({ report, now: when, origin: c.origin }), messages, maxTokens: 3000 });
+      const r = await chat(cfg, { system: sales.ownerSystem({ report, now: when, origin: c.origin }), messages, tools: sales.ownerTools(), runTool: ownerTools(c, wcfg), maxTokens: 3000, maxRounds: 6 });
       await logAi(c, 'owner', r.usage);
       await noteAi(c, true, null, r.model);
       if (!r.refused && r.text) {
@@ -3147,6 +3147,56 @@ async function ownerReply(c, wcfg, to, text, now) {
   await wa.sendText(wcfg, to, reply || `📋 الوضع هلأ:\n\n${report}`);
 }
 
+// 🧭 توجيهك للوكيل من واتسابك: «قلّه…»، «خلّي الوكيل…»، «وقّف الإرسال»
+async function findProspect(c, ref) {
+  const v = clean(ref, 60).replace(/^#/, '');
+  if (/^\d+$/.test(v)) {
+    const p = await c.db.get('SELECT * FROM prospects WHERE id = ?', Number(v));
+    if (p) return p;
+  }
+  const rows = await c.db.all("SELECT * FROM prospects WHERE name LIKE ? OR owner_name LIKE ? OR wa LIKE ? ORDER BY COALESCE(last_in_at, 0) DESC, id DESC LIMIT 5", `%${v}%`, `%${v}%`, `%${v.replace(/\D/g, '') || '-'}%`);
+  if (!v || !rows.length) throw new Error(`ما لقيت محل «${v}». اسأله أي محل بالزبط`);
+  if (rows.length > 1 && !rows.some((r) => r.name === v)) throw new Error(`في أكتر من محل: ${rows.map((r) => `#${r.id} ${r.name}`).join('، ')}. اسأله أي واحد`);
+  return rows.find((r) => r.name === v) || rows[0];
+}
+
+function ownerTools(c, wcfg) {
+  return async (name, input) => {
+    if (name === 'set_guidance') {
+      const text = clean(input.text, 600);
+      await setSetting(c.db, 'sales_guidance', text);
+      return { saved: true, cleared: !text };
+    }
+    if (name === 'set_auto') {
+      await setSetting(c.db, 'sales_auto', input.on ? '1' : '0');
+      if (input.on) await setSetting(c.db, 'sales_stop', '');
+      return { auto: !!input.on };
+    }
+    const p = await findProspect(c, input.shop);
+    if (name === 'guide_shop') {
+      const text = clean(input.instruction, 400);
+      await c.db.run('UPDATE prospects SET guide = ? WHERE id = ?', text || null, p.id);
+      return { shop: p.name, saved: true, cleared: !text };
+    }
+    if (name === 'pause_shop') {
+      await c.db.run('UPDATE prospects SET paused = ? WHERE id = ?', input.paused ? 1 : 0, p.id);
+      return { shop: p.name, paused: !!input.paused };
+    }
+    if (name === 'reply_to_shop') {
+      const text = clean(input.message, 1000);
+      if (!text) throw new Error('الرسالة فاضية');
+      if (p.status === 'optout') throw new Error(`${p.name} طلب ما نبعتله رسائل`);
+      const lastWa = await c.db.get("SELECT MAX(created_at) AS at FROM sales_msgs WHERE prospect_id = ? AND role = 'in' AND channel = 'wa'", p.id);
+      if (!p.wa || !lastWa.at || Date.now() - lastWa.at >= DAY) throw new Error(`مرّ أكتر من 24 ساعة على آخر رسالة من ${p.name}، وواتساب ما بيسمح نبعتله إلا لما يراسلنا هو. ${p.wa ? `بيقدر يحكيه من واتسابه: +${p.wa}` : ''}`);
+      const id = await wa.sendText(wcfg, p.wa, text);
+      await saveSalesMsg(c.db, p.id, 'owner', text, id);
+      await c.db.run('UPDATE prospects SET last_out_at = ? WHERE id = ?', Date.now(), p.id);
+      return { shop: p.name, sent: true };
+    }
+    throw new Error(`أداة مش معروفة: ${name}`);
+  };
+}
+
 // الوضع كله بنص واحد (للوكيل يجاوبك منه، أو بيوصلك هو نفسه إذا الذكاء مش شغّال)
 const agoAr = (ms) => (ms < HOUR ? `قبل ${Math.max(1, Math.round(ms / MIN))} دقيقة` : ms < DAY ? `قبل ${Math.round(ms / HOUR)} ساعة` : `قبل ${Math.round(ms / DAY)} يوم`);
 async function ownerReport(c, now = Date.now()) {
@@ -3156,7 +3206,7 @@ async function ownerReport(c, now = Date.now()) {
 
   const hot = await c.db.all("SELECT * FROM prospects WHERE status = 'hot' ORDER BY COALESCE(last_in_at, created_at) DESC LIMIT 10");
   L.push(`🔥 بدهم يحكوا معك (${hot.length}):`);
-  for (const p of hot) L.push(`- ${p.name} · ${phoneOf(p)}${p.last_in_at ? ` · ${agoAr(now - p.last_in_at)}` : ''}${p.note ? ` · ${clean(p.note, 120)}` : ''} · آخر رسالة: «${clean((await lastIn(p.id) || {}).text, 120)}»`);
+  for (const p of hot) L.push(`- #${p.id} ${p.name} · ${phoneOf(p)}${p.last_in_at ? ` · ${agoAr(now - p.last_in_at)}` : ''}${p.note ? ` · ${clean(p.note, 120)}` : ''} · آخر رسالة: «${clean((await lastIn(p.id) || {}).text, 120)}»`);
   if (!hot.length) L.push('- ولا حدا');
 
   const leads = await c.db.all("SELECT * FROM leads WHERE status = 'new' ORDER BY created_at DESC LIMIT 10");
@@ -3171,14 +3221,15 @@ async function ownerReport(c, now = Date.now()) {
 
   const talks = await c.db.all("SELECT * FROM prospects WHERE last_in_at > ? AND status <> 'hot' ORDER BY last_in_at DESC LIMIT 10", now - DAY);
   L.push('', `💬 محادثات آخر 24 ساعة (${talks.length}):`);
-  for (const p of talks) L.push(`- ${p.name} · ${phoneOf(p)} · ${PROSPECT_STATUS_AR[p.status] || p.status} · ${agoAr(now - p.last_in_at)} · آخر رسالة: «${clean((await lastIn(p.id) || {}).text, 120)}»${p.paused ? ' · (الوكيل موقّف معه، رد إنت)' : ''}${p.error ? ` · ⚠️ ${clean(p.error, 80)}` : ''}`);
+  for (const p of talks) L.push(`- #${p.id} ${p.name} · ${phoneOf(p)} · ${PROSPECT_STATUS_AR[p.status] || p.status} · ${agoAr(now - p.last_in_at)} · آخر رسالة: «${clean((await lastIn(p.id) || {}).text, 120)}»${p.paused ? ' · (الوكيل موقّف معه، رد إنت)' : ''}${p.guide ? ` · 📌 توجيهك: ${p.guide}` : ''}${p.error ? ` · ⚠️ ${clean(p.error, 80)}` : ''}`);
   if (!talks.length) L.push('- ما في');
 
   const counts = Object.fromEntries((await c.db.all('SELECT status, COUNT(*) AS n FROM prospects GROUP BY status')).map((r) => [r.status, r.n]));
   const sent = (await c.db.get('SELECT COUNT(*) AS n FROM prospects WHERE sent_at > ?', now - DAY)).n;
   const auto = (await getSetting(c.db, 'sales_auto')) === '1';
   const stop = await jsonSetting(c.db, 'sales_stop');
-  L.push('', `🎯 وكيل المبيعات: الإرسال لحاله ${auto ? 'شغّال' : 'موقّف'}${!auto && stop && stop.why ? ` (وقف لحاله ${agoAr(now - stop.at)}: ${stop.why})` : ''} · انبعت لـ ${sent} محل آخر 24 ساعة · بالدور ${counts.new || 0} · عم يحكوا ${counts.talking || 0} · سجّلوا ${counts.won || 0} · مش مهتمين ${counts.lost || 0} · ما بدهم رسائل ${counts.optout || 0} · فشلت ${counts.failed || 0}`);
+  const guidance = await getSetting(c.db, 'sales_guidance');
+  L.push('', `🎯 وكيل المبيعات: ${guidance ? `توجيهك العام: «${guidance}» · ` : ''}الإرسال لحاله ${auto ? 'شغّال' : 'موقّف'}${!auto && stop && stop.why ? ` (وقف لحاله ${agoAr(now - stop.at)}: ${stop.why})` : ''} · انبعت لـ ${sent} محل آخر 24 ساعة · بالدور ${counts.new || 0} · عم يحكوا ${counts.talking || 0} · سجّلوا ${counts.won || 0} · مش مهتمين ${counts.lost || 0} · ما بدهم رسائل ${counts.optout || 0} · فشلت ${counts.failed || 0}`);
 
   const platformShop = await platformShopId(c.db);
   const shops = await c.db.all('SELECT * FROM shops WHERE demo = 0 AND id <> ?', platformShop ?? 0);
@@ -3208,7 +3259,7 @@ async function sendOwnerAlert(c, wcfg, to, a) {
   let last;
   try {
     const id = via === 'text'
-      ? await wa.sendText(wcfg, to, [`🔔 ${a.event}`, a.who, a.phone && `📞 ${a.phone}`, a.about && `💬 ${clean(a.about, 300)}`, `${c.origin}/app#admin`].filter(Boolean).join('\n'))
+      ? await wa.sendText(wcfg, to, [`🔔 ${a.event}`, a.who, a.phone && `📞 ${a.phone}`, a.about && `💬 ${clean(a.about, 300)}`, '↩️ رد هون إذا بدك توجّه الوكيل', `${c.origin}/app#admin`].filter(Boolean).join('\n'))
       : await wa.sendAlert(wcfg, to, { who: `${a.who} · ${a.event}`, phone: a.phone, about: a.about });
     last = { at: Date.now(), ok: true, via, id };
   } catch (e) {
@@ -3260,7 +3311,7 @@ function prospectView(p, offer, ctx) {
   const message = sales.outreachText(p, ctx);
   return {
     id: p.id, name: p.name, area: p.area, kind: p.kind, phone: p.phone, wa: p.wa, instagram: p.instagram, website: p.website, why: p.why,
-    ownerName: p.owner_name, note: p.note, status: p.status, source: p.source, paused: !!p.paused, error: p.error, shopId: p.shop_id,
+    ownerName: p.owner_name, note: p.note, guide: p.guide || null, status: p.status, source: p.source, paused: !!p.paused, error: p.error, shopId: p.shop_id,
     sentAt: p.sent_at, lastInAt: p.last_in_at, lastOutAt: p.last_out_at, openedAt: p.opened_at, createdAt: p.created_at,
     message, link: `${ctx.origin}/?p=${p.code}`,
     waLink: p.wa ? `https://wa.me/${p.wa}?text=${encodeURIComponent(message)}` : null,

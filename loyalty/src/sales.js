@@ -75,8 +75,9 @@ export function salesRules({ plans, features, apple, signupOpen, origin, ownerWh
 }
 
 // الجزء اللي بيتغيّر: القناة، ومين المحل، والعرض إذا في
-export function salesContext({ channel, today, prospect, firstMessage, offer, offerLink }) {
+export function salesContext({ channel, today, prospect, firstMessage, offer, offerLink, guidance }) {
   const lines = [`اليوم: ${today}`];
+  if (guidance) lines.push(`📌 توجيهات صاحب المنصة لكل المحادثات (التزم فيها ما دامت ما بتخالف القواعد فوق): ${guidance}`);
   if (channel === 'wa') {
     lines.push('القناة: واتساب. ردودك بتنبعت رسالة واتساب، فخليها قصيرة كتير (جملة أو تنتين).');
     lines.push('إذا بعتلك صورة أو رسالة صوتية، قله بلطف إنك بتقرأ الرسائل المكتوبة بس لهلأ.');
@@ -97,6 +98,7 @@ export function salesContext({ channel, today, prospect, firstMessage, offer, of
     if (prospect.note) lines.push(`- ملاحظات من المحادثة: ${prospect.note}`);
     if (firstMessage) lines.push(`- أول رسالة بعتناله: «${firstMessage}»`);
     if (prospect.status === 'won') lines.push('- هالمحل سجّل بنقاطك ✓. ساعده بأسئلته.');
+    if (prospect.guide) lines.push(`- 📌 توجيه صاحب المنصة لهالمحل (التزم فيه): ${prospect.guide}`);
   }
   if (offer) lines.push('', `عرضه الحالي: تجربة ${offer.trial_days} يوم برابط ${offerLink}. إذا بده يبلّش ابعتله الرابط.`);
   return lines.join('\n');
@@ -223,11 +225,47 @@ export function ownerSystem({ report, now, origin }) {
     '- إذا سأل «شو الأخبار؟» أو «شو الوضع؟» أو «مين بده يشترك؟»: اعطيه تقرير كامل ومرتب: أول إشي اللي بدهم يحكوا معه وطلبات الاشتراك بأساميهم وأرقامهم عشان يتصل فيهم، بعدين الحوالات اللي بتستنى تأكيده، بعدين المحادثات، بعدين أرقام الوكيل والمحلات، وآخر إشي أي مشكلة.',
     '- إذا قسم فاضي، قول بكلمة إنه ما في (ما تتجاهله).',
     '- إذا سأل عن محل معيّن، دوّر عليه بالبيانات وقلّه كل إشي عنه.',
-    '- بالآخر قلّه شو أهم إشي يعمله هلأ (مثلاً: اتصل بفلان، أكّد حوالة فلان).',
-    `- الأوامر (تشغيل أو توقيف الإرسال، تأكيد حوالة، الرد على محل) بتنعمل من اللوحة: ${origin}/app ← 👑 المنصة. إنت ما بتقدر تعملها من هون، فقلّه وين.`,
+    '- بالآخر قلّه شو أهم إشي يعمله هلأ (مثلاً: اتصل بفلان، أكّد حوالة فلان)، وإذا في محل محتاج قرار منه، اسأله شو توجّه الوكيل.',
+    '- إذا وجّهك («قلّه…»، «خلّي الوكيل…»، «وقّف…»): نفّذ بالأدوات، وبعدها قلّه شو عملت بالزبط:',
+    '  • reply_to_shop: رسالة لمحل هلأ على واتساب (بس إذا راسلنا آخر 24 ساعة). اكتبها بلسان الوكيل، قصيرة ولطيفة، وفيها اللي طلبه بالزبط.',
+    '  • guide_shop: توجيه بيلتزم فيه الوكيل بكل ردوده الجاية مع هالمحل.',
+    '  • set_guidance: توجيه عام للوكيل مع كل المحلات (بيحل محل القديم؛ فاضي بيمسحه).',
+    '  • pause_shop: يوقف الوكيل مع محل (صاحب المنصة رح يرد بنفسه) أو يرجّعه.',
+    '  • set_auto: يشغّل أو يوقف إرسال أول رسالة للمحلات الجديدة لحاله.',
+    '- المحل بتحدده برقمه (#12) من البيانات، أو باسمه. إذا مش واضح أي محل أو شو بده بالزبط، اسأله قبل ما تبعت إشي.',
+    `- تأكيد الحوالات وتفعيل الاشتراكات بس من اللوحة: ${origin}/app ← 👑 المنصة.`,
     '- نسّق للواتساب: سطور قصيرة، إيموجي بسيط، *نجمة* للعريض. بدون جداول ولا عناوين Markdown.',
     '',
     `البيانات (هلأ: ${now} بتوقيت عمّان):`,
     report,
   ].join('\n');
 }
+
+const SHOP_REF = str('رقم المحل من البيانات (مثلاً #12) أو اسمه');
+export const ownerTools = () => [
+  {
+    name: 'reply_to_shop',
+    description: 'بيبعت رسالة لمحل هلأ على واتساب من رقم الوكيل (بس إذا المحل راسلنا آخر 24 ساعة). الوكيل بيضل يرد معه بعدها.',
+    input_schema: { type: 'object', properties: { shop: SHOP_REF, message: str('نص الرسالة للمحل') }, required: ['shop', 'message'], additionalProperties: false },
+  },
+  {
+    name: 'guide_shop',
+    description: 'بيحفظ توجيه للوكيل مع هالمحل بالذات، وبيلتزم فيه بكل ردوده الجاية معه. نص فاضي بيمسح التوجيه.',
+    input_schema: { type: 'object', properties: { shop: SHOP_REF, instruction: str('التوجيه بجملة أو تنتين') }, required: ['shop', 'instruction'], additionalProperties: false },
+  },
+  {
+    name: 'set_guidance',
+    description: 'توجيه عام للوكيل مع كل المحلات (بيحل محل التوجيه العام القديم). نص فاضي بيمسحه.',
+    input_schema: { type: 'object', properties: { text: str('التوجيه العام') }, required: ['text'], additionalProperties: false },
+  },
+  {
+    name: 'pause_shop',
+    description: 'paused=true: الوكيل بيوقف يرد على هالمحل (صاحب المنصة رح يرد بنفسه). false: بيرجع يرد.',
+    input_schema: { type: 'object', properties: { shop: SHOP_REF, paused: { type: 'boolean' } }, required: ['shop', 'paused'], additionalProperties: false },
+  },
+  {
+    name: 'set_auto',
+    description: 'on=true: الوكيل بيبعت أول رسالة للمحلات الجديدة بالدور لحاله كل يوم. false: بيوقف (الردود على اللي بيحكوا بتضل شغّالة).',
+    input_schema: { type: 'object', properties: { on: { type: 'boolean' } }, required: ['on'], additionalProperties: false },
+  },
+];

@@ -760,9 +760,9 @@ test('تنبيهك على واتسابك: حدا راسل الوكيل، رسا�
   await meta.flush();
   const toOwner = f.claude.filter((x) => forOwner(x.body));
   assert.equal(toOwner.length, 1);
-  assert.equal(toOwner[0].body.tools, undefined, 'بدون أدوات البيع');
+  assert.deepEqual(toOwner[0].body.tools.map((t) => t.name), ['reply_to_shop', 'guide_shop', 'set_guidance', 'pause_shop', 'set_auto'], 'أدوات التوجيه مش أدوات البيع');
   const sys = toOwner[0].body.system;
-  assert.match(sys, /🔥 بدهم يحكوا معك \(1\):\n- أبو أحمد · \+962791000001/);
+  assert.match(sys, /🔥 بدهم يحكوا معك \(1\):\n- #\d+ أبو أحمد · \+962791000001/);
   assert.match(sys, /آخر رسالة: «وين المدير؟»/);
   assert.match(sys, /📩 طلبات اشتراك لسا ما حكيتهم \(0\)/);
   assert.equal(lastUser(toOwner[0]).content, 'شو الأخبار؟ في محلات بدها تشترك؟');
@@ -804,4 +804,55 @@ test('بدون ذكاء اصطناعي: لما تراسل رقم الإيجنت 
   assert.match(r.body.text.body, /📩 طلبات اشتراك لسا ما حكيتهم \(1\):\n- حلويات النور · رامي · 0791000003 · مخبز وحلويات/);
   assert.match(r.body.text.body, /🎯 وكيل المبيعات: الإرسال لحاله موقّف/);
   assert.match(r.body.text.body, /🏪 المحلات: 0/);
+});
+
+test('توجّه الوكيل من واتسابك: رسالة لمحل، توجيه لمحل، توجيه عام، توقيف الإرسال', async () => {
+  const owner = [];
+  const f = fakes((body) => {
+    const sys = JSON.stringify(body.system);
+    if (!sys.includes('مساعد صاحب منصة')) return { text: 'أهلا! 🙏' };
+    owner.push(body);
+    const last = body.messages.at(-1);
+    const n = owner.length;
+    if (n === 1) return { tool: 'reply_to_shop', input: { shop: 'كوفي', message: 'صاحب المنصة رح يتصل فيك بكرا الصبح 🙏' } };
+    if (n === 2) { assert.match(JSON.stringify(last.content), /sent/); return { tool: 'guide_shop', input: { shop: '#1', instruction: 'اعرض عليه شهرين تجربة' } }; }
+    if (n === 3) return { tool: 'set_guidance', input: { text: 'ركّز على الكوفيهات بعمّان' } };
+    if (n === 4) return { tool: 'set_auto', input: { on: false } };
+    if (n === 5) return { text: 'تمام ✅ بعتتله، وحفظت التوجيه، ووقّفت الإرسال' };
+    if (n === 6) return { tool: 'reply_to_shop', input: { shop: 'مش موجود', message: 'مرحبا' } };
+    if (n === 7) { assert.match(JSON.stringify(last.content), /ما لقيت محل/); return { text: 'ما لقيته، أي محل قصدك؟' }; }
+    return { text: '؟' };
+  });
+  const p = await platform({ ANTHROPIC_API_KEY: 'sk-test', fetch: f.fetch, ...WA_ENV, WHATSAPP_NUMBER: '962798900911' });
+  const meta = p.client();
+  await p.admin.put('/api/admin/sales/settings', { auto: true, daily: 20 });
+  await hook(meta, incomingMsg('962791000001', 'مرحبا عندي كوفي', 'wamid.s1'));
+  await meta.flush();
+  const id = (await p.admin.get('/api/admin/sales')).data.prospects[0].id;
+  assert.equal(id, 1);
+  await p.db.run("UPDATE prospects SET name = 'كوفي الورد' WHERE id = 1");
+
+  await hook(meta, incomingMsg('962798900911', 'قله رح اتصل فيه بكرا، واعرض عليه شهرين، وركّز على الكوفيهات، ووقف الإرسال', 'wamid.o1'));
+  await meta.flush();
+  const toShop = f.graph.filter((g) => g.body.to === '962791000001' && g.body.type === 'text').at(-1);
+  assert.equal(toShop.body.text.body, 'صاحب المنصة رح يتصل فيك بكرا الصبح 🙏');
+  assert.equal(f.graph.filter((g) => g.body.to === '962798900911' && g.body.type === 'text').at(-1).body.text.body, 'تمام ✅ بعتتله، وحفظت التوجيه، ووقّفت الإرسال');
+  const st = (await p.admin.get('/api/admin/sales')).data;
+  assert.equal(st.settings.auto, false);
+  assert.equal(st.prospects[0].guide, 'اعرض عليه شهرين تجربة');
+  assert.equal(st.prospects[0].paused, false, 'الوكيل بيضل يرد');
+  const chatLog = (await p.admin.get(`/api/admin/prospects/${id}`)).data.messages;
+  assert.equal(chatLog.at(-1).role, 'owner');
+
+  // الوكيل بيشوف التوجيهات بردّه الجاي مع المحل
+  await hook(meta, incomingMsg('962791000001', 'طيب كم السعر؟', 'wamid.s2'));
+  await meta.flush();
+  const agentCtx = f.claude.filter((x) => !JSON.stringify(x.body.system).includes('مساعد صاحب منصة')).at(-1).body.system[1].text;
+  assert.match(agentCtx, /توجيه صاحب المنصة لهالمحل \(التزم فيه\): اعرض عليه شهرين تجربة/);
+  assert.match(agentCtx, /توجيهات صاحب المنصة لكل المحادثات.*ركّز على الكوفيهات بعمّان/);
+
+  // محل مش موجود: بيسألك
+  await hook(meta, incomingMsg('962798900911', 'ابعت لمحل مش موجود', 'wamid.o2'));
+  await meta.flush();
+  assert.equal(f.graph.filter((g) => g.body.to === '962798900911' && g.body.type === 'text').at(-1).body.text.body, 'ما لقيته، أي محل قصدك؟');
 });

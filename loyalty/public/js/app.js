@@ -2057,6 +2057,7 @@ function prospectCard(p, st) {
       <div class="small muted">${[p.ownerName, p.kind, p.area].filter(Boolean).join(' · ')}${p.phone ? html` · <span class="num" dir="ltr">${localPhone(p.phone)}</span>` : ''} · ${ago(p.lastInAt || p.lastOutAt || p.createdAt)}</div>
       ${p.why ? html`<div class="small" style="margin-top:4px">${p.why}</div>` : ''}
       ${p.note ? html`<div class="small" style="margin-top:4px">📝 ${p.note}</div>` : ''}
+      ${p.guide ? html`<div class="small" style="margin-top:4px">📌 توجيهك للوكيل: ${p.guide}</div>` : ''}
       ${p.error ? html`<div class="small" style="margin-top:4px;color:var(--bad)">⚠️ ${waHint(p.error) ? html`${waHint(p.error)} <span class="muted" dir="ltr">${p.error}</span>` : p.error}</div>` : ''}
     </div></div>
     <div class="acts">
