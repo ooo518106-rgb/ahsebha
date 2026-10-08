@@ -234,7 +234,7 @@ async function appleConfig(c, { withKey = true } = {}) {
 }
 
 // وقت آخر تغيير بشكل البطاقة: البطاقات القديمة على الآيفونات بتعتبر حالها قديمة وبتنزّل الشكل الجديد لما تتحدّث
-const PASS_DESIGN_AT = Date.UTC(2026, 9, 8, 18, 30);
+const PASS_DESIGN_AT = Date.UTC(2026, 9, 8, 18, 40);
 
 // صورة العملات: من الذاكرة، أو من قاعدة البيانات، أو بترسمها (تقيلة) مرة وبتحفظها
 async function stripFor(c, shop, balance) {

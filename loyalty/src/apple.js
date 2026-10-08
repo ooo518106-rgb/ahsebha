@@ -224,7 +224,8 @@ export function buildPassJson(shop, member, { passTypeId, teamId, origin, authTo
       // العناوين إيموجي لأنه Wallet بتباعد حروف العناوين الصغيرة فبينمطّ الكلام العربي («الـبـطـاقـة»)
       secondaryFields: [
         // Apple ما بتسمح بروابط على وجه البطاقة، فبنقول للزبون وين يلاقي المنيو (أول إشي على الضهر)
-        ...(menuUrl ? [{ key: 'menuHint', label: '📋', value: 'اكبس ⋯ للمنيو', textAlignment: 'PKTextAlignmentLeft' }] : []),
+        // (الكلام هون ما بينكبس؛ زر ⋯ فوق ← «تفاصيل البطاقة» ← «افتح المنيو»)
+        ...(menuUrl ? [{ key: 'menuHint', label: '📋', value: '⋯ فوق للمنيو', textAlignment: 'PKTextAlignmentLeft' }] : []),
         { key: 'reward', label: '🎁', value: shop.reward_name, textAlignment: menuUrl ? 'PKTextAlignmentCenter' : 'PKTextAlignmentLeft' },
         {
           key: 'status',
