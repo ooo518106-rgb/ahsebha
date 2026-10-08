@@ -190,15 +190,6 @@ export function shopLinks(shop) {
 }
 const link = (url, text) => `<a href="${url}">${String(text).replace(/[<>&"]/g, '')}</a>`;
 
-// ملف ترجمة عربي فاضي تقريباً: وجوده بيخلّي Wallet تعرض البطاقة عربي (من اليمين لليسار) على الآيفونات العربية
-export const AR_STRINGS = (() => {
-  const text = '"nuqatak" = "نقاطك";\n';
-  const out = new Uint8Array(2 + text.length * 2);
-  out.set([0xff, 0xfe]); // UTF-16LE
-  for (let i = 0; i < text.length; i++) { out[2 + i * 2] = text.charCodeAt(i) & 255; out[3 + i * 2] = text.charCodeAt(i) >> 8; }
-  return out;
-})();
-
 export function buildPassJson(shop, member, { passTypeId, teamId, origin, authToken, menuUrl = null, hasLogo = false }) {
   const p = progress(shop, member.balance);
   const stamps = shop.program_type === 'stamps';
@@ -228,19 +219,21 @@ export function buildPassJson(shop, member, { passTypeId, teamId, origin, authTo
         value: stamps ? `${p.available && !p.toward ? p.cost : p.toward}/${p.cost}` : member.balance,
         changeMessage: stamps ? 'صار عندك %@ أختام' : 'رصيدك صار %@ نقطة',
       }],
-      // الوجه: صورة الدواير (strip.png) مكان الحقل الكبير، وتحتها سطر واحد.
+      // الوجه: صورة العملات (strip.png) مكان الحقل الكبير، وتحتها سطر واحد.
+      // Wallet بترتّب من الشمال، فبنحطهم بالعكس عشان ينقروا من اليمين: شو باقي ← المكافأة ← المنيو.
       // العناوين إيموجي لأنه Wallet بتباعد حروف العناوين الصغيرة فبينمطّ الكلام العربي («الـبـطـاقـة»)
       secondaryFields: [
+        // Apple ما بتسمح بروابط على وجه البطاقة، فبنقول للزبون وين يلاقي المنيو (أول إشي على الضهر)
+        ...(menuUrl ? [{ key: 'menuHint', label: '📋', value: 'اكبس ⋯ للمنيو', textAlignment: 'PKTextAlignmentLeft' }] : []),
+        { key: 'reward', label: '🎁', value: shop.reward_name, textAlignment: menuUrl ? 'PKTextAlignmentCenter' : 'PKTextAlignmentLeft' },
         {
           key: 'status',
           label: p.available ? '🎉' : '⏳',
           value: p.available ? (p.available > 1 ? `${p.available} مكافآت جاهزة` : 'مكافأتك جاهزة') : `باقي ${p.remaining} ${unitWord(shop, p.remaining)}`,
+          textAlignment: 'PKTextAlignmentRight',
           changeMessage: '%@',
         },
-        { key: 'reward', label: '🎁', value: shop.reward_name },
       ],
-      // Apple ما بتسمح بروابط على وجه البطاقة، فبنقول للزبون وين يلاقي المنيو (أول إشي على الضهر)
-      auxiliaryFields: menuUrl ? [{ key: 'menuHint', label: '📋', value: 'اكبس ⋯ للمنيو' }] : [],
       backFields: [
         ...(menuUrl ? [{ key: 'menu', label: '📋 المنيو', value: menuUrl, attributedValue: link(menuUrl, 'افتح المنيو') }] : []),
         // التقييم ما بيصير جوّا المحفظة: الرابط بيفتح البطاقة على الويب عند النجوم

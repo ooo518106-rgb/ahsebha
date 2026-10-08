@@ -346,6 +346,12 @@ export const SCHEMA = [
   'CREATE INDEX IF NOT EXISTS txns_member ON txns(member_id, created_at)',
   'CREATE UNIQUE INDEX IF NOT EXISTS txns_idem ON txns(shop_id, idem)',
   'CREATE INDEX IF NOT EXISTS sessions_user ON sessions(user_id)',
+  // 🎨 صور الشريط على بطاقات الآيفون: كل حالة بتنرسم مرة وبتنحفظ (base64 PNG)
+  `CREATE TABLE IF NOT EXISTS strip_cache (
+    k TEXT PRIMARY KEY,
+    png TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+  )`,
 ];
 
 // تعديلات على جداول موجودة (بتنطبق مرة وحدة؛ لو العمود موجود بنتجاهل الخطأ)

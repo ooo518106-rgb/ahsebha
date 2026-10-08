@@ -13,7 +13,7 @@ import { geminiFindShops } from './gemini.js';
 import * as sales from './sales.js';
 import * as wa from './whatsapp.js';
 import { defaultLogoPng } from './png.js';
-import { stripImages } from './strip.js';
+import { peekStrip, stripFiles, stripKey, stripPng, STRIP_VERSION } from './strip.js';
 import { earnFor, progress, rewardCost, rewardRule, stampsLine, unitLabel, unitWord } from '../public/js/rules.js';
 import { FEATURES } from '../public/js/plans.js';
 import { b64ToBytes, bytesToB64, clean, fail, HttpError, isUniqueError, json, normPhone, randomDigits, randomToken, sha256Hex } from './util.js';
@@ -234,7 +234,19 @@ async function appleConfig(c, { withKey = true } = {}) {
 }
 
 // وقت آخر تغيير بشكل البطاقة: البطاقات القديمة على الآيفونات بتعتبر حالها قديمة وبتنزّل الشكل الجديد لما تتحدّث
-const PASS_DESIGN_AT = Date.UTC(2026, 9, 8, 18, 0);
+const PASS_DESIGN_AT = Date.UTC(2026, 9, 8, 18, 30);
+
+// صورة العملات: من الذاكرة، أو من قاعدة البيانات، أو بترسمها (تقيلة) مرة وبتحفظها
+async function stripFor(c, shop, balance) {
+  const k = stripKey(shop, balance);
+  const hot = peekStrip(k);
+  if (hot) return hot;
+  const row = await c.db.get('SELECT png FROM strip_cache WHERE k = ?', k);
+  if (row) return b64ToBytes(row.png);
+  const png = await stripPng(shop, balance);
+  await c.db.run('INSERT OR IGNORE INTO strip_cache (k, png, created_at) VALUES (?, ?, ?)', k, bytesToB64(png), Date.now());
+  return png;
+}
 
 async function passImages(c, shop) {
   const row = await c.db.get('SELECT mime, data FROM shop_logos WHERE shop_id = ?', shop.id);
@@ -247,7 +259,7 @@ async function pkpassFor(c, cfg, member) {
   const shop = await shopRow(c.db, member.shop_id);
   const { hasLogo, images } = await passImages(c, shop);
   const passJson = apple.buildPassJson(shop, member, { ...cfg, origin: c.origin, authToken: await apple.authTokenFor(cfg.authSecret, member.token), menuUrl: await menuUrlOf(c, shop), hasLogo });
-  const all = { ...images, ...(await stripImages(shop, member.balance)), 'ar.lproj/pass.strings': apple.AR_STRINGS };
+  const all = { ...images, ...stripFiles(await stripFor(c, shop, member.balance)) };
   const bytes = await apple.buildPkpass({ passJson, images: all, ...cfg });
   const updated = Math.max(member.updated_at || member.created_at, shop.updated_at || shop.created_at, PASS_DESIGN_AT);
   return { bytes, updated };
@@ -642,6 +654,7 @@ export async function runScheduled(ctx, now = Date.now()) {
     out.demoReset = true;
   }
   await c.db.run('DELETE FROM rate_hits WHERE expires_at < ?', now);
+  await c.db.run('DELETE FROM strip_cache WHERE k NOT LIKE ?', `s${STRIP_VERSION}|%`); // صور رسمة قديمة
   return out;
 }
 
