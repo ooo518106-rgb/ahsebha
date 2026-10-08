@@ -15,6 +15,7 @@ export function waConfig(env) {
     verifyToken: String(env.WHATSAPP_VERIFY_TOKEN || '').trim(),
     wabaId: /^\d{5,20}$/.test(String(env.WHATSAPP_WABA_ID || '')) ? String(env.WHATSAPP_WABA_ID) : null,
     template: String(env.WHATSAPP_TEMPLATE || 'nuqatak_intro').trim(),
+    alertTemplate: String(env.WHATSAPP_ALERT_TEMPLATE || 'nuqatak_alert').trim(), // تنبيه لصاحب المنصة على رقمه
     lang: String(env.WHATSAPP_TEMPLATE_LANG || 'ar').trim(),
     version: /^v\d+\.\d+$/.test(String(env.WHATSAPP_API_VERSION || '')) ? env.WHATSAPP_API_VERSION : 'v26.0',
     fetch: env.fetch || ((...a) => fetch(...a)),
@@ -65,7 +66,7 @@ export const registerNumber = (cfg, pin) => call(cfg, `${cfg.phoneId}/register`,
 export const subscribedApps = (cfg) => call(cfg, `${cfg.wabaId}/subscribed_apps`, { method: 'GET' });
 export const subscribeApp = (cfg) => call(cfg, `${cfg.wabaId}/subscribed_apps`, {});
 // قالب أول رسالة على حساب الواتساب: حالته عند Meta (APPROVED، PENDING، REJECTED…)؛ إذا القائمة فاضية، القالب مش على هالحساب
-export const templates = (cfg) => call(cfg, `${cfg.wabaId}/message_templates?name=${encodeURIComponent(cfg.template)}&fields=name,status,language,category,rejected_reason`, { method: 'GET' });
+export const templates = (cfg, name = cfg.template) => call(cfg, `${cfg.wabaId}/message_templates?name=${encodeURIComponent(name)}&fields=name,status,language,category,rejected_reason`, { method: 'GET' });
 // بيقدر يبعت؟ (Meta بتقول إذا في إشي مانع: الدفع، الحساب، الرقم) { can_send_message, entities: [{ errors }] }
 export const health = (cfg) => call(cfg, `${cfg.phoneId}?fields=health_status`, { method: 'GET' });
 
@@ -78,6 +79,14 @@ export const sendTemplate = (cfg, to, shopName) => graph(cfg, {
     language: { code: cfg.lang },
     components: [{ type: 'body', parameters: [{ type: 'text', text: String(shopName).replace(/\s+/g, ' ').slice(0, 60) }] }],
   },
+});
+
+// تنبيه لصاحب المنصة (قالب {{1}} مين، {{2}} رقمه، {{3}} شو بده). Meta بترفض متغير فاضي أو فيه سطر جديد
+const param = (v) => ({ type: 'text', text: String(v || '').replace(/\s+/g, ' ').trim().slice(0, 200) || '—' });
+export const sendAlert = (cfg, to, { who, phone, about }) => graph(cfg, {
+  to,
+  type: 'template',
+  template: { name: cfg.alertTemplate, language: { code: cfg.lang }, components: [{ type: 'body', parameters: [param(who), param(phone), param(about)] }] },
 });
 
 // رد عادي (بس خلال 24 ساعة من آخر رسالة من المحل)

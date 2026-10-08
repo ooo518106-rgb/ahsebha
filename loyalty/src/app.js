@@ -1290,6 +1290,10 @@ async function saveLead(c, b, source) {
     shopName, name, phone, clean(b.city, 40), kind, clean(b.note, 500), (await resellerByCode(c.db, b.partner))?.id ?? null, source, Date.now(),
   );
   await notifyAdmin(c, { title: source === 'ai' ? '🤖 طلب اشتراك من مساعد المبيعات' : '📩 طلب اشتراك جديد', body: `${shopName} · ${name}${kind ? ` · ${kind}` : ''}`, url: `${c.origin}/app#admin` });
+  await alertOwnerWa(c, {
+    title: source === 'ai' ? 'طلب اشتراك من مساعد المبيعات' : 'طلب اشتراك جديد',
+    who: `${shopName} · ${name}`, phone, about: [kind, clean(b.city, 40), clean(b.note, 140)].filter(Boolean).join(' · ') || 'بده يشترك', key: `l:${phone}`,
+  });
 }
 
 // مدير المنصة = أول حساب حقيقي انعمل عليها (صاحب المنصة)
@@ -2797,6 +2801,7 @@ function prospectTools(c, p, channel) {
     if (name === 'call_owner') {
       await c.db.run("UPDATE prospects SET status = 'hot' WHERE id = ? AND status <> 'won'", p.id);
       await notifyAdmin(c, { title: `🙋 ${p.name} بده يحكي معك`, body: clean(input.reason, 140), url: `${c.origin}/app#admin` });
+      await alertOwnerWa(c, { title: `${p.name} بده يحكي معك`, who: p.name, phone: p.wa ? `+${p.wa}` : p.phone, about: clean(input.reason, 140), key: `p:${p.id}` });
       return { notified: true };
     }
     if (name === 'set_status') {
@@ -2981,10 +2986,15 @@ async function waWebhook(c) {
 // رسالة إلنا فشلت بعد ما Meta قبلتها. إذا كانت أول رسالة (القالب): نفس اللي بنعمله لما Meta ترفض فوراً،
 // يعني الرقم بيصير «ما انبعتت»، ومشكلة الحساب (الدفع، القالب) بتوقف الإرسال التلقائي وبتبلّغك
 async function waFailed(c, f) {
+  const msg = clean(`${f.message}${f.code ? ` (${f.code})` : ''}`, 200);
+  const alert = await jsonSetting(c.db, 'wa_alert_last');
+  if (alert && alert.id && alert.id === f.id) { // التنبيه اللي انبعتلك ما وصل
+    await setSetting(c.db, 'wa_alert_last', JSON.stringify({ ...alert, ok: false, message: msg }));
+    return;
+  }
   const sent = await c.db.get('SELECT prospect_id FROM sales_msgs WHERE wa_id = ?', f.id);
   const p = sent && await c.db.get('SELECT * FROM prospects WHERE id = ?', sent.prospect_id);
   if (!p) return;
-  const msg = clean(`${f.message}${f.code ? ` (${f.code})` : ''}`, 200);
   // للتشخيص بمربع رقم الإيجنت: آخر رسالة فشلت ولمين
   await setSetting(c.db, 'wa_last_failure', JSON.stringify({ at: Date.now(), code: f.code, message: msg, name: p.name }));
   if (p.status !== 'sent' || p.last_in_at) {
@@ -3036,6 +3046,7 @@ async function waIncoming(c, wcfg, m) {
   const from = wa.waNumber(m.from) || m.from;
   if (!/^\d{8,15}$/.test(from)) return;
   const now = Date.now();
+  if (from === ownerWhatsapp(c.env)) await setSetting(c.db, 'owner_wa_in', now); // راسلت رقم الإيجنت: تنبيهاتك 24 ساعة بتوصل رسالة عادية
   let p = await c.db.get('SELECT * FROM prospects WHERE wa = ?', from);
   // جاي من رابط رسالتك («… #رمز»): بنربطه بمحله، حتى لو راسل من رقم غير اللي لقيناه
   const code = !p && /#([a-z2-9]{8})(?![a-z2-9])/i.exec(m.text || '');
@@ -3077,6 +3088,34 @@ async function waIncoming(c, wcfg, m) {
 async function agentSilent(c, p, why) {
   try { await rateLimit(c, `ai:wa:silent:${p.id}`, 1, DAY); } catch { return; }
   await notifyAdmin(c, { title: `⚠️ الوكيل ما رد على ${p.name}`, body: `${why} · رد عليه إنت من 🎯 المبيعات`, url: `${c.origin}/app#admin` });
+}
+
+// 📲 تنبيه على واتسابك (WHATSAPP_NUMBER) من رقم الإيجنت لما حدا بده يحكي معك أو ترك طلب اشتراك.
+// إذا راسلت رقم الإيجنت آخر 24 ساعة بيوصلك نص عادي، وإلا بالقالب (nuqatak_alert) لأنه واتساب ما بيسمح غير هيك
+async function alertOwnerWa(c, a) {
+  const wcfg = wa.waConfig(c.env);
+  const to = ownerWhatsapp(c.env);
+  if (!wcfg || !to) return;
+  try {
+    if (a.key) await rateLimit(c, `walert:${a.key}`, 1, 3 * HOUR); // نفس المحل: مرة كل 3 ساعات
+    await rateLimit(c, 'walert:all', 30, DAY);
+  } catch { return; }
+  c.waitUntil(sendOwnerAlert(c, wcfg, to, a).catch((e) => console.error('wa alert:', e.message)));
+}
+
+async function sendOwnerAlert(c, wcfg, to, a) {
+  const via = Date.now() - (Number(await getSetting(c.db, 'owner_wa_in')) || 0) < 23 * HOUR ? 'text' : 'template';
+  let last;
+  try {
+    const id = via === 'text'
+      ? await wa.sendText(wcfg, to, [`🔔 ${a.title}`, a.who, a.phone && `📞 ${a.phone}`, a.about, `${c.origin}/app#admin`].filter(Boolean).join('\n'))
+      : await wa.sendAlert(wcfg, to, { who: a.who, phone: a.phone, about: a.about });
+    last = { at: Date.now(), ok: true, via, id };
+  } catch (e) {
+    last = { at: Date.now(), ok: false, via, message: clean(`${e.message}${e.code ? ` (${e.code})` : ''}`, 200) };
+  }
+  await setSetting(c.db, 'wa_alert_last', JSON.stringify(last));
+  return last;
 }
 
 // رد الوكيل: بيستنى ثواني (إذا بعت كذا رسالة ورا بعض، بيرد مرة وحدة على آخرها)
@@ -3338,6 +3377,11 @@ async function adminWaNumber(c) {
       } else if (b.action === 'subscribe') {
         if (!wcfg.wabaId) fail(400, 'ناقص WHATSAPP_WABA_ID');
         await wa.subscribeApp(wcfg);
+      } else if (b.action === 'alert') {
+        const to = ownerWhatsapp(c.env);
+        if (!to) fail(400, 'حط رقمك WHATSAPP_NUMBER بإعدادات Cloudflare أول');
+        const r = await sendOwnerAlert(c, wcfg, to, { title: 'تجربة تنبيه', who: 'محل تجربة', phone: '+962790000000', about: 'هيك رح يوصلك التنبيه لما حدا بده يحكي معك' });
+        if (!r.ok) fail(400, `ما انبعت: ${r.message}`);
       } else if (b.action === 'register') {
         const pin = String(b.pin || '').replace(/\D/g, '');
         if (!/^\d{6}$/.test(pin)) fail(400, 'الـ PIN لازم يكون 6 أرقام');
@@ -3349,15 +3393,21 @@ async function adminWaNumber(c) {
     const lastFailure = await jsonSetting(c.db, 'wa_last_failure');
     let subscribed = null;
     let template = null;
-    if (wcfg.wabaId) {
-      try { subscribed = ((await wa.subscribedApps(wcfg)).data || []).length > 0; } catch { subscribed = null; }
+    let alertTemplate = null;
+    // حالة القالب عند Meta، أو MISSING إذا مش على هالحساب
+    const tplStatus = async (name) => {
       try {
-        const list = ((await wa.templates(wcfg)).data || []).filter((t) => t.name === wcfg.template);
+        const list = ((await wa.templates(wcfg, name)).data || []).filter((t) => t.name === name);
         const t = list.find((x) => x.language === wcfg.lang) || list[0];
-        template = t
+        return t
           ? { status: t.status, language: t.language, category: t.category, reason: t.rejected_reason && t.rejected_reason !== 'NONE' ? clean(t.rejected_reason, 80) : null }
           : { status: 'MISSING' };
-      } catch { template = null; }
+      } catch { return null; }
+    };
+    if (wcfg.wabaId) {
+      try { subscribed = ((await wa.subscribedApps(wcfg)).data || []).length > 0; } catch { subscribed = null; }
+      template = await tplStatus(wcfg.template);
+      alertTemplate = await tplStatus(wcfg.alertTemplate);
     }
     // هل في إشي مانع الإرسال (الدفع، الحساب، الرقم)
     let sending = null;
@@ -3377,6 +3427,10 @@ async function adminWaNumber(c) {
       subscribed,
       template,
       templateName: wcfg.template,
+      alertTemplate,
+      alertTemplateName: wcfg.alertTemplate,
+      alertLast: await jsonSetting(c.db, 'wa_alert_last'),
+      ownerWa: ownerWhatsapp(c.env),
       wabaId: wcfg.wabaId,
       sending,
       ok: true,

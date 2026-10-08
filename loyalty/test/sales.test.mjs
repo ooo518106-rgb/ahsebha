@@ -724,3 +724,57 @@ test('Gemini على الموقع الحقيقي: بيستعمل fetch العاد
     globalThis.fetch = real;
   }
 });
+
+test('تنبيهك على واتسابك: لما حدا بده يحكي معك أو ترك طلب، رقم الإيجنت بيبعتلك (قالب، أو نص إذا راسلته آخر 24 ساعة)', async () => {
+  let step = 0;
+  const f = fakes(() => (++step % 2 ? { tool: 'call_owner', input: { reason: 'بده\nيحكي عن فرعين' } } : { text: 'تمام، رح يحكي معك 🙏' }), (body) => (body.template && body.template.name === 'nuqatak_alert' && step > 4 ? { status: 400, message: 'Template name does not exist', code: 132001 } : { status: 200 }));
+  const p = await platform({ ANTHROPIC_API_KEY: 'sk-test', fetch: f.fetch, ...WA_ENV, WHATSAPP_NUMBER: '962798900911' });
+  const meta = p.client();
+  const alerts = () => f.graph.filter((g) => g.body.to === '962798900911');
+
+  await hook(meta, incomingMsg('962791000001', 'بدي أحكي مع المدير', 'wamid.x1'));
+  await meta.flush();
+  assert.equal(alerts().length, 1);
+  const t = alerts()[0].body;
+  assert.equal(t.type, 'template');
+  assert.equal(t.template.name, 'nuqatak_alert');
+  assert.deepEqual(t.template.components[0].parameters.map((x) => x.text), ['أبو أحمد', '+962791000001', 'بده يحكي عن فرعين'], 'بدون سطر جديد');
+  // نفس المحل كمان مرة: ما بنعيد التنبيه (مرة كل 3 ساعات)
+  await hook(meta, incomingMsg('962791000001', 'وين المدير؟', 'wamid.x2'));
+  await meta.flush();
+  assert.equal(alerts().length, 1);
+  // التنبيه ما وصل (Meta بعتت failed على رقمه)
+  const failed = (id) => ({ object: 'whatsapp_business_account', entry: [{ changes: [{ field: 'messages', value: { metadata: { phone_number_id: '1234567890' }, statuses: [{ id, status: 'failed', timestamp: '1760000000', recipient_id: '962798900911', errors: [{ code: 131026, title: 'Message undeliverable', error_data: { details: 'Message undeliverable' } }] }] } }] }] });
+  await hook(meta, failed(`wamid.${f.graph.indexOf(alerts()[0]) + 1}`));
+  let num = (await p.admin.get('/api/admin/wa/number')).data;
+  assert.equal(num.ownerWa, '962798900911');
+  assert.equal(num.alertTemplateName, 'nuqatak_alert');
+  assert.equal(num.alertLast.ok, false);
+  assert.match(num.alertLast.message, /131026/);
+
+  // راسلت رقم الإيجنت من رقمك: 24 ساعة التنبيهات بتوصل نص عادي فيه كل التفاصيل
+  await hook(meta, incomingMsg('962798900911', 'مرحبا', 'wamid.o1'));
+  await meta.flush();
+  const before = alerts().length;
+  assert.equal((await p.client().post('/api/leads', { shopName: 'مخبز السعادة', name: 'سامي', phone: '0791000002', kind: 'مخبز وحلويات', city: 'إربد' })).status, 201);
+  await p.client().flush();
+  const txt = alerts().slice(before).find((g) => g.body.type === 'text');
+  assert.ok(txt, 'انبعت نص');
+  assert.match(txt.body.text.body, /طلب اشتراك جديد/);
+  assert.match(txt.body.text.body, /مخبز السعادة · سامي/);
+  assert.match(txt.body.text.body, /0791000002/);
+  assert.match(txt.body.text.body, /nuqatak\.test\/app#admin/);
+
+  // زر «جرّب»: القالب مش موجود عند Meta → بيرجّع السبب
+  await p.db.run("DELETE FROM platform_settings WHERE k = 'owner_wa_in'");
+  step = 10;
+  const bad = await p.admin.post('/api/admin/wa/number', { action: 'alert' });
+  assert.equal(bad.status, 400);
+  assert.match(bad.data.error, /132001/);
+  step = 0;
+  const ok = await p.admin.post('/api/admin/wa/number', { action: 'alert' });
+  assert.equal(ok.status, 200, JSON.stringify(ok.data));
+  num = (await p.admin.get('/api/admin/wa/number')).data;
+  assert.equal(num.alertLast.ok, true);
+  assert.equal(num.alertLast.via, 'template');
+});

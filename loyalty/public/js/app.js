@@ -2175,9 +2175,19 @@ function templateRow(d) {
   const label = t.status === 'MISSING' ? html`⚠️ مش موجود على حساب الواتساب <span class="num" dir="ltr">${d.wabaId}</span>. اعمله على هالحساب بالزبط` : TEMPLATE_LABELS[t.status] || t.status;
   return html`<li><span class="muted">قالب أول رسالة (<span dir="ltr">${d.templateName}</span>)</span> <b>${label}${t.reason ? ` · ${t.reason}` : ''}${t.language && t.language !== 'ar' ? ` · اللغة ${t.language} (لازم العربية ar)` : ''}${t.category && t.category !== 'MARKETING' ? ` · الفئة ${t.category}` : ''}</b></li>`;
 }
+// 🔔 تنبيهاتك على واتسابك: قالبها، وآخر تنبيه انبعتلك
+function alertRows(d) {
+  if (!d.ownerWa) return html`<li><span class="muted">🔔 تنبيهاتك على واتسابك</span> <b>⚠️ حط رقمك WHATSAPP_NUMBER بإعدادات Cloudflare</b></li>`;
+  const t = d.alertTemplate;
+  const a = d.alertLast;
+  const label = !t ? '' : t.status === 'MISSING' ? '⚠️ لسا ما انعمل. اعمله بنفس الاسم عشان توصلك التنبيهات على واتسابك' : TEMPLATE_LABELS[t.status] || t.status;
+  return html`${t ? html`<li><span class="muted">🔔 قالب تنبيهاتك (<span dir="ltr">${d.alertTemplateName}</span>)</span> <b>${label}${t.reason ? ` · ${t.reason}` : ''}${t.language && t.language !== 'ar' ? ` · اللغة ${t.language} (لازم العربية ar)` : ''}</b></li>` : ''}
+    <li><span class="muted">آخر تنبيه على واتسابك (<span class="num" dir="ltr">+${d.ownerWa}</span>)</span> <b>${!a ? 'لسا ما انبعت ولا تنبيه' : html`${a.ok ? '✅ انبعت' : '❌ ما وصل'} · ${ago(a.at)}`}</b>
+      ${a && !a.ok ? html`<div class="small" style="color:var(--bad)">${waHint(a.message) || ''} <span dir="ltr">${a.message}</span></div>` : ''}</li>`;
+}
 function waNumberHTML(d, err) {
   const row = (k, label) => html`<li><span class="muted">${label}</span> <b>${(WA_LABELS[k] && WA_LABELS[k][d[k]]) || d[k] || '—'}</b></li>`;
-  return html`${err ? html`<p class="alert bad small">${err}</p>` : ''}
+  return html`${err ? html`<p class="alert bad small">${err}${waHint(err) ? ` — ${waHint(err)}` : ''}</p>` : ''}
     ${d ? html`<ul class="list small" style="margin:0">
       <li><span class="muted">الرقم</span> <b dir="ltr">${d.number || '—'}</b></li>
       <li><span class="muted">الاسم</span> <b>${d.name || '—'}</b></li>
@@ -2185,6 +2195,7 @@ function waNumberHTML(d, err) {
       ${d.subscribed == null ? '' : html`<li><span class="muted">استلام الردود (Webhooks)</span> <b>${d.subscribed ? '✅ مشترك' : '❌ مش مشترك'}</b></li>`}
       ${d.wabaId ? html`<li><span class="muted">حساب الواتساب</span> <b class="num" dir="ltr">${d.wabaId}</b></li>` : ''}
       ${templateRow(d)}
+      ${alertRows(d)}
       ${d.sending ? html`<li><span class="muted">الإرسال</span> <b>${SENDING_LABELS[d.sending.can] || d.sending.can}</b>${d.sending.errors.map((e) => html`<div class="small" dir="auto" style="color:var(--bad)">${e}</div>`)}</li>` : ''}
       <li><span class="muted">آخر إشعار من Meta</span> <b>${!d.lastHook ? 'لسا ما وصل ولا إشي' : html`${ago(d.lastHook.at)} · ${d.lastHook.signed ? '✅ موقّع' : '❌ التوقيع غلط (تأكد من WHATSAPP_APP_SECRET)'}${d.lastHook.fields && d.lastHook.fields.length ? ` · ${d.lastHook.fields.join('، ')}` : ''}${d.lastHook.ours ? ` · ${d.lastHook.ours} رسالة لرقم الإيجنت` : ''}${d.lastHook.other ? ` · ${d.lastHook.other} رسالة لرقم تاني` : ''}${d.lastHook.failed ? ` · ⚠️ ${d.lastHook.failed} رسالة فشلت` : ''}`}</b></li>
       ${d.lastFailure ? html`<li><span class="muted">آخر رسالة فشلت</span> <b>${d.lastFailure.name} · ${ago(d.lastFailure.at)}</b>
@@ -2193,6 +2204,7 @@ function waNumberHTML(d, err) {
     <div class="row" style="margin-top:8px">
       <button class="btn sm ghost" type="button" data-wa-check>🔄 افحص</button>
       ${d && d.subscribed === false ? html`<button class="btn sm" type="button" data-wa-sub>🔔 فعّل استلام الردود</button>` : ''}
+      ${d && d.ownerWa ? html`<button class="btn sm soft" type="button" data-wa-alert>🔔 جرّب تنبيه على واتسابي</button>` : ''}
       ${!d || d.codeStatus !== 'VERIFIED' ? html`<button class="btn sm" type="button" data-wa-code="SMS">✉️ ابعت كود برسالة</button><button class="btn sm soft" type="button" data-wa-code="VOICE">📞 كود بمكالمة</button>` : ''}
     </div>
     ${!d || d.codeStatus !== 'VERIFIED' ? html`<form class="row" data-wa-verify style="margin-top:8px"><input name="code" inputmode="numeric" maxlength="6" placeholder="الكود (6 أرقام)" dir="ltr" style="max-width:180px"><button class="btn sm" type="submit">✅ أكّد الكود</button></form>` : ''}
@@ -2213,6 +2225,7 @@ function bindWaNumber() {
   const bind = () => {
     box.querySelectorAll('[data-wa-check]').forEach((b) => { b.onclick = () => run('GET', null, b); });
     box.querySelectorAll('[data-wa-sub]').forEach((b) => { b.onclick = () => run('POST', { action: 'subscribe' }, b); });
+    box.querySelectorAll('[data-wa-alert]').forEach((b) => { b.onclick = () => run('POST', { action: 'alert' }, b); });
     box.querySelectorAll('[data-wa-code]').forEach((b) => { b.onclick = () => run('POST', { action: 'code', method: b.dataset.waCode }, b); });
     const v = box.querySelector('[data-wa-verify]');
     if (v) v.onsubmit = (e) => { e.preventDefault(); run('POST', { action: 'verify', code: v.code.value }, v.querySelector('button')); };
