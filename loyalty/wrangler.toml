@@ -47,3 +47,8 @@ enabled = true
 # مهام دورية كل 5 دقايق: هدايا عيد الميلاد، طلب التقييم بعد الزيارة، وتذكير الزبائن الغايبين
 [triggers]
 crons = ["*/5 * * * *"]
+
+# 💾 النسخة الاحتياطية الأسبوعية على إيميل مدير المنصة (Cloudflare Email Routing لـ nuqatak.com).
+# بدون عنوان محدد: بتبعت لأي إيميل متأكد منه بـ Email Routing ← Destination addresses
+[[send_email]]
+name = "MAIL"
