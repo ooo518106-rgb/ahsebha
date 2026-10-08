@@ -6,7 +6,9 @@ import { startCameraScan } from './scan.js';
 import { parseBirthday, readCsv, readXlsx } from './sheet.js';
 import { PLAN_BLURB, PLAN_DEFAULTS, compareHTML } from './plans.js';
 
-const state = { me: null, shop: null, google: null, member: null, key: newKey(), stopScan: null, branch: (() => { try { return localStorage.getItem('nq_branch') || ''; } catch { return ''; } })() };
+// «3 أيام» بس «1 يوم» و«11 يوم»
+const dayWord = (n) => (n >= 3 && n <= 10 ? 'أيام' : 'يوم');
+const state = { me: null, shop: null, google: null, member: null, keys: {}, stopScan: null, branch: (() => { try { return localStorage.getItem('nq_branch') || ''; } catch { return ''; } })() };
 const branchName = (id) => (state.shop.locations.find((l) => l.id === id) || {}).name || '';
 const view = $('#view');
 const isOwner = () => state.me && state.me.user.role === 'owner';
@@ -44,10 +46,10 @@ function renderSubBanner() {
     tpl = html`<div class="alert bad sub-banner"><div><b>خلصت فترة ${sub.paid ? 'الاشتراك' : 'التجربة'} ⏳</b> الكاشير متوقف لحد ما تفعّل الاشتراك. زبائنك ونقاطهم محفوظين.</div>
       ${link(ask) ? html`<a class="btn sm wa" href="${link(ask)}" target="_blank" rel="noopener">فعّل الاشتراك</a>` : ''}</div>`;
   } else if (sub.state === 'trial' && isOwner()) {
-    tpl = html`<div class="alert warn sub-banner"><div>🎁 <b>تجربة مجانية:</b> باقي <b class="num">${sub.daysLeft}</b> ${sub.daysLeft === 1 ? 'يوم' : 'يوم'}. إنت على الباقة المميزة بكل ميزاتها، والباقات من ${PLAN_DEFAULTS.basic.month} دينار بالشهر.</div>
+    tpl = html`<div class="alert warn sub-banner"><div>🎁 <b>تجربة مجانية:</b> باقي <b class="num">${sub.daysLeft}</b> ${dayWord(sub.daysLeft)}. إنت على الباقة المميزة بكل ميزاتها، والباقات من ${PLAN_DEFAULTS.basic.month} دينار بالشهر.</div>
       <a class="btn sm" href="#settings/billing">اختار باقتك</a></div>`;
   } else if (sub.state === 'active' && sub.daysLeft <= 5 && isOwner()) {
-    tpl = html`<div class="alert warn sub-banner"><div>اشتراكك بيخلص بعد <b class="num">${sub.daysLeft}</b> يوم.</div>
+    tpl = html`<div class="alert warn sub-banner"><div>اشتراكك بيخلص بعد <b class="num">${sub.daysLeft}</b> ${dayWord(sub.daysLeft)}.</div>
       ${link(`مرحبا، بدي أجدد اشتراك نقاطك لمحل ${state.shop.name}`) ? html`<a class="btn sm wa" href="${link(`مرحبا، بدي أجدد اشتراك نقاطك لمحل ${state.shop.name}`)}" target="_blank" rel="noopener">جدّد</a>` : ''}</div>`;
   }
   box.classList.toggle('hidden', !tpl);
@@ -233,9 +235,14 @@ async function findMember(code, fromCamera = false) {
   }
 }
 
+// مفتاح لكل نوع حركة (نقاط، صرف، شحن، دفع): إذا النت قطع والكاشير كبس كمان مرة، السيرفر بيعرفها نفس الحركة
+// وما بيسجّلها مرتين. وكل نوع إله مفتاحه، عشان صرف بعد إضافة نقاط فشلت ما ينحسب «مكرر»
+const opKey = (kind) => (state.keys[kind] ||= newKey());
+const opDone = (kind) => { delete state.keys[kind]; };
+
 function selectMember(m) {
   state.member = m;
-  state.key = newKey();
+  state.keys = {};
   if ((location.hash || '#cashier') !== '#cashier') location.hash = '#cashier';
   else showMember(m);
 }
@@ -344,9 +351,10 @@ function bindCredit(m) {
     const cur = state.shop.currency;
     if (!confirm(kind === 'topup' ? `شحن ${v} ${cur} لـ ${m.name}${state.shop.perks.creditBonus ? ` (+${state.shop.perks.creditBonus}% هدية)` : ''}؟` : `دفع ${v} ${cur} من رصيد ${m.name}؟`)) return;
     try {
-      const r = await api(`/api/members/${m.id}/credit/${kind}`, { method: 'POST', body: { amount: v, key: newKey(), branch: state.branch } });
+      const r = await api(`/api/members/${m.id}/credit/${kind}`, { method: 'POST', body: { amount: v, key: opKey(kind), branch: state.branch } });
+      opDone(kind);
       state.member = r.member;
-      toast(kind === 'topup' ? `انشحن ✅ رصيده ${fmt(r.member.credit)} ${cur}` : `انخصم ✅ باقي ${fmt(r.member.credit)} ${cur}`, 'ok');
+      toast(r.duplicate ? 'هاي الحركة انسجلت قبل، ما انحسبت مرتين' : kind === 'topup' ? `انشحن ✅ رصيده ${fmt(r.member.credit)} ${cur}` : `انخصم ✅ باقي ${fmt(r.member.credit)} ${cur}`, 'ok');
       if (r.push) pushToast(r.push);
       showMember(r.member);
       if (kind === 'spend' && state.shop.programType === 'points' && $('#amount')) { $('#amount').value = v; $('#amount').dispatchEvent(new Event('input')); $('#amount').focus(); }
@@ -384,8 +392,8 @@ async function earn(m, body) {
   const btn = $('#earnBtn');
   btn.disabled = true;
   try {
-    const r = await api(`/api/members/${m.id}/earn`, { method: 'POST', body: { ...body, key: state.key, branch: state.branch } });
-    state.key = newKey();
+    const r = await api(`/api/members/${m.id}/earn`, { method: 'POST', body: { ...body, key: opKey('earn'), branch: state.branch } });
+    opDone('earn');
     state.member = r.member;
     toast(r.duplicate ? 'هاي الحركة انسجلت قبل' : `+${fmt(r.delta)} ${state.shop.unit} لـ ${m.name}${r.reasons && r.reasons.length ? ` (${r.reasons.join('، ')})` : ''}`, 'ok');
     if (r.refBonus) toast(`👥 +${fmt(r.refBonus)} هدية الدعوة إله ولصاحبه`, 'ok');
@@ -410,10 +418,10 @@ async function redeem(m) {
   const btn = $('#redeemBtn');
   btn.disabled = true;
   try {
-    const r = await api(`/api/members/${m.id}/redeem`, { method: 'POST', body: { key: state.key, branch: state.branch } });
-    state.key = newKey();
+    const r = await api(`/api/members/${m.id}/redeem`, { method: 'POST', body: { key: opKey('redeem'), branch: state.branch } });
+    opDone('redeem');
     state.member = r.member;
-    toast(`🎁 انصرفت المكافأة لـ ${m.name}`, 'ok');
+    toast(r.duplicate ? 'هاي المكافأة انصرفت قبل، ما انصرفت مرتين' : `🎁 انصرفت المكافأة لـ ${m.name}`, 'ok');
     showMember(r.member);
   } catch (e) {
     toast(e.message, 'bad');
@@ -1649,14 +1657,14 @@ async function loadBilling() {
   try { b = await api('/api/billing'); } catch (e) { render(box, html`<h2>💳 الاشتراك</h2><p class="alert bad">${e.message}</p>`); return; }
   const sub = b.subscription;
   const mine = sub.state === 'active' ? b.plan.chosen : null;
+  const tierName = (t) => b.plans[t === 'basic' ? 'basic' : 'pro'].name;
+  const tierThe = (t) => (t === 'basic' ? 'الأساسية' : 'المميزة');
   const status = sub.state === 'trial' ? html`<p class="alert warn small">🎁 تجربة مجانية على الباقة المميزة بكل ميزاتها: باقي <b class="num">${sub.daysLeft}</b> يوم. اختار باقتك قبل ما تخلص.</p>`
     : sub.state === 'active' ? html`<p class="alert ok small">✅ مشترك بالباقة <b>${tierThe(mine)}</b> لحد <b>${fmtDay(sub.until)}</b> (باقي <span class="num">${sub.daysLeft}</span> يوم).</p>`
       : html`<p class="alert bad small">⏳ الاشتراك خالص. الكاشير متوقف لحد ما تجدّد، وزبائنك ونقاطهم محفوظين.</p>`;
   let tier = mine || 'pro';
   let period = 'month';
   const wa = b.whatsapp ? `https://wa.me/${b.whatsapp}?text=${encodeURIComponent(`مرحبا، بدي أشترك بنقاطك لمحل ${state.shop.name}`)}` : null;
-  const tierName = (t) => b.plans[t === 'basic' ? 'basic' : 'pro'].name;
-  const tierThe = (t) => (t === 'basic' ? 'الأساسية' : 'المميزة');
   render(box, html`<h2>💳 الاشتراك</h2>${status}
     <div class="tier-pick" id="tierPick" role="radiogroup" aria-label="الباقة">${['basic', 'pro'].map((t) => html`<div class="tier-card ${t === tier ? 'on' : ''}" role="radio" tabindex="0" aria-checked="${t === tier}" data-tier="${t}">
         <b>${t === 'pro' ? '💎' : '⭐'} ${b.plans[t].name} ${mine === t ? html`<span class="badge ok">باقتك</span>` : ''}</b>

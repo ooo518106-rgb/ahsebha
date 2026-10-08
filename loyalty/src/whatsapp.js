@@ -92,21 +92,24 @@ export async function verifySignature(appSecret, raw, header) {
   return crypto.subtle.verify('HMAC', key, sig, new TextEncoder().encode(raw));
 }
 
+// أي إشي بالإشعار مش قائمة (إشعار غلط أو مش من Meta) بنعامله كقائمة فاضية
+const list = (v) => (Array.isArray(v) ? v : []);
+const changesOf = (payload) => list(payload && payload.entry).flatMap((entry) => list(entry && entry.changes).map((ch) => ({ entry, ch: ch || {} })));
+
 // الرسائل الواصلة من الـ webhook: [{ from, id, name, text, at }]
 export function incoming(payload, phoneId) {
   const out = [];
-  for (const entry of (payload && payload.entry) || []) {
-    for (const ch of entry.changes || []) {
-      const v = ch.value || {};
-      if (phoneId && v.metadata && v.metadata.phone_number_id && v.metadata.phone_number_id !== phoneId) continue;
-      const names = Object.fromEntries((v.contacts || []).map((ct) => [ct.wa_id, ct.profile && ct.profile.name]));
-      for (const msg of v.messages || []) {
-        const text = msg.type === 'text' ? msg.text && msg.text.body
-          : msg.type === 'button' ? msg.button && (msg.button.text || msg.button.payload)
-            : msg.type === 'interactive' ? (msg.interactive.button_reply || msg.interactive.list_reply || {}).title
-              : null;
-        out.push({ from: normPhone(msg.from), id: msg.id, name: names[msg.from] || '', text: text ? String(text).trim().slice(0, 1000) : '', type: msg.type, at: Number(msg.timestamp) * 1000 || Date.now() });
-      }
+  for (const { ch } of changesOf(payload)) {
+    const v = ch.value || {};
+    if (phoneId && v.metadata && v.metadata.phone_number_id && v.metadata.phone_number_id !== phoneId) continue;
+    const names = Object.fromEntries(list(v.contacts).map((ct) => [ct && ct.wa_id, ct && ct.profile && ct.profile.name]));
+    for (const msg of list(v.messages)) {
+      if (!msg || typeof msg !== 'object') continue;
+      const text = msg.type === 'text' ? msg.text && msg.text.body
+        : msg.type === 'button' ? msg.button && (msg.button.text || msg.button.payload)
+          : msg.type === 'interactive' ? ((msg.interactive && (msg.interactive.button_reply || msg.interactive.list_reply)) || {}).title
+            : null;
+      out.push({ from: normPhone(msg.from), id: msg.id, name: names[msg.from] || '', text: text ? String(text).trim().slice(0, 1000) : '', type: msg.type, at: Number(msg.timestamp) * 1000 || Date.now() });
     }
   }
   return out;
@@ -116,15 +119,13 @@ export function incoming(payload, phoneId) {
 // Meta بترد «تمام» على الإرسال، وبعدين بتبعت إشعار حالة «failed» فيه السبب. [{ id, to, code, message }]
 export function failures(payload, phoneId) {
   const out = [];
-  for (const entry of (payload && payload.entry) || []) {
-    for (const ch of entry.changes || []) {
-      const v = ch.value || {};
-      if (phoneId && v.metadata && v.metadata.phone_number_id && v.metadata.phone_number_id !== phoneId) continue;
-      for (const st of v.statuses || []) {
-        if (st.status !== 'failed' || !st.id) continue;
-        const er = (st.errors && st.errors[0]) || {};
-        out.push({ id: String(st.id), to: normPhone(st.recipient_id), code: Number(er.code) || null, message: String((er.error_data && er.error_data.details) || er.message || er.title || 'failed').slice(0, 300) });
-      }
+  for (const { ch } of changesOf(payload)) {
+    const v = ch.value || {};
+    if (phoneId && v.metadata && v.metadata.phone_number_id && v.metadata.phone_number_id !== phoneId) continue;
+    for (const st of list(v.statuses)) {
+      if (!st || st.status !== 'failed' || !st.id) continue;
+      const er = list(st.errors)[0] || {};
+      out.push({ id: String(st.id), to: normPhone(st.recipient_id), code: Number(er.code) || null, message: String((er.error_data && er.error_data.details) || er.message || er.title || 'failed').slice(0, 300) });
     }
   }
   return out;
@@ -134,15 +135,13 @@ export function failures(payload, phoneId) {
 // [{ kind: 'template'|'quality', event, name, reason }]
 export function accountEvents(payload, wabaId) {
   const out = [];
-  for (const entry of (payload && payload.entry) || []) {
-    if (wabaId && entry.id && String(entry.id) !== wabaId) continue;
-    for (const ch of entry.changes || []) {
-      const v = ch.value || {};
-      const event = String(v.event || '').toUpperCase().slice(0, 40);
-      if (!event) continue;
-      if (ch.field === 'message_template_status_update') out.push({ kind: 'template', event, name: String(v.message_template_name || ''), reason: String(v.reason || (v.other_info && v.other_info.description) || '').slice(0, 200) });
-      else if (ch.field === 'phone_number_quality_update') out.push({ kind: 'quality', event, name: String(v.display_phone_number || ''), reason: String(v.current_limit || '').slice(0, 40) });
-    }
+  for (const { entry, ch } of changesOf(payload)) {
+    if (wabaId && entry && entry.id && String(entry.id) !== wabaId) continue;
+    const v = ch.value || {};
+    const event = String(v.event || '').toUpperCase().slice(0, 40);
+    if (!event) continue;
+    if (ch.field === 'message_template_status_update') out.push({ kind: 'template', event, name: String(v.message_template_name || ''), reason: String(v.reason || (v.other_info && v.other_info.description) || '').slice(0, 200) });
+    else if (ch.field === 'phone_number_quality_update') out.push({ kind: 'quality', event, name: String(v.display_phone_number || ''), reason: String(v.current_limit || '').slice(0, 40) });
   }
   return out;
 }
@@ -152,13 +151,11 @@ export function hookSummary(payload, phoneId) {
   const fields = new Set();
   let ours = 0;
   let other = 0;
-  for (const entry of (payload && payload.entry) || []) {
-    for (const ch of entry.changes || []) {
-      if (ch.field) fields.add(String(ch.field).slice(0, 40));
-      const n = ((ch.value && ch.value.messages) || []).length;
-      const pid = ch.value && ch.value.metadata && ch.value.metadata.phone_number_id;
-      if (pid && pid === phoneId) ours += n; else other += n;
-    }
+  for (const { ch } of changesOf(payload)) {
+    if (ch.field) fields.add(String(ch.field).slice(0, 40));
+    const n = list(ch.value && ch.value.messages).length;
+    const pid = ch.value && ch.value.metadata && ch.value.metadata.phone_number_id;
+    if (pid && pid === phoneId) ours += n; else other += n;
   }
   return { fields: [...fields].slice(0, 5), ours, other, failed: failures(payload, phoneId).length };
 }

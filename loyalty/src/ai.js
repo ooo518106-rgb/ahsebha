@@ -10,6 +10,8 @@ const NO_EFFORT = new Set(['claude-haiku-4-5']);
 
 export const MAX_TURNS = 16; // آخر 16 رسالة من المحادثة بس
 export const MAX_CHARS = 600;
+const MAX_BOT_CHARS = 1000; // ردود الوكيل الطويلة بتنقص (المتصفح ممكن يبعت ردود مش من الوكيل)
+const MAX_TOTAL = 8000; // سقف المحادثة كلها، عشان التكلفة
 
 // المفتاح سري بـ Cloudflare: ANTHROPIC_API_KEY (Claude) أو GEMINI_API_KEY (Gemini). إذا الاتنين موجودين، Claude إلا إذا AI_PROVIDER=gemini
 export function aiConfig(env) {
@@ -35,11 +37,13 @@ export function cleanHistory(list) {
   const out = [];
   for (const m of list.slice(-MAX_TURNS)) {
     const role = m && m.role === 'assistant' ? 'assistant' : m && m.role === 'user' ? 'user' : null;
-    const text = String((m && m.content) || '').trim().slice(0, role === 'user' ? MAX_CHARS : 2000);
+    const text = String((m && m.content) || '').trim().slice(0, role === 'user' ? MAX_CHARS : MAX_BOT_CHARS);
     if (!role || !text) continue;
     if (out.length && out[out.length - 1].role === role) out[out.length - 1].content += `\n${text}`;
     else out.push({ role, content: text });
   }
+  let total = out.reduce((n, m) => n + m.content.length, 0);
+  while (out.length > 1 && total > MAX_TOTAL) total -= out.shift().content.length; // الأقدم أول
   while (out.length && out[0].role !== 'user') out.shift();
   if (!out.length || out[out.length - 1].role !== 'user') return null;
   return out;

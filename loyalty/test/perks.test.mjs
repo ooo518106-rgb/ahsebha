@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { runScheduled } from '../src/app.js';
 import { localTime } from '../src/perks.js';
+import { parseBirthday } from '../public/js/sheet.js';
 import { fakeDevice, setup, signup } from './helpers.mjs';
 
 const DAY = 864e5;
@@ -237,6 +238,9 @@ test('التقارير وملف Excel: للمالك بس، والأرقام صح
   assert.ok(text.startsWith('\ufeff"الاسم"'), 'BOM عشان Excel يقرأ العربي');
   assert.ok(text.includes(`"'=HYPERLINK(""x"")"`), 'المعادلات ما بتنفّذ بـ Excel');
   assert.ok(text.includes('"0791110021"'));
+  // عيد الميلاد يوم/شهر، والاستيراد بيقرأه نفس اليوم (مش بيقلب الشهر واليوم)
+  assert.ok(text.includes('"1/5"'), 'عيد الميلاد 1 أيار');
+  assert.deepEqual(parseBirthday('1/5'), { day: 1, month: 5 });
   // الموظف لأ
   await owner.post('/api/staff', { name: 'كاشير', email: 'rep-cashier@test.com', password: 'cashier-pass' });
   const staff = client();

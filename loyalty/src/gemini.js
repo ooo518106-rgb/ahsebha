@@ -29,10 +29,10 @@ export async function geminiModel(cfg) {
     const stable = ok.map((n) => [n, /^gemini-(\d+(?:\.\d+)?)-flash$/.exec(n)]).filter(([, m]) => m).sort((a, b) => Number(b[1][1]) - Number(a[1][1]));
     picked = stable.length ? stable[0][0] : ok.includes('gemini-flash-latest') ? 'gemini-flash-latest'
       : ok.find((n) => /flash/.test(n) && !/lite|image|tts|live|audio|thinking|exp/.test(n)) || 'gemini-flash-latest';
+    return picked;
   } catch {
-    picked = 'gemini-flash-latest';
+    return 'gemini-flash-latest'; // القائمة ما زبطت هالمرة: الاسم العام، وبنرجع نجرّب نختار بالطلب الجاي
   }
-  return picked;
 }
 
 // مخطط الأدوات (JSON Schema) بصيغة Gemini: الأنواع بحروف كبيرة، وبدون additionalProperties

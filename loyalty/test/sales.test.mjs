@@ -345,6 +345,38 @@ test('واتساب: الـ webhook موقّع، الوكيل بيرد ويفاو
   assert.equal(f.claude.length, calls);
 });
 
+test('المحادثة من المتصفح: ردود «الوكيل» الطويلة بتنقص، والمحادثة كلها إلها سقف', () => {
+  const long = 'ا'.repeat(1900);
+  const h = cleanHistory([{ role: 'user', content: 'مرحبا' }, { role: 'assistant', content: long }, { role: 'user', content: 'كم السعر؟' }]);
+  assert.equal(h[1].content.length, 1000);
+  const many = Array.from({ length: 16 }, (_, i) => ({ role: i % 2 ? 'assistant' : 'user', content: (i % 2 ? 'ب' : 'س').repeat(i % 2 ? 1000 : 600) }));
+  many.push({ role: 'user', content: 'آخر سؤال' });
+  const cut = cleanHistory(many);
+  assert.ok(cut.reduce((n, m) => n + m.content.length, 0) <= 8000);
+  assert.equal(cut[0].role, 'user');
+  assert.match(cut.at(-1).content, /آخر سؤال/);
+});
+
+test('واتساب: إشعار مش من Meta أو مكسور ما بيوقّع السيرفر، واللي سجّل بيضل «سجّل» حتى لو كتب «وقف»', async () => {
+  const f = fakes();
+  const p = await platform({ ANTHROPIC_API_KEY: 'sk-test', fetch: f.fetch, ...WA_ENV });
+  const meta = p.client();
+  for (const junk of [{ entry: 5 }, { entry: [{ changes: 7 }] }, { entry: [null] }, [], 'x']) {
+    assert.equal((await hook(meta, junk)).status, 200, JSON.stringify(junk));
+  }
+  // بدون توقيع: مرفوض، والتشخيص ما بينكتب أكتر من مرة بالدقيقة
+  const raw = JSON.stringify({ entry: 5 });
+  assert.equal((await meta.req('POST', '/api/wa/webhook', raw, { 'x-hub-signature-256': sign(raw, 'wrong') })).status, 401);
+  assert.equal((await p.admin.get('/api/admin/wa/number')).data.lastHook.signed, true, 'آخر موقّع ما انمسح');
+  // محل سجّل بنقاطك وبعدين كتب «وقف»
+  await hook(meta, incomingMsg('962791000001', 'مرحبا'));
+  await meta.flush();
+  const id = (await p.admin.get('/api/admin/sales')).data.prospects[0].id;
+  await p.admin.put(`/api/admin/prospects/${id}`, { status: 'won' });
+  await hook(meta, incomingMsg('962791000001', 'وقف'));
+  assert.equal((await p.admin.get('/api/admin/sales')).data.prospects[0].status, 'won');
+});
+
 test('أرقام واتساب ورسائل الإيقاف', () => {
   assert.equal(waNumber('0791234567'), '962791234567');
   assert.equal(waNumber('+962 79 123 4567'), '962791234567');

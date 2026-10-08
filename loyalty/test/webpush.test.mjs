@@ -173,7 +173,7 @@ test('من البطاقة للإشعار: اشتراك، إشعار نقاط، �
   assert.equal((await guest.req('DELETE', `/api/cards/${token}/push`, { endpoint })).status, 200);
   assert.equal((await db.get('SELECT COUNT(*) AS n FROM push_subs WHERE member_id = ?', id)).n, 0);
   await guest.post(`/api/cards/${token}/push`, { endpoint, keys: { p256dh: d.p256dh, auth: d.auth } });
-  await guest.post(`/api/cards/${token}/delete`, {});
+  await guest.post(`/api/cards/${token}/delete`, { phone: '0791110000' });
   assert.equal((await db.get('SELECT COUNT(*) AS n FROM push_subs WHERE member_id = ?', id)).n, 0);
 
   // ملف التطبيق للشاشة الرئيسية

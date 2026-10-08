@@ -137,7 +137,7 @@ test('Apple Wallet من الإعداد للبطاقة الموقّعة وخدم�
   // حذف البطاقة بيشيل التسجيل
   assert.equal((await guest.req('DELETE', reg, undefined, auth)).status, 200);
   await guest.req('POST', reg, { pushToken: 'abc' }, auth);
-  await guest.post(`/api/cards/${token}/delete`, {});
+  await guest.post(`/api/cards/${token}/delete`, { phone: '0791234567' });
   assert.equal((await db.get('SELECT COUNT(*) AS n FROM apple_regs')).n, 0);
 });
 

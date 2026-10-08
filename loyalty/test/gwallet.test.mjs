@@ -103,7 +103,7 @@ test('من البداية للنهاية: مزامنة الفئة، رابط ا�
   await guest.get(`/c/${other.data.token}/google`);
   const otherId = (await c.get(`/api/members/lookup?code=${other.data.token}`)).data.member.id;
   const beforeDelete = google.calls.length;
-  await guest.post(`/api/cards/${other.data.token}/delete`, {});
+  await guest.post(`/api/cards/${other.data.token}/delete`, { phone: '0799990000' });
   await guest.flush();
   const deactivate = google.calls.slice(beforeDelete).find((x) => x.method === 'PATCH');
   assert.ok(deactivate.url.endsWith(encodeURIComponent(`3388.loy_m${otherId}`)));

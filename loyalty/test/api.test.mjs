@@ -331,11 +331,13 @@ test('حذف البيانات: الزبون من صفحة بطاقته، وال�
   const m = (await owner.get(`/api/members/lookup?code=${j.data.token}`)).data.member;
   await owner.post(`/api/members/${m.id}/earn`, { amount: 30 });
 
-  assert.equal((await guest.post(`/api/cards/${j.data.token}/delete`, {})).status, 200);
+  assert.equal((await guest.post(`/api/cards/${j.data.token}/delete`, {})).status, 400, 'بدون رقم الجوال');
+  assert.equal((await guest.post(`/api/cards/${j.data.token}/delete`, { phone: '0791119999' })).status, 403, 'رقم غلط (متل كاشير معه الـ QR بس)');
+  assert.equal((await guest.post(`/api/cards/${j.data.token}/delete`, { phone: '+962 79 111 2222' })).status, 200);
   assert.equal((await guest.get(`/api/cards/${j.data.token}`)).status, 404);
   assert.equal((await owner.get('/api/members')).data.total, 0);
   assert.equal((await owner.get('/api/activity')).data.recent.length, 0, 'السجل انمسح كمان');
-  assert.equal((await guest.post(`/api/cards/${j.data.token}/delete`, {})).status, 404);
+  assert.equal((await guest.post(`/api/cards/${j.data.token}/delete`, { phone: '0791112222' })).status, 404);
   // نفس الرقم بيقدر ينضم من جديد بعد الحذف
   assert.equal((await guest.post(`/api/shops/${shop.slug}/join`, { name: 'سلمى', phone: '0791112222' })).status, 201);
 

@@ -440,7 +440,7 @@ async function cardPushTest(c, token) {
   const { m, sub } = await saveSubscription(c, token);
   await rateLimit(c, `pushtest:${m.id}`, 8, 60 * MIN, 'جرّبت كتير، استنى شوي وجرّب كمان مرة');
   const shop = await shopRow(c.db, m.shop_id);
-  const r = await pushTo(c, [sub], () => ({
+  const r = await pushTo(c, [sub], () => demoSafe(shop, {
     title: shop.name,
     body: isEn(m) ? 'All set! Notifications work ✅ You’ll be notified every time you earn points.' : 'تمام! الإشعارات شغّالة ✅ رح يوصلك إشعار كل ما تنضافلك نقاط.',
     icon: logoUrl(shop, c.origin),
@@ -539,7 +539,7 @@ async function notifyAdmin(c, message) {
 async function notifyMember(c, member, message) {
   const subs = await c.db.all('SELECT * FROM push_subs WHERE member_id = ?', member.id);
   if (!subs.length) return { devices: 0 };
-  const job = pushTo(c, subs, () => ({ ...message, url: `${c.origin}/c/${member.token}` }))
+  const job = pushTo(c, subs, () => demoSafe(c.shop, { ...message, url: `${c.origin}/c/${member.token}` }))
     .catch((e) => { console.error('web push:', e.message); return null; });
   c.waitUntil(job);
   let timer;
@@ -644,12 +644,19 @@ const cronSubs = (c, m) => c.db.all('SELECT * FROM push_subs WHERE member_id = ?
 async function cronSend(c, shop, m, subs, message) {
   if (!subs.length) return;
   c.budget -= subs.length;
-  await pushTo(c, subs, () => ({ icon: logoUrl(shop, c.origin), url: `${c.origin}/c/${m.token}`, title: shop.name, ...message }));
+  await pushTo(c, subs, () => demoSafe(shop, { icon: logoUrl(shop, c.origin), url: `${c.origin}/c/${m.token}`, title: shop.name, ...message }));
 }
+
+// حساب العرض: أي زائر بيقدر يغيّر اسم المحل ونصوصه، فإشعاراته لأجهزة حقيقية بنص ثابت (ما بتنستعمل لرسائل غريبة)
+const demoSafe = (shop, message) => (shop && shop.demo
+  ? { ...message, title: 'كوفي العرض (تجربة)', body: 'هيك بيوصل الإشعار لزبائنك مع كل نقاط ومكافأة ✅ هاد حساب العرض بنقاطك' }
+  : message);
 
 // 🎂 يوم عيد الميلاد (بتوقيت المحل، من 9 الصبح): الهدية بتنضاف للرصيد وبيوصله إشعار
 async function birthdayJob(c, shopOf, now) {
-  const mds = [...new Set([-1, 0, 1].map((d) => new Date(now + d * DAY).toISOString().slice(5, 10)).concat('02-29'))];
+  const near = [-1, 0, 1].map((d) => new Date(now + d * DAY).toISOString().slice(5, 10));
+  // مواليد 29 شباط بيحتفلوا 28 شباط بالسنين العادية، فبنجيبهم بس حوالين آخر شباط (وما بياخدوا من دور غيرهم طول السنة)
+  const mds = [...new Set(near.some((d) => d >= '02-27' && d <= '03-01') ? [...near, '02-29'] : near)];
   // اللي أخدوا هديتهم هالسنة بيجوا آخر الدور، عشان ما ياخدوا مكان اللي لسا ما أخدوها
   const rows = await c.db.all(
     `SELECT m.* FROM members m JOIN shops s ON s.id = m.shop_id
@@ -742,7 +749,7 @@ async function winbackJob(c, shopOf, now) {
     if (!r.changes) continue;
     const first = perks.firstName(m.name);
     const en = isEn(m) && !shop.winback_text;
-    const text = (shop.winback_text || (en ? 'We miss you, {الاسم} ☕ Come see us soon' : 'اشتقنالك يا {الاسم} ☕ مرّ علينا قريب')).replaceAll('{الاسم}', first);
+    const text = (shop.winback_text || (en ? 'We miss you, {الاسم} ☕ Come see us soon' : 'اشتقنالك يا {الاسم} ☕ مرّ علينا قريب')).replaceAll('{الاسم}', () => first);
     const body = shop.winback_double ? `${text}${en ? ' — double points for 3 days 🎁' : ' — نقاطك دبل لـ 3 أيام 🎁'}` : text;
     await cronSend(c, shop, m, subs, { body });
     n++;
@@ -756,10 +763,10 @@ async function expiryJob(c, shopOf, now) {
   const ends = `${activity} + s.expiry_months * ${MONTH}`;
   const warn = await c.db.all(
     `SELECT m.*, ${ends} AS ends FROM members m JOIN shops s ON s.id = m.shop_id
-     WHERE s.expiry_months > 0 AND m.balance > 0 AND ${ends} - ${7 * DAY} < ? AND ${ends} > ? AND ${PRO_SQL} AND ${c.live.sql}
+     WHERE s.expiry_months > 0 AND m.balance > 0 AND ${ends} - ${7 * DAY} < ? AND ${PRO_SQL} AND ${c.live.sql}
        AND (m.expiry_warned_at IS NULL OR m.expiry_warned_at < ${activity})
        AND EXISTS (SELECT 1 FROM push_subs p WHERE p.member_id = m.id)
-     ORDER BY ends LIMIT 200`, now, now, ...c.live.args,
+     ORDER BY ends LIMIT 200`, now, ...c.live.args,
   );
   let warned = 0;
   for (const m of warn) {
@@ -770,7 +777,8 @@ async function expiryJob(c, shopOf, now) {
     const subs = await cronSubs(c, m);
     if (subs.length > c.budget) break;
     await c.db.run('UPDATE members SET expiry_warned_at = ? WHERE id = ?', now, m.id);
-    const days = Math.max(1, Math.round((m.ends - now) / DAY));
+    // اللي فاتت صلاحيته وهو ما وصله تذكير (متل محل كان متوقف ورجع): بياخد أسبوع من هلق
+    const days = Math.max(1, Math.round((m.ends > now ? m.ends - now : 7 * DAY) / DAY));
     const body = isEn(m) ? `⏳ Your ${m.balance} ${unitEn(shop, m.balance)} expire in ${days} day${days === 1 ? '' : 's'}. Drop by and use them ☕`
       : `⏳ عندك ${m.balance} ${unitLabel(shop)} بتنتهي بعد ${days} ${days === 1 ? 'يوم' : 'أيام'}. مرّ علينا واستعملها ☕`;
     if (!subs.length) continue;
@@ -779,7 +787,9 @@ async function expiryJob(c, shopOf, now) {
   }
   const due = await c.db.all(
     `SELECT m.* FROM members m JOIN shops s ON s.id = m.shop_id WHERE s.expiry_months > 0 AND m.balance > 0 AND ${ends} <= ? AND ${PRO_SQL} AND ${c.live.sql}
-     ORDER BY ${ends} LIMIT 100`, now, ...c.live.args,
+       AND (NOT EXISTS (SELECT 1 FROM push_subs p WHERE p.member_id = m.id)
+         OR (m.expiry_warned_at >= ${activity} AND m.expiry_warned_at <= ?))
+     ORDER BY ${ends} LIMIT 100`, now, ...c.live.args, now - 6 * DAY,
   );
   let expired = 0;
   for (const m of due) {
@@ -852,7 +862,8 @@ async function giftRefundJob(c, now) {
 // 📊 ملخص اليوم لصاحب المحل الساعة 10 بالليل (بتوقيته)، للي مفعّل الإشعارات على اللوحة
 async function summaryJob(c, now) {
   const shops = await c.db.all(
-    `SELECT s.* FROM shops s WHERE ${PRO_SQL} AND EXISTS (SELECT 1 FROM users u JOIN user_push_subs p ON p.user_id = u.id WHERE u.shop_id = s.id AND u.role = 'owner')`,
+    `SELECT s.* FROM shops s WHERE s.demo = 0 AND ${PRO_SQL} AND ${c.live.sql} AND EXISTS (SELECT 1 FROM users u JOIN user_push_subs p ON p.user_id = u.id WHERE u.shop_id = s.id AND u.role = 'owner')`,
+    ...c.live.args,
   );
   let n = 0;
   for (const shop of shops) {
@@ -1130,6 +1141,15 @@ async function cardBirthday(c, token) {
   return json({ ok: true, birthday: md });
 }
 
+// صفحة البطاقة مفتوحة لأي حدا معه رابطها، والرابط هو نفسه الـ QR اللي بيمسحه الكاشير.
+// فالأوامر اللي بتاخد من الزبون (إهداء الرصيد، حذف البطاقة) بتطلب رقم جواله كمان، والكاشير بيشوفه مخفي
+async function confirmPhone(c, shop, m) {
+  const raw = normPhone(c.body.phone);
+  if (raw.length < 7) fail(400, 'اكتب رقم جوالك للتأكيد');
+  await rateLimit(c, `confirm:${m.id}`, 8, 60 * MIN, 'محاولات كتير، جرّب بعد ساعة');
+  if (!phoneForms(raw, shop.country).includes(m.phone)) fail(403, 'رقم الجوال مش نفس رقم البطاقة');
+}
+
 // ─── 🎁 إهداء رصيد لصاحب ───
 const GIFT_DAYS = 30;
 async function createGift(c, token) {
@@ -1139,6 +1159,7 @@ async function createGift(c, token) {
   if (!shop.credit_on) fail(400, 'الرصيد مش مفعّل بهالمحل');
   const amount = readMoney(c.body.amount);
   if (amount < 500) fail(400, 'أقل هدية نص دينار');
+  await confirmPhone(c, shop, m);
   await rateLimit(c, `gift:${m.id}`, 5, 24 * 60 * MIN, 'بعثت هدايا كتير اليوم');
   const code = randomToken();
   const now = Date.now();
@@ -1225,11 +1246,12 @@ async function cardReview(c, token) {
   return json({ ok: true, googleUrl: stars >= 4 && shop.review_url ? shop.review_url : null }, 201);
 }
 
-// الزبون بيحذف بطاقته وبياناته بنفسه (رابط البطاقة نفسه هو الإثبات)
+// الزبون بيحذف بطاقته وبياناته بنفسه (رابط البطاقة، ورقم جواله للتأكيد)
 async function deleteCard(c, token) {
   const m = await c.db.get('SELECT * FROM members WHERE token = ?', token);
   if (!m) fail(404, 'ما لقينا هالبطاقة');
   const shop = await shopRow(c.db, m.shop_id);
+  await confirmPhone(c, shop, m);
   await deleteMember(c, shop, m);
   return json({ ok: true });
 }
@@ -1409,7 +1431,7 @@ async function billing(c) {
     limits: BASIC_LIMITS,
     currency: 'JOD',
     cliq: await cliqInfo(c.db),
-    whatsapp: /^\d{8,15}$/.test(String(c.env.WHATSAPP_NUMBER || '')) ? String(c.env.WHATSAPP_NUMBER) : null,
+    whatsapp: ownerWhatsapp(c.env),
     payments: payments.map(paymentView),
   });
 }
@@ -1514,7 +1536,11 @@ async function signup(c) {
   await storeDefaultLogo(c.db, shop);
   const reseller = await resellerByCode(c.db, b.partner);
   if (reseller) await c.db.run('UPDATE shops SET reseller_id = ? WHERE id = ?', reseller.id, shop.id);
-  if (offer) await c.db.run('UPDATE offers SET shop_id = ?, used_at = ? WHERE code = ?', shop.id, now, offer.code);
+  if (offer) {
+    // العرض لمرة وحدة: إذا تسجيلين بنفس اللحظة، واحد بس بياخد التجربة الأطول
+    const claim = await c.db.run('UPDATE offers SET shop_id = ?, used_at = ? WHERE code = ? AND used_at IS NULL', shop.id, now, offer.code);
+    if (!claim.changes) await c.db.run('UPDATE shops SET active_until = ? WHERE id = ?', now + TRIAL_DAYS * DAY, shop.id);
+  }
   // المحل اللي حكى معه وكيل المبيعات (من العرض، أو من رابطه الخاص /?p=…)
   const prospectId = (offer && offer.prospect_id) || ((await prospectByCode(c.db, b.prospect)) || {}).id;
   if (prospectId) await c.db.run("UPDATE prospects SET status = 'won', shop_id = ? WHERE id = ?", shop.id, prospectId);
@@ -1529,10 +1555,14 @@ async function demoLogin(c) {
   await rateLimit(c, `demo:${c.ip}`, 20, 60 * MIN, 'جرّبت كتير، استنى شوي');
   let owner = await c.db.get('SELECT * FROM users WHERE email = ?', DEMO_EMAIL);
   if (!owner || (await getSetting(c.db, 'demo_version')) !== String(DEMO_VERSION)) {
-    await seedDemo(c.db);
-    await setSetting(c.db, 'demo_day', localDayKey('JO'));
-    await setSetting(c.db, 'demo_version', String(DEMO_VERSION));
+    // طلب واحد بس بيعيد تعبئة العرض (اللي غيّر رقم النسخة)، عشان زائرين بنفس اللحظة ما يعبّوه مرتين
+    const claim = await c.db.run("INSERT INTO platform_settings (k, v) VALUES ('demo_version', ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v WHERE v <> excluded.v", String(DEMO_VERSION));
+    if (claim.changes || !owner) {
+      await seedDemo(c.db);
+      await setSetting(c.db, 'demo_day', localDayKey('JO'));
+    }
     owner = await c.db.get('SELECT * FROM users WHERE email = ?', DEMO_EMAIL);
+    if (!owner) fail(503, 'العرض عم يتجهّز، جرّب كمان ثانية');
   }
   const token = await auth.createSession(c.db, owner.id);
   return json({ ok: true }, 200, { 'set-cookie': auth.sessionCookie(token, c.req) });
@@ -1564,7 +1594,7 @@ async function me(c) {
     plan: planInfo(c.shop),
     pushCount: (await c.db.get('SELECT COUNT(DISTINCT member_id) AS n FROM push_subs WHERE shop_id = ?', c.shop.id)).n,
     userPush: (await c.db.get('SELECT COUNT(*) AS n FROM user_push_subs WHERE user_id = ?', c.user.id)).n,
-    whatsapp: /^\d{8,15}$/.test(String(c.env.WHATSAPP_NUMBER || '')) ? String(c.env.WHATSAPP_NUMBER) : null,
+    whatsapp: ownerWhatsapp(c.env),
     currencies: CURRENCIES,
     onboarding: c.user.role === 'owner' && !c.shop.demo ? await onboardingOf(c) : null,
     demo: c.shop.demo ? { sampleCard: (await c.db.get('SELECT token FROM members WHERE shop_id = ? ORDER BY visits DESC LIMIT 1', c.shop.id))?.token || null } : null,
@@ -1783,7 +1813,6 @@ function branchFor(c) {
 // إشعارات الزبون بلغته (عربي أو إنجليزي)
 const isEn = (m) => m && m.lang === 'en';
 const unitEn = (shop, n) => (shop.program_type === 'stamps' ? (n === 1 ? 'stamp' : 'stamps') : (n === 1 ? 'point' : 'points'));
-const unitFor = (shop, m, n) => (isEn(m) ? unitEn(shop, n) : unitLabel(shop));
 
 // ─── الحماية من تلاعب الموظفين (المالك مستثنى) ───
 const guardBig = (shop) => shop.guard_big ?? rewardCost(shop);
@@ -1995,7 +2024,9 @@ async function membersCsv(c) {
   const lines = [head.map(cell).join(',')];
   for (const m of rows) {
     const tier = perks.tierOf(c.shop, m.visits);
-    lines.push([m.name, m.phone, m.card_no, m.balance, m.lifetime, m.visits, m.redeemed, day(m.last_visit), day(m.created_at), m.birthday || '', tier ? tier.name : ''].map(cell).join(','));
+    // عيد الميلاد يوم/شهر (21/5)، نفس الشكل اللي بيقرأه استيراد الزبائن
+    const bday = m.birthday ? `${Number(m.birthday.slice(3))}/${Number(m.birthday.slice(0, 2))}` : '';
+    lines.push([m.name, m.phone, m.card_no, m.balance, m.lifetime, m.visits, m.redeemed, day(m.last_visit), day(m.created_at), bday, tier ? tier.name : ''].map(cell).join(','));
   }
   // BOM عشان Excel يقرأ العربي صح
   return new Response(`\ufeff${lines.join('\r\n')}\r\n`, {
@@ -2515,7 +2546,6 @@ const syncsMenu = (fn) => async (c, ...rest) => {
 const MAX_MENU_PDF = 6 * 1024 * 1024;
 const PDF_PART = 600 * 1024;
 const B64_RE = /^[A-Za-z0-9+/]+=*$/;
-const b64Size = (b64) => Math.floor((b64.length * 3) / 4) - (b64.endsWith('==') ? 2 : b64.endsWith('=') ? 1 : 0);
 const menuPdfUrl = (shop, origin) => (shop.menu_pdf ? `${origin}/media/menu-pdf/${shop.id}/${shop.menu_pdf}.pdf` : null);
 const menuPdfView = (shop, origin) => (shop.menu_pdf ? { url: menuPdfUrl(shop, origin), size: shop.menu_pdf_size } : null);
 
@@ -2710,7 +2740,7 @@ function prospectTools(c, p, channel) {
     }
     if (name === 'set_status') {
       if (!['lost', 'optout'].includes(input.status)) throw new Error('حالة مش معروفة');
-      await c.db.run('UPDATE prospects SET status = ? WHERE id = ?', input.status, p.id);
+      await c.db.run("UPDATE prospects SET status = ? WHERE id = ? AND status <> 'won'", input.status, p.id); // اللي سجّل بيضل «سجّل»
       return { saved: true };
     }
     throw new Error(`أداة مش معروفة: ${name}`);
@@ -2763,14 +2793,13 @@ async function salesChat(c) {
   const reply = r.refused || !r.text ? 'ما بقدر أساعد بهالسؤال 🙏 بس بقدر أحكيلك عن نقاطك وأسعارها، أو تشوف المحل التجريبي.' : r.text;
   if (prospect) {
     const now = Date.now();
-    await saveSalesMsg(c.db, prospect.id, 'in', messages[messages.length - 1].content.slice(-MAX_CHARS_IN), null, now, 'web');
+    await saveSalesMsg(c.db, prospect.id, 'in', messages[messages.length - 1].content, null, now, 'web'); // cleanHistory قصّها أصلاً
     await saveSalesMsg(c.db, prospect.id, 'agent', reply, null, now + 1, 'web');
     await c.db.run(`UPDATE prospects SET last_in_at = ?, last_out_at = ?, status = CASE WHEN status IN ${TALKING_FROM} THEN 'talking' ELSE status END WHERE id = ?`, now, now, prospect.id);
     if (!prospect.last_in_at) await notifyAdmin(c, { title: `💬 ${prospect.name} عم يحكي مع وكيل المبيعات`, body: messages[messages.length - 1].content.slice(0, 120), url: `${c.origin}/app#admin` });
   }
   return json({ reply, lead, offer: made ? { code: made.code, trialDays: made.trialDays } : null });
 }
-const MAX_CHARS_IN = 600;
 
 // 🔗 رابط المحل الخاص (/?p=…): بيرجّع اسمه للصفحة، وأول مرة بيفتحه بيوصلك إشعار
 const PROSPECT_RE = /^[a-z2-9]{8}$/;
@@ -2817,17 +2846,23 @@ async function sendIntro(c, wcfg, p, now = Date.now()) {
       err.stop = true;
       throw err;
     }
-    if (WA_RECIPIENT_ERRORS.has(e.code)) {
-      await c.db.run('UPDATE prospects SET status = ?, sent_at = NULL, error = ? WHERE id = ?', e.code === 131050 ? 'optout' : 'failed', msg, p.id);
-      return false;
-    }
-    // مشكلة بالحساب أو القالب: بنرجّع المحل للدور وبنوقف الإرسال التلقائي لحد ما تصلّحها
-    await c.db.run("UPDATE prospects SET status = 'new', sent_at = NULL, error = ? WHERE id = ?", msg, p.id);
-    await stopOutreach(c, msg);
+    if (await introFailed(c, p, e.code, msg)) return false;
     const err = new Error(msg);
     err.stop = true;
     throw err;
   }
+}
+
+// أول رسالة ما وصلت (فوراً، أو بإشعار من Meta بعدين). مشكلة بالرقم نفسه: المحل بيصير «ما انبعتت» وبيرجّع true.
+// مشكلة بالحساب أو القالب: المحل بيرجع للدور والإرسال التلقائي بيوقف لحد ما تصلّحها
+async function introFailed(c, p, code, msg) {
+  if (WA_RECIPIENT_ERRORS.has(code)) {
+    await c.db.run('UPDATE prospects SET status = ?, sent_at = NULL, error = ? WHERE id = ?', code === 131050 ? 'optout' : 'failed', msg, p.id);
+    return true;
+  }
+  await c.db.run("UPDATE prospects SET status = 'new', sent_at = NULL, error = ? WHERE id = ?", msg, p.id);
+  await stopOutreach(c, msg);
+  return false;
 }
 
 // كل 5 دقايق: لحد رسالتين، بأوقات الدوام بالأردن (10 الصبح لـ 8 المسا، مش الجمعة)، وضمن الحد باليوم
@@ -2871,8 +2906,9 @@ async function waWebhook(c) {
   const signed = await wa.verifySignature(wcfg.appSecret, raw, c.req.headers.get('x-hub-signature-256'));
   let payload;
   try { payload = JSON.parse(raw); } catch { payload = null; }
-  // للتشخيص بصفحة المبيعات: آخر إشعار وصل من Meta (بدون نص الرسائل)
-  await setSetting(c.db, 'wa_last_hook', JSON.stringify({ at: Date.now(), signed, ...wa.hookSummary(payload, wcfg.phoneId) }));
+  // للتشخيص بصفحة المبيعات: آخر إشعار وصل من Meta (بدون نص الرسائل). اللي مش موقّع (ممكن من أي حدا) مرة بالدقيقة بالكتير
+  const prev = signed ? null : await jsonSetting(c.db, 'wa_last_hook');
+  if (signed || !prev || prev.at < Date.now() - 60_000) await setSetting(c.db, 'wa_last_hook', JSON.stringify({ at: Date.now(), signed, ...wa.hookSummary(payload, wcfg.phoneId) }));
   if (!signed) return new Response('bad signature', { status: 401 });
   if (!payload) return new Response('bad json', { status: 400 });
   for (const m of wa.incoming(payload, wcfg.phoneId)) await waIncoming(c, wcfg, m);
@@ -2894,12 +2930,7 @@ async function waFailed(c, f) {
     await c.db.run('UPDATE prospects SET error = ? WHERE id = ?', msg, p.id);
     return;
   }
-  if (WA_RECIPIENT_ERRORS.has(f.code)) {
-    await c.db.run('UPDATE prospects SET status = ?, sent_at = NULL, error = ? WHERE id = ?', f.code === 131050 ? 'optout' : 'failed', msg, p.id);
-    return;
-  }
-  await c.db.run("UPDATE prospects SET status = 'new', sent_at = NULL, error = ? WHERE id = ?", msg, p.id);
-  await stopOutreach(c, msg);
+  await introFailed(c, p, f.code, msg);
 }
 
 // بيطفي الإرسال التلقائي وبيحفظ السبب (بيبيّن بصفحة المبيعات). الإشعار بس إذا كان شغّال
@@ -2961,7 +2992,7 @@ async function waIncoming(c, wcfg, m) {
   const ins = await saveSalesMsg(c.db, p.id, 'in', text, m.id, now);
   if (!ins.changes) return; // Meta بتعيد نفس الرسالة أحياناً
   if (wa.isOptOut(m.text, { firstReply: !p.last_in_at })) {
-    await c.db.run("UPDATE prospects SET status = 'optout', last_in_at = ? WHERE id = ?", now, p.id);
+    await c.db.run("UPDATE prospects SET status = CASE WHEN status = 'won' THEN status ELSE 'optout' END, last_in_at = ? WHERE id = ?", now, p.id);
     try {
       const bye = 'تمام، ما رح نرجع نبعتلك 🙏 وإذا احتجت إشي بأي وقت، إحنا هون.';
       await saveSalesMsg(c.db, p.id, 'agent', bye, await wa.sendText(wcfg, from, bye));
@@ -2981,6 +3012,12 @@ async function waIncoming(c, wcfg, m) {
   }).catch((e) => console.error('wa reply alert:', e.message)));
 }
 
+// الوكيل ما رح يرد على هالمحل: بنبلّغك (مرة باليوم لكل محل) عشان ترد إنت
+async function agentSilent(c, p, why) {
+  try { await rateLimit(c, `ai:wa:silent:${p.id}`, 1, DAY); } catch { return; }
+  await notifyAdmin(c, { title: `⚠️ الوكيل ما رد على ${p.name}`, body: `${why} · رد عليه إنت من 🎯 المبيعات`, url: `${c.origin}/app#admin` });
+}
+
 // رد الوكيل: بيستنى ثواني (إذا بعت كذا رسالة ورا بعض، بيرد مرة وحدة على آخرها)
 async function waReply(c, wcfg, prospectId, msgId) {
   const cfg = aiConfig(c.env);
@@ -2993,7 +3030,8 @@ async function waReply(c, wcfg, prospectId, msgId) {
     await rateLimit(c, `ai:wa:${p.id}`, 30, DAY);
     await rateLimit(c, 'ai:all', cfg.platform, DAY);
   } catch {
-    return; // ما منرد أكتر اليوم (بيحمينا من الردود الآلية اللي بترد على بعض)
+    // ما منرد أكتر اليوم (بيحمينا من الردود الآلية اللي بترد على بعض)، بس بنبلّغك ترد إنت
+    return agentSilent(c, p, 'الوكيل وصل حد الردود اليوم');
   }
   const rows = await c.db.all('SELECT role, text FROM sales_msgs WHERE prospect_id = ? ORDER BY id DESC LIMIT 16', p.id);
   const messages = cleanHistory(rows.reverse().map((r) => ({ role: r.role === 'in' ? 'user' : 'assistant', content: r.text })));
@@ -3003,7 +3041,7 @@ async function waReply(c, wcfg, prospectId, msgId) {
   const r = await chat(cfg, { system: await salesSystem(c, 'wa', p, offer), messages, tools: sales.waTools(), runTool, maxTokens: 3000 });
   await logAi(c, 'wa', r.usage);
   await noteAi(c, true, null, r.model);
-  if (r.refused || !r.text) return;
+  if (r.refused || !r.text) return agentSilent(c, p, 'الوكيل ما لقى رد مناسب على هالرسالة');
   let id;
   try {
     id = await wa.sendText(wcfg, p.wa, r.text);

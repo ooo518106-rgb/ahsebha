@@ -37,7 +37,7 @@ async function platform() {
     const r = await guest.post(`/api/shops/${shop.slug}/join`, { name, phone, ...extra });
     assert.equal(r.status, 201, JSON.stringify(r.data));
     const id = (await owner.get(`/api/members/lookup?code=${r.data.token}`)).data.member.id;
-    return { guest, token: r.data.token, id };
+    return { guest, token: r.data.token, id, phone };
   }
   async function staffClient(email = `cashier${Math.random().toString(36).slice(2)}@test.com`) {
     await owner.post('/api/staff', { name: 'أحمد', email, password: 'cashier-pass' });
@@ -232,6 +232,29 @@ test('صلاحية النقاط: بتبلّش من يوم التفعيل، تذ�
   assert.equal(after.member.balance, 0);
   assert.equal(after.txns[0].note, '⏳ انتهت صلاحية النقاط');
   assert.equal(after.txns[0].delta, -40);
+});
+
+test('صلاحية النقاط: محل وقف اشتراكه ورجع، زبائنه بياخدوا تذكير أسبوع قبل ما تنتهي نقاطهم (مش فجأة)', async () => {
+  const p = await platform();
+  const { owner, device, to } = p;
+  await p.admin.post(`/api/admin/shops/${p.shop.id}/plan`, { action: 'year' });
+  const sara = await p.customer('سارة', '0791110031');
+  await owner.post(`/api/members/${sara.id}/earn`, { amount: 40 });
+  await owner.put('/api/shop/perks', { expiryMonths: 6, winbackDays: 0, reviewOn: false });
+  const dev = await device(sara.guest, `/api/cards/${sara.token}/push`, 'sara-lapse');
+  // الاشتراك خلص قبل موعد التذكير: ولا تذكير ولا مسح
+  await p.db.run('UPDATE shops SET active_until = ? WHERE id = ?', Date.now() + 100 * DAY, p.shop.id);
+  let r = await p.cron(amman(12, 176));
+  assert.equal(r.expiryWarned, 0);
+  assert.equal(r.expired, 0);
+  // رجع اشترك بعد ما فاتت الصلاحية
+  await p.db.run('UPDATE shops SET active_until = ? WHERE id = ?', Date.now() + 400 * DAY, p.shop.id);
+  r = await p.cron(amman(12, 200));
+  assert.equal(r.expired, 0, 'ما بتنمسح فجأة');
+  assert.equal(r.expiryWarned, 1);
+  assert.match(to(dev).at(-1).body, /بتنتهي بعد 7 أيام/);
+  assert.equal((await p.cron(amman(12, 203))).expired, 0, 'لسا ما خلص الأسبوع');
+  assert.equal((await p.cron(amman(12, 207))).expired, 1);
 });
 
 test('روابط المحل والفروع: الروابط بتتصحّح، والموظف مربوط بفرعه بالحركات والتقارير', async () => {
@@ -533,10 +556,13 @@ test('إهداء الرصيد: بينخصم من المهدي، صاحبه بي�
   await owner.put('/api/shop/perks', { creditOn: true, creditBonus: 0 });
   await owner.post(`/api/members/${sara.id}/credit/topup`, { amount: 10 });
   const dev = await device(sara.guest, `/api/cards/${sara.token}/push`, 'sara-gift');
-  let r = await sara.guest.post(`/api/cards/${sara.token}/gift`, { amount: 20 });
+  // رابط البطاقة لحاله (متل كاشير معه الـ QR) ما بيكفي: لازم رقم جوالها
+  assert.equal((await sara.guest.post(`/api/cards/${sara.token}/gift`, { amount: 4 })).status, 400, 'بدون رقم');
+  assert.equal((await sara.guest.post(`/api/cards/${sara.token}/gift`, { amount: 4, phone: '0790000000' })).status, 403, 'رقم غلط');
+  let r = await sara.guest.post(`/api/cards/${sara.token}/gift`, { amount: 20, phone: sara.phone });
   assert.equal(r.status, 409, 'أكتر من رصيدها');
-  assert.equal((await sara.guest.post(`/api/cards/${sara.token}/gift`, { amount: 0.2 })).status, 400, 'أقل من نص دينار');
-  r = await sara.guest.post(`/api/cards/${sara.token}/gift`, { amount: 4 });
+  assert.equal((await sara.guest.post(`/api/cards/${sara.token}/gift`, { amount: 0.2, phone: sara.phone })).status, 400, 'أقل من نص دينار');
+  r = await sara.guest.post(`/api/cards/${sara.token}/gift`, { amount: 4, phone: sara.phone });
   assert.equal(r.status, 201, JSON.stringify(r.data));
   assert.equal(r.data.credit, 6);
   assert.match(r.data.url, /\/g\/[a-z2-9]{20}$/);
@@ -564,7 +590,7 @@ test('إهداء الرصيد: بينخصم من المهدي، صاحبه بي�
   assert.equal(h[0].note, '🎁 هدية من صاحب');
   assert.deepEqual((await owner.get('/api/reports')).data.credit, { outstanding: 10, topups: 10, spent: 0 });
   // هدية تانية ما حدا استلمها ← بترجع بعد 30 يوم
-  const code2 = (await sara.guest.post(`/api/cards/${sara.token}/gift`, { amount: 2.5 })).data.code;
+  const code2 = (await sara.guest.post(`/api/cards/${sara.token}/gift`, { amount: 2.5, phone: sara.phone })).data.code;
   assert.equal((await sara.guest.get(`/api/cards/${sara.token}`)).data.member.credit, 3.5);
   assert.equal((await p.cron(Date.now() + 29 * DAY)).giftsRefunded, 0);
   assert.equal((await p.cron(Date.now() + 31 * DAY)).giftsRefunded, 1);
@@ -582,7 +608,7 @@ test('طلبين بنفس الملّي ثانية: الهدية والكوبون
   const omar = await p.customer('عمر', '0791110018');
   await owner.put('/api/shop/perks', { creditOn: true, creditBonus: 0 });
   await owner.post(`/api/members/${sara.id}/credit/topup`, { amount: 10 });
-  const code = (await sara.guest.post(`/api/cards/${sara.token}/gift`, { amount: 4 })).data.code;
+  const code = (await sara.guest.post(`/api/cards/${sara.token}/gift`, { amount: 4, phone: sara.phone })).data.code;
   const cp = (await owner.post('/api/coupons', { title: 'قهوة مجانية', segment: 'all', days: 3 })).data;
   const st = await p.staffClient();
   const realNow = Date.now;

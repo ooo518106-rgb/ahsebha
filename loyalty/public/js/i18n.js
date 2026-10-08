@@ -30,6 +30,7 @@ const AR = {
   iosSide: ' وعلى الآيفون بتفتحها بكبستين على الزر الجانبي.',
   visits: 'زياراتك: {v} · المكافآت اللي أخدتها: {r}', privacy: 'سياسة الخصوصية', deleteCard: 'احذف بطاقتي وبياناتي', powered: 'بطاقات الولاء من',
   deleteConfirm: 'أكيد بدك تحذف بطاقتك؟ رح تنمسح نقاطك وكل سجلك عند هالمحل نهائياً، وما في رجعة.',
+  confirmPhone: 'للتأكيد إنك صاحب البطاقة: اكتب رقم جوالك اللي سجّلت فيه',
   deleted: 'انحذفت بطاقتك وكل بياناتك. إذا كانت محفوظة بالمحفظة، رح تتوقف لحالها.',
   // الإشعارات
   pushAsk: '🔔 بدك يوصلك إشعار لما تنضافلك نقاط أو يكون في عرض؟', pushOn: 'فعّل الإشعارات', pushIsOn: '🔔 الإشعارات مفعّلة', pushTest: 'جرّب إشعار',
@@ -80,6 +81,7 @@ const EN = {
   iosSide: ' On iPhone, double-press the side button to open it.',
   visits: 'Visits: {v} · Rewards redeemed: {r}', privacy: 'Privacy policy', deleteCard: 'Delete my card and data', powered: 'Loyalty cards by',
   deleteConfirm: 'Delete your card? Your points and history at this shop will be removed for good.',
+  confirmPhone: 'To confirm it is your card, enter the phone number you signed up with',
   deleted: 'Your card and data were deleted. If it was saved in a wallet, it will stop working.',
   pushAsk: '🔔 Get a notification when you earn points or there’s an offer?', pushOn: 'Turn on notifications', pushIsOn: '🔔 Notifications on', pushTest: 'Send a test',
   pushOff: 'Turn off', pushDenied: '🔕 Notifications are blocked for this card. You can allow them in your phone settings.', pushEnabled: 'Notifications are on 🔔',

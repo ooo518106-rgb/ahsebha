@@ -330,8 +330,10 @@ async function makeGift() {
   if (input == null) return;
   const amount = Number(String(input).replace(/[٠-٩]/g, (d) => '٠١٢٣٤٥٦٧٨٩'.indexOf(d)).replace(',', '.').trim());
   if (!(amount > 0)) return;
+  const phone = prompt(t('confirmPhone'), '');
+  if (!phone) return;
   try {
-    const r = await api(`/api/cards/${token}/gift`, { method: 'POST', body: { amount } });
+    const r = await api(`/api/cards/${token}/gift`, { method: 'POST', body: { amount, phone } });
     gift = { url: r.url, text: t('giftText', { amount: r.amount, cur: shop.currency, shop: shop.name, url: r.url }) };
     confetti({ count: 90, origin: { x: 0.5, y: 0.6 } });
     lastSig = null;
@@ -353,8 +355,10 @@ root.addEventListener('submit', async (e) => {
 root.addEventListener('click', async (e) => {
   if (!e.target.closest('#deleteCard')) return;
   if (!confirm(t('deleteConfirm'))) return;
+  const phone = prompt(t('confirmPhone'), '');
+  if (!phone) return;
   try {
-    await api(`/api/cards/${token}/delete`, { method: 'POST' });
+    await api(`/api/cards/${token}/delete`, { method: 'POST', body: { phone } });
     deleted = true;
     forget();
     render(root, html`<div class="panel center" style="margin-top:60px"><h1>👋</h1><p>${t('deleted')}</p></div>`);
