@@ -2448,7 +2448,8 @@ function applePanel(st) {
       <p class="alert ok">مفعّل ✅ بطاقات الآيفون شغّالة لكل المحلات.</p>
       <p class="small muted" dir="ltr" style="text-align:right">${st.passTypeId} · Team ${st.teamId}</p>
       ${st.certExpires ? html`<p class="small">الشهادة بتخلص بـ <b>${fmtDay(st.certExpires)}</b>. قبلها بشهر بنعمل طلب جديد.</p>` : ''}
-      <button class="btn ghost sm" type="button" id="appleRenew">طلب شهادة جديدة (تجديد)</button>`;
+      <button class="btn ghost sm" type="button" id="appleRenew">طلب شهادة جديدة (تجديد)</button>
+      ${apnsPanel(st.apns || {})}`;
   }
   return html`<h2>Apple Wallet 🍏</h2>
     <p class="small muted">بتعملها مرة وحدة، وبعدها كل محل بيصير عنده بطاقة آيفون. بدها حساب Apple Developer.</p>
@@ -2469,6 +2470,30 @@ function applePanel(st) {
       <p>ارفع ملف <span dir="ltr">pass.cer</span> هون:</p>
       <label class="btn sm ${st.hasKey ? '' : 'ghost'}" style="margin:0">رفع الشهادة<input type="file" id="appleCert" accept=".cer,.pem,.crt,application/x-x509-ca-cert,application/pkix-cert" class="hidden"></label>
     </div></div>`;
+}
+
+// 🔔 تحديث بطاقات الآيفون لحالها: مفتاح APNs من Apple (ملف .p8 + Key ID)
+function apnsPanel(a) {
+  const last = a.last;
+  return html`<div class="stack" style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border)">
+    <h3 style="margin:0">🔔 النقاط تتحدّث على الآيفون لحالها</h3>
+    ${a.configured
+      ? html`<p class="alert ok small">شغّال ✅ أول ما الكاشير يضيف نقاط، بطاقة الزبون بتتحدّث وبيوصله إشعار على شاشة القفل.
+          <span class="muted" dir="ltr">Key ${a.keyId}</span>${last ? html`<br>آخر إرسال ${ago(last.at)}: ${last.sent} وصل${last.failed ? ` · ${last.failed} ما وصل (${last.reason})` : ''}` : ''}</p>`
+      : html`<p class="small">بدونه الزبون لازم يسحب البطاقة لتحت عشان تتحدّث. خطوة وحدة بموقع Apple:</p>
+        <ol class="small" style="margin:0;padding-inline-start:20px">
+          <li>افتح صفحة المفاتيح: <a href="https://developer.apple.com/account/resources/authkeys/add" target="_blank" rel="noopener">Keys ← ➕</a></li>
+          <li>الاسم <b dir="ltr">Nuqatak Push</b>، وعلّم <b dir="ltr">Apple Push Notifications service (APNs)</b> ← <b dir="ltr">Configure</b>: <b dir="ltr">Production</b> و <b dir="ltr">Team Scoped (All Topics)</b> ← Save ← Continue ← Register</li>
+          <li><b>Download</b>: الملف بينزل مرة وحدة بس، احفظه. وانسخ الـ <b dir="ltr">Key ID</b> اللي جنبه</li>
+          <li>ارفعه هون:</li>
+        </ol>`}
+    <form class="row" id="apnsForm">
+      <label class="btn sm ${a.configured ? 'ghost' : ''}" style="margin:0">ملف .p8<input type="file" id="apnsFile" accept=".p8,text/plain,application/pkcs8,application/octet-stream" class="hidden"></label>
+      <input name="keyId" maxlength="10" placeholder="Key ID" dir="ltr" style="max-width:140px;text-transform:uppercase" value="${a.keyId || ''}">
+      <button class="btn sm" type="submit">${a.configured ? 'تغيير المفتاح' : 'حفظ وتجربة'}</button>
+    </form>
+    <p class="hint" id="apnsFileName"></p>
+  </div>`;
 }
 
 function downloadText(text, filename) {
@@ -2503,6 +2528,27 @@ function bindApple() {
     if (!confirm('طلب جديد بيوقف بطاقات الآيفون الجديدة لحد ما ترفع الشهادة الجديدة. متأكد؟')) return;
     try { await makeCsr(true); admin(); } catch (e) { toast(e.message, 'bad'); }
   };
+  const apns = $('#apnsForm');
+  if (apns) {
+    let key = '';
+    $('#apnsFile').onchange = async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      key = await file.text();
+      $('#apnsFileName').textContent = `✅ ${file.name}`;
+    };
+    apns.onsubmit = async (e) => {
+      e.preventDefault();
+      if (!key) { toast('اختار ملف .p8 أول', 'bad'); return; }
+      const btn = apns.querySelector('button');
+      btn.disabled = true;
+      try {
+        await api('/api/admin/apple/apns', { method: 'PUT', body: { key, keyId: apns.keyId.value } });
+        toast('تمام ✅ بطاقات الآيفون صارت تتحدّث لحالها', 'ok');
+        admin();
+      } catch (err) { toast(err.message, 'bad'); btn.disabled = false; }
+    };
+  }
   const cert = $('#appleCert');
   if (cert) cert.onchange = async (e) => {
     const file = e.target.files[0];

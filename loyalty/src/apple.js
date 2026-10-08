@@ -217,7 +217,6 @@ export function buildPassJson(shop, member, { passTypeId, teamId, origin, authTo
         key: 'balance',
         label: stamps ? 'الأختام' : 'النقاط',
         value: stamps ? `${p.available && !p.toward ? p.cost : p.toward}/${p.cost}` : member.balance,
-        changeMessage: stamps ? 'صار عندك %@ أختام' : 'رصيدك صار %@ نقطة',
       }],
       // الوجه: صورة العملات (strip.png) مكان الحقل الكبير، وتحتها سطر واحد.
       // Wallet بترتّب من الشمال، فبنحطهم بالعكس عشان ينقروا من اليمين: شو باقي ← المكافأة ← المنيو.
@@ -232,7 +231,7 @@ export function buildPassJson(shop, member, { passTypeId, teamId, origin, authTo
           label: p.available ? '🎉' : '⏳',
           value: p.available ? (p.available > 1 ? `${p.available} مكافآت جاهزة` : 'مكافأتك جاهزة') : `باقي ${p.remaining} ${unitWord(shop, p.remaining)}`,
           textAlignment: 'PKTextAlignmentRight',
-          changeMessage: '%@',
+          changeMessage: '%@', // إشعار شاشة القفل لما البطاقة تتحدّث: «باقي 5 نقاط» أو «مكافأتك جاهزة»
         },
       ],
       backFields: [
@@ -273,4 +272,42 @@ export async function buildPkpass({ passJson, images, pkcs8, certDer, chain }) {
   const manifestBytes = enc.encode(JSON.stringify(manifest));
   const signature = await signDetached(manifestBytes, { pkcs8, certDer, ...(chain ? { chain } : {}) });
   return zip([...files, { name: 'manifest.json', data: manifestBytes }, { name: 'signature', data: signature }]);
+}
+
+// ─── 🔔 تحديث البطاقات على الآيفونات لحالها (APNs بمفتاح .p8 من Apple) ───
+// السيرفر بيبعت إشعار فاضي للجهاز، والـ Wallet بتطلب آخر نسخة من البطاقة (وبتورجي changeMessage على شاشة القفل)
+export function p8ToPkcs8(text) {
+  const b = String(text || '').replace(/-----[^-]+-----/g, '').replace(/\s+/g, '');
+  if (!/^[A-Za-z0-9+/]+=*$/.test(b) || b.length > 400) throw new Error('bad key');
+  return Uint8Array.from(atob(b), (ch) => ch.charCodeAt(0));
+}
+const b64url = (bytes) => btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+export const importApnsKey = (pkcs8) => crypto.subtle.importKey('pkcs8', pkcs8, { name: 'ECDSA', namedCurve: 'P-256' }, false, ['sign']);
+
+// التوكن (JWT ES256) صالح ساعة، وApple بتفضّل ما ينعمل أكتر من مرة كل 20 دقيقة: منحفظه 40 دقيقة
+let jwtCache = null;
+export function forgetApnsToken() { jwtCache = null; }
+export async function apnsJwt({ keyId, teamId, pkcs8 }, now = Date.now()) {
+  if (jwtCache && jwtCache.keyId === keyId && jwtCache.teamId === teamId && now - jwtCache.at < 40 * 60e3) return jwtCache.token;
+  const key = await importApnsKey(pkcs8);
+  const enc = (o) => b64url(new TextEncoder().encode(JSON.stringify(o)));
+  const input = `${enc({ alg: 'ES256', kid: keyId })}.${enc({ iss: teamId, iat: Math.floor(now / 1000) })}`;
+  const sig = new Uint8Array(await crypto.subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, key, new TextEncoder().encode(input)));
+  const token = `${input}.${b64url(sig)}`;
+  jwtCache = { keyId, teamId, at: now, token };
+  return token;
+}
+
+// إشعار تحديث بطاقة: محتواه فاضي، والموضوع (topic) = معرّف البطاقة
+export async function sendPassPush({ passTypeId, fetch: f }, jwt, pushToken) {
+  const res = await f(`https://api.push.apple.com/3/device/${pushToken}`, {
+    method: 'POST',
+    headers: { authorization: `bearer ${jwt}`, 'apns-topic': passTypeId, 'apns-push-type': 'background', 'apns-priority': '5' },
+    body: '{}',
+  });
+  let reason = null;
+  if (res.status !== 200) {
+    try { reason = (await res.json()).reason || null; } catch { reason = null; }
+  }
+  return { status: res.status, reason };
 }

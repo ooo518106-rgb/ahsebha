@@ -190,8 +190,45 @@ function googleStatus(c, shop) {
 // بعد أي تغيير بالنقاط: نحدّث البطاقة بمحفظة الزبون بالخلفية (بدون ما نأخّر الكاشير)
 function pushMember(c, shop, member) {
   const cfg = gw.googleConfig(c.env);
-  if (!cfg || !member.gw_object) return;
-  c.waitUntil(gw.patchObject(cfg, gw.buildObject(cfg, shop, member, c.origin)).catch((e) => console.error('gwallet patch:', e.message)));
+  if (cfg && member.gw_object) c.waitUntil(gw.patchObject(cfg, gw.buildObject(cfg, shop, member, c.origin)).catch((e) => console.error('gwallet patch:', e.message)));
+  c.waitUntil(applePush(c, [member.token]).catch((e) => console.error('apns:', e.message)));
+}
+
+// ─── 🔔 Apple: «البطاقة تغيّرت» للأجهزة اللي عليها هالبطاقات، فبتتحدّث لحالها ───
+async function apnsConfig(c) {
+  const row = await c.db.get('SELECT pass_type_id, team_id, apns_key, apns_key_id FROM apple_config WHERE id = 1 AND cert IS NOT NULL AND apns_key IS NOT NULL');
+  if (!row) return null;
+  return { passTypeId: row.pass_type_id, teamId: row.team_id, keyId: row.apns_key_id, pkcs8: b64ToBytes(row.apns_key), fetch: c.env.fetch || ((...a) => fetch(...a)) };
+}
+
+async function applePush(c, serials, { limit = 300 } = {}) {
+  if (!serials.length) return null;
+  const regs = await c.db.all(`SELECT DISTINCT push_token FROM apple_regs WHERE serial IN (${serials.map(() => '?').join(',')}) LIMIT ${limit}`, ...serials);
+  if (!regs.length) return null;
+  const cfg = await apnsConfig(c);
+  if (!cfg) return null;
+  const jwt = await apple.apnsJwt(cfg);
+  const out = { at: Date.now(), sent: 0, failed: 0, reason: null };
+  for (const r of regs) {
+    let res;
+    try { res = await apple.sendPassPush(cfg, jwt, r.push_token); } catch (e) { res = { status: 0, reason: clean(e.message, 80) }; }
+    if (res.status === 200) { out.sent++; continue; }
+    out.failed++;
+    out.reason = res.reason || `HTTP ${res.status}`;
+    // الجهاز شال البطاقة أو التوكن مش صالح: منشيله. المفتاح غلط: منعيد عمل التوكن المرة الجاية
+    if (res.status === 410 || res.reason === 'BadDeviceToken' || res.reason === 'Unregistered') await c.db.run('DELETE FROM apple_regs WHERE push_token = ?', r.push_token);
+    if (res.status === 403) apple.forgetApnsToken();
+  }
+  await c.db.run('UPDATE apple_config SET apns_last = ? WHERE id = 1', JSON.stringify(out));
+  return out;
+}
+
+// تغيير بإعدادات المحل (اسم، لون، شعار، روابط): كل بطاقاته بتتحدّث
+function applePushShop(c, shopId) {
+  c.waitUntil((async () => {
+    const rows = await c.db.all('SELECT DISTINCT r.serial FROM apple_regs r JOIN members m ON m.token = r.serial WHERE m.shop_id = ? LIMIT 300', shopId);
+    await applePush(c, rows.map((x) => x.serial));
+  })().catch((e) => console.error('apns shop:', e.message)));
 }
 
 async function googleSave(c, token) {
@@ -381,7 +418,34 @@ async function adminApple(c) {
     passTypeId: (row && row.pass_type_id) || null,
     teamId: (row && row.team_id) || null,
     certExpires: (row && row.cert_expires) || null,
+    apns: { configured: !!(row && row.apns_key), keyId: (row && row.apns_key_id) || null, last: row && row.apns_last ? JSON.parse(row.apns_last) : null },
   });
+}
+
+// 🔔 مفتاح APNs (.p8) من Apple Developer ← Keys: بنتأكد منه عند Apple (توكن جهاز وهمي: «BadDeviceToken» يعني المفتاح مقبول)
+async function adminAppleApns(c) {
+  await requireAdmin(c);
+  const row = await c.db.get('SELECT * FROM apple_config WHERE id = 1');
+  if (!row || !row.cert) fail(400, 'فعّل Apple Wallet أول (الشهادة)');
+  const keyId = String(c.body.keyId || '').trim().toUpperCase();
+  if (!/^[A-Z0-9]{10}$/.test(keyId)) fail(400, 'الـ Key ID عشر حروف وأرقام (بتلاقيه جنب المفتاح بصفحة Keys)');
+  let pkcs8;
+  try { pkcs8 = apple.p8ToPkcs8(c.body.key); await apple.importApnsKey(pkcs8); } catch { fail(400, 'ملف المفتاح مش صالح. ارفع ملف .p8 اللي نزّلته من Apple'); }
+  const cfg = { passTypeId: row.pass_type_id, teamId: row.team_id, keyId, pkcs8, fetch: c.env.fetch || ((...a) => fetch(...a)) };
+  apple.forgetApnsToken();
+  let res;
+  try { res = await apple.sendPassPush(cfg, await apple.apnsJwt(cfg), '0'.repeat(64)); } catch (e) { fail(502, `ما قدرنا نوصل لـ Apple: ${clean(e.message, 120)}`); }
+  if (res.status === 403) {
+    apple.forgetApnsToken();
+    fail(400, `Apple رفضت المفتاح (${res.reason || 403}). تأكد إنه مفتاح APNs من نفس الحساب، والـ Key ID صح${res.reason === 'TopicDisallowed' ? '، وإنه المفتاح مش محصور بتطبيق معيّن (Team Scoped)' : ''}`);
+  }
+  await c.db.run('UPDATE apple_config SET apns_key = ?, apns_key_id = ?, apns_last = NULL, updated_at = ? WHERE id = 1', bytesToB64(pkcs8), keyId, Date.now());
+  // كل البطاقات المضافة بتتحدّث هلأ (بتاخد آخر شكل)
+  c.waitUntil((async () => {
+    const rows = await c.db.all('SELECT DISTINCT serial FROM apple_regs LIMIT 500');
+    await applePush(c, rows.map((x) => x.serial), { limit: 500 });
+  })().catch((e) => console.error('apns all:', e.message)));
+  return adminApple(c);
 }
 
 // المتصفح بيولّد المفتاح وطلب الشهادة (توليد RSA تقيل على حد وقت Cloudflare)، والسيرفر بيتحقق وبيحفظ
@@ -2174,6 +2238,7 @@ async function updateShop(c) {
   }
   await c.db.run('UPDATE shops SET updated_at = ? WHERE id = ?', Date.now(), s.id);
   const shop = await shopRow(c.db, s.id);
+  applePushShop(c, s.id);
   const google = await syncClass(c, shop);
   return json({ shop: shopView(shop, c.origin), google: { ...googleStatus(c, shop), lastSync: google } });
 }
@@ -2196,6 +2261,7 @@ async function updateLogo(c) {
   }
   await c.db.run('UPDATE shops SET updated_at = ? WHERE id = ?', Date.now(), s.id);
   const shop = await shopRow(c.db, s.id);
+  applePushShop(c, s.id);
   const google = await syncClass(c, shop);
   return json({ shop: shopView(shop, c.origin), google: { ...googleStatus(c, shop), lastSync: google } });
 }
@@ -2507,8 +2573,9 @@ async function updateLinks(c) {
   const links = normalizeLinks(c.body, c.shop.country);
   await c.db.run('UPDATE shops SET links = ?, updated_at = ? WHERE id = ?', JSON.stringify(links), Date.now(), c.shop.id);
   const shop = await shopRow(c.db, c.shop.id);
-  // الروابط على بطاقات Google Wallet (Apple بتاخدها لما البطاقة تتحدّث)
+  // الروابط على بطاقات Google Wallet، وبطاقات Apple بتتحدّث
   if (shop.gw_synced_at) c.waitUntil(syncClass(c, shop));
+  applePushShop(c, shop.id);
   return json({ shop: shopView(shop, c.origin) });
 }
 
@@ -3789,6 +3856,7 @@ const API = [
   ['GET', /^\/api\/admin\/apple$/, adminApple, 'staff'],
   ['POST', /^\/api\/admin\/apple\/key$/, adminAppleKey, 'staff'],
   ['PUT', /^\/api\/admin\/apple\/cert$/, adminAppleCert, 'staff'],
+  ['PUT', /^\/api\/admin\/apple\/apns$/, adminAppleApns, 'staff'],
   ['GET', /^\/api\/admin\/payments$/, adminPayments, 'staff'],
   ['POST', /^\/api\/admin\/payments\/(\d+)$/, adminPaymentDecide, 'staff'],
   ['GET', /^\/api\/admin\/settings$/, adminSettings, 'staff'],

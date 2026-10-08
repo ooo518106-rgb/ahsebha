@@ -187,3 +187,80 @@ test('صورة الدواير على بطاقة الآيفون: كم دايرة 
   assert.deepEqual(stripState({ ...pts, reward_threshold: 100 }, 45), { slots: 10, filled: 4, ready: false }, 'نقاط كتير: 10 دواير = نسبة');
   assert.deepEqual(stripState({ program_type: 'stamps', stamps_required: 8 }, 3), { slots: 8, filled: 3, ready: false });
 });
+
+test('🔔 تحديث بطاقات الآيفون لحالها: مفتاح APNs، وإشعار للجهاز لما الرصيد يتغيّر', async (t) => {
+  if (!opensslOk) { t.skip('openssl مش موجود'); return; }
+  const pushes = [];
+  let reply = (url) => (url.endsWith('/' + '0'.repeat(64)) ? { status: 400, body: { reason: 'BadDeviceToken' } } : { status: 200 });
+  const fetch = async (url, init = {}) => {
+    const u = String(url);
+    if (!u.startsWith('https://api.push.apple.com/')) return new Response(null, { status: 201 });
+    pushes.push({ url: u, headers: new Headers(init.headers), body: init.body });
+    const r = reply(u);
+    return new Response(r.body ? JSON.stringify(r.body) : null, { status: r.status });
+  };
+  const { db, client } = await setup({ APPLE_WWDR_PEM: readFileSync(path.join(dir, 'wwdr.pem'), 'utf8'), fetch });
+  const admin = client();
+  const { shop } = await signup(admin, { shopName: 'Mocha Coffee' });
+  const b64 = (u8) => Buffer.from(u8).toString('base64');
+  const keys = await generateKeyAndCsr();
+  await admin.post('/api/admin/apple/key', { privateKey: b64(keys.pkcs8), publicKey: b64(keys.spki) });
+  assert.equal((await admin.put('/api/admin/apple/cert', { cert: issue(keys.csrPem, 'pass2') })).status, 200);
+  const guest = client();
+  const token = (await guest.post(`/api/shops/${shop.slug}/join`, { name: 'أحمد', phone: '0791234567' })).data.token;
+  const secret = (await db.get('SELECT auth_secret FROM apple_config WHERE id = 1')).auth_secret;
+  const auth = { authorization: `ApplePass ${await authTokenFor(secret, token)}` };
+  assert.equal((await guest.req('POST', `/apple/v1/devices/dev1/registrations/pass.com.nuqatak.test/${token}`, { pushToken: 'aa11' }, auth)).status, 201);
+
+  // بدون مفتاح: ما في إشعارات
+  const memberId = (await admin.get(`/api/members/lookup?code=${token}`)).data.member.id;
+  await admin.post(`/api/members/${memberId}/earn`, { amount: 5 });
+  await admin.flush();
+  assert.equal(pushes.length, 0);
+
+  // مفتاح P-256 متل ملف .p8 تبع Apple
+  const pair = await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify']);
+  const p8 = `-----BEGIN PRIVATE KEY-----\n${b64(new Uint8Array(await crypto.subtle.exportKey('pkcs8', pair.privateKey))).match(/.{1,64}/g).join('\n')}\n-----END PRIVATE KEY-----\n`;
+  assert.equal((await admin.put('/api/admin/apple/apns', { key: p8, keyId: 'short' })).status, 400);
+  assert.equal((await admin.put('/api/admin/apple/apns', { key: 'nope', keyId: 'ABC123DEFG' })).status, 400);
+  reply = () => ({ status: 403, body: { reason: 'InvalidProviderToken' } });
+  const bad = await admin.put('/api/admin/apple/apns', { key: p8, keyId: 'ABC123DEFG' });
+  assert.equal(bad.status, 400);
+  assert.match(bad.data.error, /InvalidProviderToken/);
+  reply = (url) => (url.endsWith('/' + '0'.repeat(64)) ? { status: 400, body: { reason: 'BadDeviceToken' } } : { status: 200 });
+  pushes.length = 0;
+  const ok = await admin.put('/api/admin/apple/apns', { key: p8, keyId: 'abc123defg' });
+  assert.equal(ok.status, 200, JSON.stringify(ok.data));
+  assert.deepEqual([ok.data.apns.configured, ok.data.apns.keyId], [true, 'ABC123DEFG']);
+  await admin.flush();
+  assert.ok(pushes.some((p) => p.url.endsWith('/3/device/aa11')), 'كل البطاقات المضافة بتتحدّث بعد ما ينحفظ المفتاح');
+
+  // الكاشير ضاف نقاط ← إشعار للجهاز، بالموضوع والتوكن الصح
+  pushes.length = 0;
+  await admin.post(`/api/members/${memberId}/earn`, { amount: 3 });
+  await admin.flush();
+  assert.equal(pushes.length, 1);
+  const p = pushes[0];
+  assert.equal(p.url, 'https://api.push.apple.com/3/device/aa11');
+  assert.equal(p.headers.get('apns-topic'), 'pass.com.nuqatak.test');
+  assert.equal(p.body, '{}');
+  const [h, c, sig] = p.headers.get('authorization').replace(/^bearer /, '').split('.');
+  const dec = (s) => JSON.parse(Buffer.from(s, 'base64url').toString());
+  assert.deepEqual(dec(h), { alg: 'ES256', kid: 'ABC123DEFG' });
+  assert.equal(dec(c).iss, 'ABCDE12345');
+  assert.ok(await crypto.subtle.verify({ name: 'ECDSA', hash: 'SHA-256' }, pair.publicKey, Buffer.from(sig, 'base64url'), new TextEncoder().encode(`${h}.${c}`)), 'التوقيع صحيح');
+  assert.equal((await admin.get('/api/admin/apple')).data.apns.last.sent, 1);
+
+  // تغيير بالمحل (الاسم) ← كل بطاقاته بتتحدّث
+  pushes.length = 0;
+  await admin.put('/api/shop', { name: 'موكا' });
+  await admin.flush();
+  assert.equal(pushes.length, 1);
+
+  // الجهاز شال البطاقة (410): منشيل التسجيل
+  reply = () => ({ status: 410, body: { reason: 'Unregistered' } });
+  await admin.post(`/api/members/${memberId}/earn`, { amount: 3 });
+  await admin.flush();
+  assert.equal((await db.get('SELECT COUNT(*) AS n FROM apple_regs')).n, 0);
+  assert.equal((await admin.get('/api/admin/apple')).data.apns.last.reason, 'Unregistered');
+});

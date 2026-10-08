@@ -429,4 +429,8 @@ export const MIGRATIONS = [
   'CREATE INDEX IF NOT EXISTS members_bday ON members(shop_id, birthday)',
   'ALTER TABLE users ADD COLUMN reset_asked_at INTEGER',
   'ALTER TABLE prospects ADD COLUMN guide TEXT', // 📌 توجيهك للوكيل مع هالمحل (من واتسابك)
+  // 🔔 مفتاح APNs (.p8) لتحديث بطاقات الآيفون لحالها، وآخر نتيجة إرسال للتشخيص
+  'ALTER TABLE apple_config ADD COLUMN apns_key TEXT',
+  'ALTER TABLE apple_config ADD COLUMN apns_key_id TEXT',
+  'ALTER TABLE apple_config ADD COLUMN apns_last TEXT',
 ];
