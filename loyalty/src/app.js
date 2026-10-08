@@ -13,7 +13,7 @@ import { geminiFindShops } from './gemini.js';
 import * as sales from './sales.js';
 import * as wa from './whatsapp.js';
 import { defaultLogoPng } from './png.js';
-import { earnFor, progress, rewardCost, rewardRule, stampsLine, unitLabel } from '../public/js/rules.js';
+import { earnFor, progress, rewardCost, rewardRule, stampsLine, unitLabel, unitWord } from '../public/js/rules.js';
 import { FEATURES } from '../public/js/plans.js';
 import { b64ToBytes, bytesToB64, clean, fail, HttpError, isUniqueError, json, normPhone, randomDigits, randomToken } from './util.js';
 
@@ -571,7 +571,7 @@ function earnMessage(shop, before, after, perk, ref) {
     ? `🎁 مكافأتك جاهزة: ${shop.reward_name}! اطلبها بزيارتك الجاية.${tail}`
     : stamps
       ? `انضافلك ${delta === 1 ? 'ختم' : `${delta} أختام`} ☕${tail} صار عندك ${p1.toward}/${p1.cost}`
-      : `انضافلك ${delta} نقطة ☕${tail} رصيدك صار ${after.balance}، وباقي ${p1.remaining} لـ ${shop.reward_name}`;
+      : `انضافلك ${delta} ${unitWord(shop, delta)} ☕${tail} رصيدك صار ${after.balance}، وباقي ${p1.remaining} لـ ${shop.reward_name}`;
   return { title: shop.name, body };
 }
 
@@ -688,7 +688,7 @@ async function birthdayJob(c, shopOf, now) {
           : `Happy birthday, ${first}! 🎉 You got ${gift} ${unitEn(shop, gift)} as a birthday gift 🎁`)
       : gift <= 0 ? `كل سنة وإنت سالم يا ${first}! 🎉 من كل فريق ${shop.name}`
         : gift === rewardCost(shop) ? `كل سنة وإنت سالم يا ${first}! 🎉 ${shop.reward_name} اليوم علينا، الهدية صارت بحسابك 🎁`
-          : `كل سنة وإنت سالم يا ${first}! 🎉 انضافلك ${gift} ${unitLabel(shop)} هدية عيدك 🎁`;
+          : `كل سنة وإنت سالم يا ${first}! 🎉 انضافلك ${gift} ${unitWord(shop, gift)} هدية عيدك 🎁`;
     if (wallet) {
       c.budget -= 2;
       pushMember(c, shop, await c.db.get('SELECT * FROM members WHERE id = ?', m.id));
@@ -780,7 +780,7 @@ async function expiryJob(c, shopOf, now) {
     // اللي فاتت صلاحيته وهو ما وصله تذكير (متل محل كان متوقف ورجع): بياخد أسبوع من هلق
     const days = Math.max(1, Math.round((m.ends > now ? m.ends - now : 7 * DAY) / DAY));
     const body = isEn(m) ? `⏳ Your ${m.balance} ${unitEn(shop, m.balance)} expire in ${days} day${days === 1 ? '' : 's'}. Drop by and use them ☕`
-      : `⏳ عندك ${m.balance} ${unitLabel(shop)} بتنتهي بعد ${days} ${days === 1 ? 'يوم' : 'أيام'}. مرّ علينا واستعملها ☕`;
+      : `⏳ عندك ${m.balance} ${unitWord(shop, m.balance)} بتنتهي بعد ${days} ${days === 1 ? 'يوم' : 'أيام'}. مرّ علينا واستعملها ☕`;
     if (!subs.length) continue;
     await cronSend(c, shop, m, subs, { body });
     warned++;
@@ -1796,7 +1796,7 @@ async function earn(c, id) {
   if (res && c.user.role === 'staff' && p.delta >= guardBig(c.shop)) {
     await alertOwner(c, `big:${c.user.id}:${m.id}`, {
       title: '⚠️ نقاط كتير على بطاقة وحدة',
-      body: `${c.user.name} ضاف ${p.delta} ${unitLabel(c.shop)} لـ ${m.name}${r.amount ? ` (فاتورة ${r.amount} ${c.shop.currency})` : ''}`,
+      body: `${c.user.name} ضاف ${p.delta} ${unitWord(c.shop, p.delta)} لـ ${m.name}${r.amount ? ` (فاتورة ${r.amount} ${c.shop.currency})` : ''}`,
     });
   }
   const extra = res ? { delta: p.delta, base: p.base, reasons: p.reasons, ...(ref ? { refBonus: ref.bonus } : {}) } : { duplicate: true };
@@ -1882,7 +1882,7 @@ async function rewardReferral(c, m, now) {
     c.waitUntil(notifyMember(c, fresh, {
       title: c.shop.name,
       body: isEn(fresh) ? `👥 Your friend ${perks.firstName(m.name)} visited us! You got ${bonus} ${unitEn(c.shop, bonus)} as an invite gift 🎉`
-        : `👥 صاحبك ${perks.firstName(m.name)} زارنا! انضافلك ${bonus} ${unitLabel(c.shop)} هدية الدعوة 🎉`,
+        : `👥 صاحبك ${perks.firstName(m.name)} زارنا! انضافلك ${bonus} ${unitWord(c.shop, bonus)} هدية الدعوة 🎉`,
       icon: logoUrl(c.shop, c.origin),
     }).catch(() => {}));
   }

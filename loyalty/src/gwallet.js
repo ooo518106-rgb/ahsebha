@@ -2,7 +2,7 @@
 // - رابط «أضف إلى محفظة Google» = JWT موقّع بمفتاح حساب الخدمة.
 // - تحديث النقاط وإرسال الرسائل عن طريق Wallet REST API.
 // - merchantLocations (لحد 10 مواقع) هي اللي بتخلي الجوال يطلّع البطاقة لما يقرّب الزبون من المحل.
-import { progress, rewardRule, stampsLine } from '../public/js/rules.js';
+import { progress, rewardRule, stampsLine, unitWord } from '../public/js/rules.js';
 import { b64ToBytes, b64url, b64urlText } from './util.js';
 
 const TOKEN_URL = 'https://oauth2.googleapis.com/token';
@@ -86,7 +86,7 @@ export function buildObject(cfg, shop, member, origin) {
     secondaryLoyaltyPoints: p.available
       ? { label: 'مكافآت جاهزة', balance: { int: p.available } }
       : { label: 'باقي للمكافأة', balance: { int: p.remaining } },
-    textModulesData: [{ id: 'progress', header: shop.reward_name, body: stamps ? stampsLine(shop, member.balance) : `${p.toward} / ${p.cost} نقطة` }],
+    textModulesData: [{ id: 'progress', header: shop.reward_name, body: stamps ? stampsLine(shop, member.balance) : `${p.toward} / ${p.cost} ${unitWord(shop, p.cost)}` }],
     linksModuleData: { uris: [{ id: 'card', uri: `${origin}/c/${member.token}`, description: 'بطاقتي على الويب' }] },
   };
   return obj;

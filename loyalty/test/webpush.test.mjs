@@ -133,7 +133,7 @@ test('من البطاقة للإشعار: اشتراك، إشعار نقاط، �
   assert.deepEqual(e1.data.push, { devices: 1, sent: 1, reason: null }, 'الكاشير بيعرف إنه الإشعار انبعت');
   assert.equal(sent.length, 1);
   assert.equal(sent[0].msg.title, 'Mocha');
-  assert.match(sent[0].msg.body, /انضافلك 10 نقطة.*رصيدك صار 10.*باقي 20/);
+  assert.match(sent[0].msg.body, /انضافلك 10 نقاط.*رصيدك صار 10.*باقي 20/);
   assert.equal(sent[0].msg.url, `https://loyalty.test/c/${token}`);
   // لما تجهز المكافأة
   await owner.post(`/api/members/${id}/earn`, { amount: 25 });

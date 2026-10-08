@@ -12,6 +12,10 @@ export function unitLabel(shop) {
   return shop.program_type === 'stamps' ? 'ختم' : 'نقطة';
 }
 
+// الكلمة مع العدد بالعربي: من 3 لـ 10 جمع (6 نقاط، 9 أختام)، وغيرها مفرد (1 نقطة، 15 نقطة، 100 نقطة)
+export const countWord = (n, one, many) => (n >= 3 && n <= 10 ? many : one);
+export const unitWord = (shop, n) => (shop.program_type === 'stamps' ? countWord(n, 'ختم', 'أختام') : countWord(n, 'نقطة', 'نقاط'));
+
 // كم بياخد الزبون على هالزيارة. النقاط: المبلغ × نقاط لكل وحدة (لتحت). الأختام: عدد القطع.
 export function earnFor(shop, { amount, count } = {}) {
   if (shop.program_type === 'stamps') {
@@ -35,10 +39,10 @@ export function progress(shop, balance) {
 }
 
 export function rewardRule(shop) {
-  if (shop.program_type === 'stamps') return `اجمع ${shop.stamps_required} أختام واحصل على ${shop.reward_name}`;
+  if (shop.program_type === 'stamps') return `اجمع ${shop.stamps_required} ${unitWord(shop, shop.stamps_required)} واحصل على ${shop.reward_name}`;
   const per = Number(shop.points_per_unit);
-  const earn = per === 1 ? `كل 1 ${shop.currency} = نقطة` : `كل 1 ${shop.currency} = ${per} نقطة`;
-  return `${earn} · ${shop.reward_threshold} نقطة = ${shop.reward_name}`;
+  const earn = per === 1 ? `كل 1 ${shop.currency} = نقطة` : `كل 1 ${shop.currency} = ${per} ${unitWord(shop, per)}`;
+  return `${earn} · ${shop.reward_threshold} ${unitWord(shop, shop.reward_threshold)} = ${shop.reward_name}`;
 }
 
 export function stampsLine(shop, balance) {

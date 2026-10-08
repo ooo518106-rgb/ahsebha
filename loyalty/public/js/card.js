@@ -1,5 +1,5 @@
 // صفحة بطاقة الزبون: QR للكاشير + زر الحفظ بمحفظة Google، وبتتحدّث لحالها لما تنضاف نقاط
-import { $, api, cardHTML, html, isIOS, raw, render, setBrand, toast } from './common.js';
+import { $, api, cardHTML, html, isIOS, raw, render, setBrand, toast, unitKey } from './common.js';
 import { LANG, applyLang, fmtDate, ruleText, setLang, t } from './i18n.js';
 import { confetti } from './confetti.js';
 
@@ -132,7 +132,7 @@ async function load(first = false, quiet = false) {
     return;
   }
   const gained = lastBalance !== null && data.member.balance > lastBalance;
-  if (!quiet && gained) toast(`+${data.member.balance - lastBalance} ${t(data.shop.programType === 'stamps' ? 'unitStamp' : 'unitPoint')} 🎉`, 'ok');
+  if (!quiet && gained) toast(`+${data.member.balance - lastBalance} ${unitOf(data.shop, data.member.balance - lastBalance)} 🎉`, 'ok');
   // احتفال: نقاط جديدة، وأكبر لما تجهز مكافأة
   const ready = lastAvail !== null && data.member.progress.available > lastAvail;
   if (ready) confetti({ count: 220 });
@@ -164,11 +164,10 @@ let rate = null; // { stars, note } لما يختار النجوم (وبيكبس
 let gift = null; // آخر هدية عملها: { url, text }
 const fmtDay = (ms) => fmtDate(ms, { weekday: 'long', day: 'numeric', month: 'long' });
 const first = (name) => String(name).trim().split(/\s+/)[0];
-const unitOf = (shop) => t(shop.programType === 'stamps' ? 'unitStamp' : 'unitPoint');
+const unitOf = (shop, n) => t(unitKey(shop.programType === 'stamps', n));
 const LINKS = ['instagram', 'snapchat', 'tiktok', 'facebook', 'whatsapp', 'website'];
 
 function perksPanels(shop, member, refUrl, canRate, coupons) {
-  const unit = unitOf(shop);
   const tier = member.tier;
   return html`
     ${member.birthdayToday ? html`<div class="alert ok center">${t('bdayToday', { name: first(member.name) })}</div>` : ''}
@@ -190,12 +189,12 @@ function perksPanels(shop, member, refUrl, canRate, coupons) {
         ${rate && rate.stars ? html`<textarea id="rateNote" rows="2" maxlength="500" placeholder="${t(rate.stars >= 4 ? 'rateNoteGood' : 'rateNote')}">${rate.note || ''}</textarea>
           <button class="btn block" type="button" id="rateSend">${t('send')}</button>` : ''}</div>` : ''}
     ${shop.bdayOn && !member.birthday ? html`<form class="panel small stack" id="bdayForm"><b>${t('bdayAsk')}</b>
-        <span class="muted">${shop.bdayGift > 0 ? t('bdayGift', { gift: shop.bdayGift >= shop.cost ? shop.rewardName : `${shop.bdayGift} ${unit}` }) : t('bdayGreet')}</span>
+        <span class="muted">${shop.bdayGift > 0 ? t('bdayGift', { gift: shop.bdayGift >= shop.cost ? shop.rewardName : `${shop.bdayGift} ${unitOf(shop, shop.bdayGift)}` }) : t('bdayGreet')}</span>
         <div class="row tight"><select name="day" class="grow" required aria-label="${t('day')}"><option value="">${t('day')}</option>${Array.from({ length: 31 }, (_, i) => html`<option>${i + 1}</option>`)}</select>
           <select name="month" class="grow" required aria-label="${t('month')}"><option value="">${t('month')}</option>${t('months').map((m, i) => html`<option value="${i + 1}">${m}</option>`)}</select>
           <button class="btn" type="submit">${t('save')}</button></div></form>` : ''}
     ${refUrl ? html`<div class="panel small stack"><b>${t('invite')}</b>
-        <span class="muted">${t('inviteHint', { n: shop.refBonus, unit })}</span>
+        <span class="muted">${t('inviteHint', { n: shop.refBonus, unit: unitOf(shop, shop.refBonus) })}</span>
         <div class="row"><button class="btn grow" type="button" id="shareRef">${t('inviteSend')}</button>
           <button class="btn ghost" type="button" id="copyRef">${t('copyLink')}</button></div></div>` : ''}`;
 }

@@ -1,7 +1,7 @@
 // لوحة المحل: الكاشير (مسح وإضافة نقاط)، الزبائن، النشاط، رابط الانضمام، والإعدادات
 import { $, $$, ago, api, cardHTML, fmt, fmtDate, html, newKey, qrSVG, raw, render, setBrand, stampsHTML, toast } from './common.js';
 import { generateKeyAndCsr } from './csr.js';
-import { parseLatLng } from './rules.js';
+import { countWord, parseLatLng } from './rules.js';
 import { startCameraScan } from './scan.js';
 import { parseBirthday, readCsv, readXlsx } from './sheet.js';
 import { PLAN_BLURB, PLAN_DEFAULTS, compareHTML } from './plans.js';
@@ -317,7 +317,7 @@ function showMember(m) {
     const { mult, label } = perkMult(m);
     amount.oninput = () => {
       const pts = Math.floor(Math.floor(Number(amount.value) * s.pointsPerUnit + 1e-9) * mult + 1e-9);
-      $('#preview').textContent = pts > 0 ? `+${fmt(pts)} نقطة${label}` : ' ';
+      $('#preview').textContent = pts > 0 ? `+${fmt(pts)} ${countWord(pts, 'نقطة', 'نقاط')}${label}` : ' ';
     };
     $('#earnForm').onsubmit = (e) => { e.preventDefault(); earn(m, { amount: amount.value }); };
     if (matchMedia('(pointer: fine)').matches) amount.focus();
@@ -1171,9 +1171,10 @@ function editMenuItem(it) {
 
 // ─── الإعدادات ───
 function ruleText(f) {
-  if (f.programType === 'stamps') return `اجمع ${f.stampsRequired} أختام واحصل على ${f.rewardName}`;
+  const n = (x, one, many) => `${x} ${countWord(Number(x), one, many)}`;
+  if (f.programType === 'stamps') return `اجمع ${n(f.stampsRequired, 'ختم', 'أختام')} واحصل على ${f.rewardName}`;
   const per = Number(f.pointsPerUnit);
-  return `${per === 1 ? `كل 1 ${f.currency} = نقطة` : `كل 1 ${f.currency} = ${per} نقطة`} · ${f.rewardThreshold} نقطة = ${f.rewardName}`;
+  return `${per === 1 ? `كل 1 ${f.currency} = نقطة` : `كل 1 ${f.currency} = ${n(per, 'نقطة', 'نقاط')}`} · ${n(f.rewardThreshold, 'نقطة', 'نقاط')} = ${f.rewardName}`;
 }
 
 // الشعار بيتحفظ PNG (Apple Wallet ما بتقبل غيره)، وإذا كبير منصغّره

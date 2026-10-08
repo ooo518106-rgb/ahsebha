@@ -305,7 +305,7 @@ test('الإنجليزي: الزبون اللي اختار English بتوصله 
   assert.equal((await john.guest.post(`/api/cards/${john.token}/lang`, { lang: 'ar' })).status, 200);
   await p.db.run('UPDATE members SET last_visit = ? WHERE id = ?', Date.now() - 3600e3, john.id);
   await owner.post(`/api/members/${john.id}/earn`, { amount: 10 });
-  assert.match(to(dev)[2].body, /^انضافلك 10 نقطة/);
+  assert.match(to(dev)[2].body, /^انضافلك 10 نقاط/);
   assert.equal((await p.client().post('/api/cards/aaaaaaaaaaaaaaaaaaaa/lang', { lang: 'en' })).status, 404);
 });
 

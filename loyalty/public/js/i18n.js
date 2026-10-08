@@ -20,7 +20,7 @@ export function applyLang() {
 
 const AR = {
   // البطاقة
-  name: 'الاسم', points: 'النقاط', stamps: 'الأختام', unitPoint: 'نقطة', unitStamp: 'ختم',
+  name: 'الاسم', points: 'النقاط', stamps: 'الأختام', unitPoint: 'نقطة', unitStamp: 'ختم', unitPoints: 'نقاط', unitStamps: 'أختام', unitPoint1: 'نقطة', unitStamp1: 'ختم',
   ready1: '🎁 عندك مكافأة جاهزة: {reward}', readyN: '🎁 عندك {n} مكافآت جاهزة: {reward}', remaining: 'باقي {n} {unit} لـ {reward}',
   cardTitle: 'بطاقة {shop}', welcomeNew: 'أهلاً {name}! هاي بطاقتك 🎉', saveToWallet: 'احفظها بالمحفظة عشان تطلعلك بسرعة.',
   gwOff: 'الحفظ بمحفظة Google لسا مش مفعّل. اعرض هالصفحة للكاشير.', appleOff: 'الحفظ بـ Apple Wallet لسا مش مفعّل. اعرض هالصفحة للكاشير.',
@@ -71,7 +71,7 @@ const AR = {
 };
 
 const EN = {
-  name: 'Name', points: 'Points', stamps: 'Stamps', unitPoint: 'points', unitStamp: 'stamps',
+  name: 'Name', points: 'Points', stamps: 'Stamps', unitPoint: 'points', unitStamp: 'stamps', unitPoints: 'points', unitStamps: 'stamps', unitPoint1: 'point', unitStamp1: 'stamp',
   ready1: '🎁 Your reward is ready: {reward}', readyN: '🎁 {n} rewards ready: {reward}', remaining: '{n} {unit} to go for {reward}',
   cardTitle: '{shop} card', welcomeNew: 'Welcome {name}! This is your card 🎉', saveToWallet: 'Save it to your wallet for quick access.',
   gwOff: 'Saving to Google Wallet isn’t available yet. Show this page at the counter.', appleOff: 'Saving to Apple Wallet isn’t available yet. Show this page at the counter.',

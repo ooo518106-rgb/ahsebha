@@ -5,7 +5,7 @@
 import { NULL, children, concat, ctx, int, octets, oid, oidToString, pemToDer, read, seq, set, setOf, utcTime } from '../public/js/asn1.js';
 export { generateKeyAndCsr } from '../public/js/csr.js';
 import { crc32, hexToRgb } from './png.js';
-import { progress, rewardRule, stampsLine } from '../public/js/rules.js';
+import { progress, rewardRule, stampsLine, unitWord } from '../public/js/rules.js';
 
 const OID = {
   rsaEncryption: '1.2.840.113549.1.1.1',
@@ -207,7 +207,7 @@ export function buildPassJson(shop, member, { passTypeId, teamId, origin, authTo
       primaryFields: [{
         key: 'reward',
         label: shop.reward_name,
-        value: p.available ? (p.available > 1 ? `🎁 ${p.available} مكافآت جاهزة` : '🎁 جاهزة') : `باقي ${p.remaining} ${p.remaining >= 3 && p.remaining <= 10 ? (stamps ? 'أختام' : 'نقاط') : stamps ? 'ختم' : 'نقطة'}`,
+        value: p.available ? (p.available > 1 ? `🎁 ${p.available} مكافآت جاهزة` : '🎁 جاهزة') : `باقي ${p.remaining} ${unitWord(shop, p.remaining)}`,
         changeMessage: '%@',
       }],
       secondaryFields: [

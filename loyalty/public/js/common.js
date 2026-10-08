@@ -94,7 +94,9 @@ export function stampsHTML(cost, filled) {
 }
 
 // شكل البطاقة نفسه بصفحة الزبون وبمعاينة الإعدادات. tr = دالة الترجمة (صفحة الزبون)، وبدونها عربي
-const CARD_AR = { name: 'الاسم', points: 'النقاط', stamps: 'الأختام', unitPoint: 'نقطة', unitStamp: 'ختم', ready1: '🎁 عندك مكافأة جاهزة: {reward}', readyN: '🎁 عندك {n} مكافآت جاهزة: {reward}', remaining: 'باقي {n} {unit} لـ {reward}' };
+// مفتاح كلمة الوحدة حسب العدد (بالعربي 3 لـ 10 جمع، وبالإنجليزي 1 مفرد): unitPoint / unitPoints / unitPoint1
+export const unitKey = (stamps, n) => (stamps ? 'unitStamp' : 'unitPoint') + (n >= 3 && n <= 10 ? 's' : n === 1 ? '1' : '');
+const CARD_AR = { name: 'الاسم', points: 'النقاط', stamps: 'الأختام', unitPoint: 'نقطة', unitStamp: 'ختم', unitPoints: 'نقاط', unitStamps: 'أختام', unitPoint1: 'نقطة', unitStamp1: 'ختم', ready1: '🎁 عندك مكافأة جاهزة: {reward}', readyN: '🎁 عندك {n} مكافآت جاهزة: {reward}', remaining: 'باقي {n} {unit} لـ {reward}' };
 const fill = (s, v) => s.replace(/\{(\w+)\}/g, (_, k) => v[k] ?? '');
 export function cardHTML(shop, member, { qr = true, tr = (k, v = {}) => fill(CARD_AR[k], v) } = {}) {
   const p = member.progress;
@@ -102,7 +104,7 @@ export function cardHTML(shop, member, { qr = true, tr = (k, v = {}) => fill(CAR
   const filled = p.available && !p.toward ? p.cost : p.toward;
   const status = p.available
     ? (p.available > 1 ? tr('readyN', { n: p.available, reward: shop.rewardName }) : tr('ready1', { reward: shop.rewardName }))
-    : tr('remaining', { n: p.remaining, unit: tr(stamps ? 'unitStamp' : 'unitPoint'), reward: shop.rewardName });
+    : tr('remaining', { n: p.remaining, unit: tr(unitKey(stamps, p.remaining)), reward: shop.rewardName });
   return html`
     <div class="loyalty-card${p.available ? ' ready' : ''}" style="--c:${shop.color};--ci:${inkFor(shop.color)}">
       <div class="lc-head">
