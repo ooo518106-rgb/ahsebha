@@ -923,4 +923,7 @@ test('أول رسالة الجديدة: صورة + أزرار لما Meta توا
   const after = sends().slice(before);
   assert.deepEqual(after.map((g) => g.body.template.name), ['nuqatak_intro_ar', 'nuqatak_intro']);
   assert.equal((await p.admin.get('/api/admin/sales')).data.intro.status, 'ERROR');
+  // Meta بعتت إن حالة القالب الجديد تغيّرت ← منعيد نفحص فوراً
+  await hook(p.client(), { object: 'whatsapp_business_account', entry: [{ id: '5550001', changes: [{ field: 'message_template_status_update', value: { event: 'APPROVED', message_template_name: 'nuqatak_intro_ar', message_template_language: 'ar' } }] }] });
+  assert.equal((await p.admin.get('/api/admin/sales')).data.intro, null);
 });

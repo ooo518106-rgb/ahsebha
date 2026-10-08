@@ -3235,6 +3235,8 @@ async function stopOutreach(c, why) {
 const TEMPLATE_STOP = new Set(['PAUSED', 'DISABLED', 'FLAGGED', 'REJECTED', 'PENDING_DELETION']);
 const QUALITY_STOP = new Set(['FLAGGED', 'DOWNGRADE']);
 async function waAccountEvent(c, wcfg, ev) {
+  // القالب الجديد تغيّرت حالته (وافقوا، وقّفوه…): منعيد نفحصه بأول رسالة جاية بدل ما نستنى ساعة
+  if (ev.kind === 'template' && wcfg.templates2.includes(ev.name)) await setSetting(c.db, 'wa_tpl2', '');
   if (ev.kind === 'template' && ev.name === wcfg.template && TEMPLATE_STOP.has(ev.event)) {
     await stopOutreach(c, `Meta وقّفت قالب أول رسالة (${ev.event})${ev.reason ? `: ${ev.reason}` : ''}. غالباً ناس بلّغوا عنه أو حظروا الرقم`);
   } else if (ev.kind === 'quality' && QUALITY_STOP.has(ev.event)) {
