@@ -14,6 +14,7 @@ import * as sales from './sales.js';
 import * as wa from './whatsapp.js';
 import { defaultLogoPng } from './png.js';
 import { peekStrip, stripFiles, stripKey, stripPng, STRIP_VERSION } from './strip.js';
+import * as backup from './backup.js';
 import { earnFor, progress, rewardCost, rewardRule, stampsLine, unitLabel, unitWord } from '../public/js/rules.js';
 import { FEATURES } from '../public/js/plans.js';
 import { b64ToBytes, bytesToB64, clean, fail, HttpError, isUniqueError, json, normPhone, randomDigits, randomToken, sha256Hex } from './util.js';
@@ -708,6 +709,7 @@ export async function runScheduled(ctx, now = Date.now()) {
   out.outreach = await salesOutreachJob(c, now).catch((e) => { console.error('outreach:', e.message); return 0; });
   Object.assign(out, await expiryJob(c, shopOf, now));
   out.giftsRefunded = await giftRefundJob(c, now);
+  out.backup = await backupJob(c, now).catch((e) => { console.error('backup:', e.message); return 'error'; });
   const day = localDayKey('JO', now);
   // حساب العرض بيرجع لحاله كل يوم الساعة 4 الصبح، أو فوراً لما ينضافله إشي جديد (رقم النسخة تغيّر)
   const demoOld = (await getSetting(c.db, 'demo_version')) !== String(DEMO_VERSION);
@@ -1384,6 +1386,86 @@ async function saveLead(c, b, source) {
 async function isPlatformAdmin(c) {
   const first = await c.db.get(FIRST_USER);
   return !!(c.user && first && first.id === c.user.id);
+}
+
+// ─── 💾 النسخ الاحتياطي ───
+// كل أسبوع (ليلة الجمعة، 3 الصبح بعمّان) بتنبعت نسخة على إيميل مدير المنصة، إذا الإيميل مربوط (MAIL)
+const BACKUP_EVERY = 7 * DAY;
+async function adminEmail(db) {
+  const u = await db.get(FIRST_USER);
+  return u ? (await db.get('SELECT email FROM users WHERE id = ?', u.id)).email : null;
+}
+
+async function sendBackup(c, now = Date.now()) {
+  const to = (await getSetting(c.db, 'backup_email')) || (await adminEmail(c.db));
+  const data = await backup.exportDb(c.db, now);
+  const gz = await backup.gzipJson(data);
+  const rows = backup.summary(data);
+  const count = (t) => (rows.find((r) => r[0] === t) || [0, 0])[1];
+  const filename = backup.backupName(now);
+  const host = new URL(c.origin).hostname;
+  const text = [
+    'نسخة احتياطية من نقاطك 💾',
+    '',
+    `المحلات: ${count('shops')} · الزبائن: ${count('members')} · الحركات: ${count('txns')}`,
+    `حجم الملف: ${(gz.length / 1024).toFixed(0)} KB`,
+    '',
+    'خلّي الإيميل عندك: الملف فيه كل بيانات المحلات والزبائن.',
+    'الاسترجاع (إذا احتجت): node scripts/restore-backup.mjs الملف > restore.sql ثم npx wrangler d1 execute loyalty --remote --file=restore.sql',
+  ].join('\n');
+  const raw = backup.mimeMessage({ from: `backup@${host}`, fromName: 'نقاطك', to, subject: `💾 نسخة نقاطك الاحتياطية ${filename.slice(16, 26)}`, text, filename, data: gz, now });
+  const EmailMessage = c.env.EmailMessage || (await import('cloudflare:email')).EmailMessage;
+  await c.env.MAIL.send(new EmailMessage(`backup@${host}`, to, raw));
+  const last = { at: now, ok: true, to, size: gz.length, shops: count('shops'), members: count('members') };
+  await setSetting(c.db, 'backup_last', JSON.stringify(last));
+  return last;
+}
+
+async function backupJob(c, now) {
+  if (!c.env.MAIL) return 'no-mail';
+  const last = await jsonSetting(c.db, 'backup_last');
+  const tried = Number(await getSetting(c.db, 'backup_try')) || 0;
+  if (last && last.ok && now - last.at < BACKUP_EVERY - 6 * HOUR) return 'fresh';
+  if (now - tried < 6 * HOUR) return 'wait'; // فشلت قبل شوي: منرجع نجرّب بعد 6 ساعات
+  const t = perks.localTime('JO', now);
+  if (last && last.ok && !(t.hour >= 3 && t.hour < 6)) return 'later'; // بالليل، والموقع فاضي
+  await setSetting(c.db, 'backup_try', now);
+  try {
+    await sendBackup(c, now);
+    return 'sent';
+  } catch (e) {
+    await setSetting(c.db, 'backup_last', JSON.stringify({ ...(last || {}), at: (last && last.at) || null, ok: false, error: clean(e.message, 200), failedAt: now }));
+    throw e;
+  }
+}
+
+async function adminBackup(c) {
+  await requireAdmin(c);
+  const now = Date.now();
+  const gz = await backup.gzipJson(await backup.exportDb(c.db, now));
+  await setSetting(c.db, 'backup_download', now);
+  return new Response(gz, {
+    headers: {
+      'content-type': 'application/gzip',
+      'content-disposition': `attachment; filename="${backup.backupName(now)}"`,
+      'cache-control': 'no-store',
+    },
+  });
+}
+
+async function adminBackupStatus(c) {
+  await requireAdmin(c);
+  if (c.req.method === 'POST') {
+    if (!c.env.MAIL) fail(400, 'الإيميل لسا مش مربوط (Email Routing)');
+    await rateLimit(c, 'backup:send', 5, DAY, 'بعتنا نسخ كتير اليوم، جرّب بكرا');
+    try { await sendBackup(c); } catch (e) { fail(502, `ما انبعتت: ${clean(e.message, 200)}`); }
+  }
+  return json({
+    mail: !!c.env.MAIL,
+    to: (await getSetting(c.db, 'backup_email')) || (await adminEmail(c.db)),
+    last: await jsonSetting(c.db, 'backup_last'),
+    downloadedAt: Number(await getSetting(c.db, 'backup_download')) || null,
+  });
 }
 
 async function requireAdmin(c) {
@@ -3857,6 +3939,9 @@ const API = [
   ['POST', /^\/api\/admin\/apple\/key$/, adminAppleKey, 'staff'],
   ['PUT', /^\/api\/admin\/apple\/cert$/, adminAppleCert, 'staff'],
   ['PUT', /^\/api\/admin\/apple\/apns$/, adminAppleApns, 'staff'],
+  ['GET', /^\/api\/admin\/backup$/, adminBackup, 'staff'],
+  ['GET', /^\/api\/admin\/backup\/status$/, adminBackupStatus, 'staff'],
+  ['POST', /^\/api\/admin\/backup\/status$/, adminBackupStatus, 'staff'],
   ['GET', /^\/api\/admin\/payments$/, adminPayments, 'staff'],
   ['POST', /^\/api\/admin\/payments\/(\d+)$/, adminPaymentDecide, 'staff'],
   ['GET', /^\/api\/admin\/settings$/, adminSettings, 'staff'],

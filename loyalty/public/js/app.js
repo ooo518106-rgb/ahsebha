@@ -1877,6 +1877,36 @@ const SUB_BADGE = {
 };
 const fmtDay = (ms) => new Intl.DateTimeFormat('ar-u-nu-latn', { dateStyle: 'medium' }).format(new Date(ms));
 
+// 💾 النسخ الاحتياطي: تنزيل هلأ، وكل أسبوع على الإيميل
+function backupPanel(b) {
+  const last = b.last;
+  return html`<h2>💾 النسخ الاحتياطي</h2>
+    <p class="small muted">نسخة من كل البيانات: المحلات، الزبائن، النقاط، المنيو، الحوالات والإعدادات. وكمان Cloudflare بتحفظ نسخ لآخر 7 أيام لحالها.</p>
+    ${b.mail
+      ? html`<p class="alert ${last && last.ok ? 'ok' : 'warn'} small">📧 كل أسبوع بتوصلك نسخة على <b dir="ltr">${b.to}</b>${last && last.ok ? html` · آخر وحدة ${ago(last.at)} (${Math.round(last.size / 1024)} KB، ${fmt(last.shops)} محل و ${fmt(last.members)} زبون)` : ''}${last && !last.ok ? html`<br>⚠️ آخر محاولة فشلت: <span dir="ltr">${last.error}</span>` : ''}</p>`
+      : html`<p class="alert warn small">📧 النسخة الأسبوعية على الإيميل لسا مش مربوطة. لهلأ نزّل نسخة بإيدك كل فترة.</p>`}
+    <div class="row">
+      <a class="btn" href="/api/admin/backup" download>⬇️ نزّل نسخة هلأ</a>
+      ${b.mail ? html`<button class="btn ghost" type="button" id="backupSend">📧 ابعت نسخة على إيميلي هلأ</button>` : ''}
+    </div>
+    ${b.downloadedAt ? html`<p class="hint">آخر تنزيل ${ago(b.downloadedAt)}</p>` : ''}
+    <p class="hint">🔒 الملف فيه كل بيانات المحلات والزبائن: خليه عندك (مثلاً iCloud Drive) وما تبعته لحدا.</p>`;
+}
+
+function bindBackup() {
+  const btn = $('#backupSend');
+  if (!btn) return;
+  btn.onclick = async () => {
+    btn.disabled = true;
+    btn.textContent = '📧 عم تنبعت…';
+    try {
+      render($('#backupPanel'), backupPanel(await api('/api/admin/backup/status', { method: 'POST', body: {} })));
+      bindBackup();
+      toast('انبعتت ✅ شيّك على إيميلك', 'ok');
+    } catch (e) { toast(e.message, 'bad'); btn.disabled = false; btn.textContent = '📧 ابعت نسخة على إيميلي هلأ'; }
+  };
+}
+
 // 🆕 سجل التحديثات: كل تحديث برقمه وتاريخه وشو انضاف فيه (الأحدث فوق)
 function updatesPanel({ version, changelog }) {
   return html`<section class="panel updates">
@@ -1898,14 +1928,15 @@ async function admin() {
   let resellers;
   let stats;
   let salesSt;
+  let backupSt;
   const nav = state.nav;
   try {
-    [{ leads }, { shops, signupOpen }, appleSt, pay, { resellers }, stats, salesSt] = await Promise.all([api('/api/admin/leads'), api('/api/admin/shops'), api('/api/admin/apple'), api('/api/admin/payments'), api('/api/admin/resellers'), api('/api/admin/stats'), api('/api/admin/sales')]);
+    [{ leads }, { shops, signupOpen }, appleSt, pay, { resellers }, stats, salesSt, backupSt] = await Promise.all([api('/api/admin/leads'), api('/api/admin/shops'), api('/api/admin/apple'), api('/api/admin/payments'), api('/api/admin/resellers'), api('/api/admin/stats'), api('/api/admin/sales'), api('/api/admin/backup/status')]);
   } catch (e) { if (nav === state.nav) render(view, html`<p class="alert bad">${e.message}</p>`); return; }
   if (nav !== state.nav) return;
   const fresh = leads.filter((l) => l.status === 'new').length;
   render(view, html`
-    ${subnav('admin', [['overview', '📊 الأرقام'], ['pay', `💳 الحوالات${pay.payments.some((p) => p.status === 'pending') ? ' •' : ''}`], ['shops', `🏪 المحلات والطلبات${fresh ? ` (${fresh})` : ''}`], ['sales', `🎯 المبيعات${salesSt.counts.hot ? ` (🔥 ${salesSt.counts.hot})` : ''}`], ['partners', '🤝 المندوبين'], ['apple', '🍎 Apple Wallet'], ['updates', `🆕 التحديثات (${stats.version})`]])}
+    ${subnav('admin', [['overview', '📊 الأرقام'], ['pay', `💳 الحوالات${pay.payments.some((p) => p.status === 'pending') ? ' •' : ''}`], ['shops', `🏪 المحلات والطلبات${fresh ? ` (${fresh})` : ''}`], ['sales', `🎯 المبيعات${salesSt.counts.hot ? ` (🔥 ${salesSt.counts.hot})` : ''}`], ['partners', '🤝 المندوبين'], ['apple', '🍎 Apple Wallet'], ['backup', `💾 النسخ${backupSt.last && backupSt.last.ok ? '' : ' •'}`], ['updates', `🆕 التحديثات (${stats.version})`]])}
     <div class="group" data-group="overview">
     <a class="panel version-chip" href="#admin/updates" data-goto-updates>
       <span class="badge ok num">الإصدار ${stats.version}</span>
@@ -1982,8 +2013,10 @@ async function admin() {
     <div class="group" data-group="apple">
     <section class="panel stack" id="applePanel">${applePanel(appleSt)}</section>
     </div>
+    <div class="group" data-group="backup"><section class="panel stack" id="backupPanel">${backupPanel(backupSt)}</section></div>
     <div class="group" data-group="updates">${updatesPanel(stats)}</div>`);
   bindSubnav('admin', 'overview');
+  bindBackup();
   $('[data-goto-updates]').onclick = (e) => { e.preventDefault(); $('[data-subnav="admin"] [data-g="updates"]').click(); };
   bindApple();
   bindPayments();
