@@ -13,7 +13,7 @@ import { geminiFindShops } from './gemini.js';
 import * as sales from './sales.js';
 import * as wa from './whatsapp.js';
 import { defaultLogoPng } from './png.js';
-import { peekStrip, stripFiles, stripKey, stripPng, STRIP_VERSION } from './strip.js';
+import { heroKey, parseKey, peekStrip, renderKey, stripFiles, stripKey, STRIP_VERSION } from './strip.js';
 import * as backup from './backup.js';
 import { earnFor, progress, rewardCost, rewardRule, stampsLine, unitLabel, unitWord } from '../public/js/rules.js';
 import { FEATURES } from '../public/js/plans.js';
@@ -275,15 +275,24 @@ async function appleConfig(c, { withKey = true } = {}) {
 const PASS_DESIGN_AT = Date.UTC(2026, 9, 8, 18, 40);
 
 // صورة العملات: من الذاكرة، أو من قاعدة البيانات، أو بترسمها (تقيلة) مرة وبتحفظها
-async function stripFor(c, shop, balance) {
-  const k = stripKey(shop, balance);
+async function stripByKey(c, k) {
   const hot = peekStrip(k);
   if (hot) return hot;
   const row = await c.db.get('SELECT png FROM strip_cache WHERE k = ?', k);
   if (row) return b64ToBytes(row.png);
-  const png = await stripPng(shop, balance);
+  const png = await renderKey(k);
   await c.db.run('INSERT OR IGNORE INTO strip_cache (k, png, created_at) VALUES (?, ?, ?)', k, bytesToB64(png), Date.now());
   return png;
+}
+const stripFor = (c, shop, balance) => stripByKey(c, stripKey(shop, balance));
+
+// صورة بطاقة Google Wallet (Google بتنزّلها من الرابط). بس لألوان محلات موجودة، عشان ما حدا يشغّل الرسم على الفاضي
+async function heroImage(c, name) {
+  const k = heroKey(name);
+  const parsed = k && k.startsWith('g') ? parseKey(k) : null;
+  if (!parsed) return notFound(c);
+  if (!peekStrip(k) && !(await c.db.get('SELECT 1 AS x FROM shops WHERE lower(color) = ? LIMIT 1', parsed.color))) return notFound(c);
+  return new Response(await stripByKey(c, k), { headers: { 'content-type': 'image/png', 'cache-control': 'public, max-age=31536000, immutable', 'x-content-type-options': 'nosniff' } });
 }
 
 async function passImages(c, shop) {
@@ -720,7 +729,7 @@ export async function runScheduled(ctx, now = Date.now()) {
     out.demoReset = true;
   }
   await c.db.run('DELETE FROM rate_hits WHERE expires_at < ?', now);
-  await c.db.run('DELETE FROM strip_cache WHERE k NOT LIKE ?', `s${STRIP_VERSION}|%`); // صور رسمة قديمة
+  await c.db.run('DELETE FROM strip_cache WHERE k NOT GLOB ?', `[sg]${STRIP_VERSION}|*`); // صور رسمة قديمة
   return out;
 }
 
@@ -4113,6 +4122,7 @@ export async function handle(req, ctx) {
     if ((m = p.match(/^\/c\/([a-z2-9]{20})\/apple$/))) return await appleSave(c, m[1]);
     if ((m = p.match(/^\/c\/([a-z2-9]{20})\/manifest\.webmanifest$/))) return await cardManifest(c, m[1]);
     if (/^\/c\/[a-z2-9]{20}\/?$/.test(p)) return await page(c, '/card.html');
+    if ((m = p.match(/^\/img\/hero\/([a-z0-9-]{10,60})\.png$/))) return await heroImage(c, m[1]);
     if (p === '/robots.txt') return robotsTxt(c);
     if (p === '/sitemap.xml') return sitemapXml(c);
     if (/\.html$/.test(p)) return notFound(c);

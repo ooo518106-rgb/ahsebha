@@ -5,6 +5,7 @@
 import { progress, rewardRule, stampsLine, unitWord } from '../public/js/rules.js';
 import { b64ToBytes, b64url, b64urlText } from './util.js';
 import { shopLinks } from './apple.js';
+import { heroPath } from './strip.js';
 
 const TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const API = 'https://walletobjects.googleapis.com/walletobjects/v1';
@@ -91,6 +92,8 @@ export function buildObject(cfg, shop, member, origin) {
     secondaryLoyaltyPoints: p.available
       ? { label: 'مكافآت جاهزة', balance: { int: p.available } }
       : { label: 'باقي للمكافأة', balance: { int: p.remaining } },
+    // نفس عملات بطاقة الآيفون (☕ على زخرفة بلون المحل، والهدية ذهبية لما تجهز)
+    heroImage: { sourceUri: { uri: `${origin}${heroPath(shop, member.balance)}` }, contentDescription: { defaultValue: { language: 'ar', value: p.available ? `${shop.reward_name}: جاهزة` : `باقي ${p.remaining} ${unitWord(shop, p.remaining)} لـ ${shop.reward_name}` } } },
     textModulesData: [{ id: 'progress', header: shop.reward_name, body: stamps ? stampsLine(shop, member.balance) : `${p.toward} / ${p.cost} ${unitWord(shop, p.cost)}` }],
     linksModuleData: { uris: [
       ...(shop.review_on ? [{ id: 'rate', uri: `${origin}/c/${member.token}#rate`, description: '⭐ قيّم زيارتك' }] : []),

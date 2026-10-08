@@ -44,6 +44,26 @@ test('شكل الفئة والبطاقة', () => {
   assert.deepEqual(obj.secondaryLoyaltyPoints, { label: 'باقي للمكافأة', balance: { int: 5 } });
   assert.equal(obj.textModulesData[0].body, '●●●●○○○○○');
   assert.equal(obj.linksModuleData.uris[0].uri, 'https://x.test/c/abcdefghijkmnpqrstuv');
+  assert.match(obj.heroImage.sourceUri.uri, /^https:\/\/x\.test\/img\/hero\/g2-[0-9a-f]{6}-[a-z]+-9-4-0\.png$/, 'نفس عملات الآيفون: 9 أختام، 4 مليانين');
+  assert.match(obj.heroImage.contentDescription.defaultValue.value, /^باقي 5 أختام/);
+});
+
+test('صورة بطاقة Google: بتنرسم لألوان المحلات الموجودة بس، وبتنحفظ', async () => {
+  const { db, client } = await setup();
+  const admin = client();
+  const { shop } = await signup(admin, { shopName: 'Mocha Coffee' });
+  const color = (await db.get('SELECT color FROM shops WHERE id = ?', shop.id)).color.slice(1).toLowerCase();
+  const res = await client().req('GET', `/img/hero/g2-${color}-cup-10-4-0.png`);
+  assert.equal(res.status, 200);
+  assert.equal(res.headers.get('content-type'), 'image/png');
+  assert.match(res.headers.get('cache-control'), /immutable/);
+  assert.equal(Buffer.from(res.data).readUInt32BE(16), 1032, 'عرضها 1032');
+  assert.equal(Buffer.from(res.data).readUInt32BE(20), 336, 'طولها 336');
+  assert.ok(await db.get("SELECT 1 AS x FROM strip_cache WHERE k = ?", `g2|#${color}|cup|10|4|0`));
+  assert.equal((await client().req('GET', '/img/hero/g2-123456-cup-10-4-0.png')).status, 404, 'لون مش لمحل');
+  assert.equal((await client().req('GET', `/img/hero/g2-${color}-cup-10-11-0.png`)).status, 404, 'أرقام مش منطقية');
+  assert.equal((await client().req('GET', `/img/hero/s2-${color}-cup-10-4-0.png`)).status, 404, 'بس صور Google من هون');
+  assert.equal((await client().req('GET', `/img/hero/g1-${color}-cup-10-4-0.png`)).status, 404, 'رسمة قديمة');
 });
 
 test('من البداية للنهاية: مزامنة الفئة، رابط الحفظ، وتحديث النقاط بالمحفظة', async () => {

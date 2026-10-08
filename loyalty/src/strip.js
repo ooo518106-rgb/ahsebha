@@ -1,4 +1,4 @@
-// 🎨 صورة الشريط على وجه بطاقة الآيفون (strip.png، 375×144 نقطة): عملات بأيقونة شغل المحل (☕ 🧁 ✂️ 🍴 🛍 ⭐)
+// 🎨 صورة الشريط على وجه بطاقة الآيفون (strip.png، 375×144 نقطة) وصورة بطاقة Google (hero، 1032×336): عملات بأيقونة شغل المحل (☕ 🧁 ✂️ 🍴 🛍 ⭐)
 // على زخرفة نجمة ثمانية خفيفة بلون المحل. المليانة عملات بارزة، الفاضية محفورة، الجاية إطارها متقطّع،
 // وآخر وحدة هدية بتصير عملة ذهبية بتلمع لما المكافأة تجهز. من اليمين لليسار.
 // الرسم تقيل، فمنقسّمه: الخلفية مرة لكل لون، وكل عملة مرة لكل لون وأيقونة، وكل حالة بتتجمّع منهم وبتنحفظ.
@@ -6,11 +6,9 @@ import { encodePng, hexToRgb } from './png.js';
 import { progress } from '../public/js/rules.js';
 
 export const STRIP_VERSION = 2; // غيّره لما يتغيّر الرسم (بيبطّل الكاش)
-const W = 375;
-const H = 144;
 const S = 3; // صورة حادة 3x، والآيفونات الـ 2x بتصغّرها
-const PW = W * S;
-const PH = H * S;
+// s: شريط Apple (البطاقة اللي عليها QR مربّع)، g: صورة Google Wallet (hero) بالنسبة اللي بتطلبها 1032×336
+const FORMATS = { s: { W: 375, H: 144 }, g: { W: 344, H: 112 } };
 
 const c01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
 const cov = (d) => c01(0.5 - d); // تغطية البكسل من المسافة للحافة (حواف ناعمة)
@@ -107,7 +105,7 @@ export function stripState(shop, balance) {
 }
 
 // صفين (أو صف إذا 6 أو أقل)، من اليمين لليسار
-function layout(n) {
+function layout(n, { W, H }) {
   const d = n <= 6 ? 44 : n <= 10 ? 40 : 34;
   const gap = n <= 6 ? 14 : n <= 10 ? 17 : 13;
   const rows = n <= 6 ? [n] : [Math.ceil(n / 2), Math.floor(n / 2)];
@@ -169,8 +167,9 @@ function patternTile() {
 }
 
 // الخلفية: لون المحل + ضو ناعم بالنص + الزخرفة، وكلهم بيختفوا عند الحواف (ما في خط فاصل مع البطاقة)
-function background(color) {
-  return remember(`bg|${color}`, () => {
+function background(color, { W, H }) {
+  return remember(`bg|${color}|${W}x${H}`, () => {
+    const PW = W * S; const PH = H * S;
     const { bg, light } = theme(color);
     const tile = patternTile();
     const stride = PW * 3 + 1;
@@ -257,10 +256,11 @@ function sprite(color, icon, kind, d) {
   });
 }
 
-async function render(color, icon, st) {
+async function render(color, icon, st, f) {
+  const PW = f.W * S; const PH = f.H * S;
   const stride = PW * 3 + 1;
-  const raw = background(color).slice();
-  const { d, spots } = layout(st.slots);
+  const raw = background(color, f).slice();
+  const { d, spots } = layout(st.slots, f);
   spots.forEach((p, n) => {
     const kind = n === st.slots - 1 ? (st.ready ? 'giftReady' : 'gift') : n < st.filled ? 'filled' : n === st.filled ? 'next' : 'empty';
     const sp = sprite(color, icon, kind, d);
@@ -284,17 +284,34 @@ async function render(color, icon, st) {
 
 const normColor = (c) => (/^#[0-9a-f]{6}$/i.test(c || '') ? c.toLowerCase() : '#6b3e26');
 
-// مفتاح الصورة (للحفظ بقاعدة البيانات): نفس المفتاح = نفس الصورة بالزبط
-export function stripKey(shop, balance) {
+// مفتاح الصورة (للحفظ بقاعدة البيانات): نفس المفتاح = نفس الصورة بالزبط. kind: s (Apple) أو g (Google)
+export function stripKey(shop, balance, kind = 's') {
   const st = stripState(shop, balance);
-  return `s${STRIP_VERSION}|${normColor(shop.color)}|${iconFor(shop)}|${st.slots}|${st.filled}|${st.ready ? 1 : 0}`;
+  return `${kind}${STRIP_VERSION}|${normColor(shop.color)}|${iconFor(shop)}|${st.slots}|${st.filled}|${st.ready ? 1 : 0}`;
 }
 
-export async function stripPng(shop, balance) {
-  const color = normColor(shop.color);
-  const icon = iconFor(shop);
-  const st = stripState(shop, balance);
-  return remember(`png|${stripKey(shop, balance)}`, () => render(color, icon, st));
+// المفتاح ← شو نرسم (أو null إذا مش صالح أو من رسمة قديمة)
+export function parseKey(key) {
+  const m = /^([sg])(\d+)\|(#[0-9a-f]{6})\|([a-z]+)\|(\d{1,2})\|(\d{1,2})\|([01])$/.exec(String(key));
+  if (!m || Number(m[2]) !== STRIP_VERSION || !ICONS[m[4]]) return null;
+  const slots = Number(m[5]); const filled = Number(m[6]);
+  if (slots < 1 || slots > 12 || filled > slots) return null;
+  return { f: FORMATS[m[1]], color: m[3], icon: m[4], st: { slots, filled, ready: m[7] === '1' } };
+}
+
+export function renderKey(key) {
+  const k = parseKey(key);
+  if (!k) return null;
+  return remember(`png|${key}`, () => render(k.color, k.icon, k.st, k.f));
+}
+
+export const stripPng = (shop, balance, kind = 's') => renderKey(stripKey(shop, balance, kind));
+
+// رابط صورة Google (عام، وما فيه إشي عن الزبون: بس اللون والأيقونة والتقدّم)، وبيرجع للمفتاح
+export const heroPath = (shop, balance) => `/img/hero/${stripKey(shop, balance, 'g').replace('#', '').replace(/\|/g, '-')}.png`;
+export function heroKey(name) {
+  const p = String(name).split('-');
+  return p.length === 6 ? `${p[0]}|#${p[1]}|${p.slice(2).join('|')}` : null;
 }
 
 export const peekStrip = (key) => cache.get(`png|${key}`) || null; // وعد بالصورة إذا انرسمت بهالـ isolate
