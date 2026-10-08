@@ -3683,6 +3683,19 @@ async function page(c, file) {
 // 🌐 الدومين الرسمي (PUBLIC_URL، مثلاً https://nuqatak.com): صفحات العنوان القديم (workers.dev) و www بتتحوّل لحالها.
 // الـ API وخدمة Apple والصور و sw.js بيضلوا شغّالين على كل العناوين، عشان البطاقات اللي بالمحافظ والإشعارات اللي انبعتت قبل
 const PAGE_RE = /^\/(?:$|index\.html$|app\/?$|privacy\/?$|terms\/?$|cards\/?$|(?:j|m|print)\/[a-z0-9-]{3,40}\/?$|(?:c|g|partner)\/[a-z2-9]{20}\/?$)/;
+// 🔎 Google: شو يقرأ (الصفحة الرئيسية، الشروط، الخصوصية، صفحات المحلات والمنيو) وشو لأ (اللوحة، بطاقات الزبائن، الهدايا، الـ API)
+function robotsTxt(c) {
+  const body = ['User-agent: *', 'Disallow: /api/', 'Disallow: /app', 'Disallow: /c/', 'Disallow: /g/', 'Disallow: /cards', 'Disallow: /partner/', 'Disallow: /print/', 'Disallow: /apple/', '', `Sitemap: ${c.origin}/sitemap.xml`, ''].join('\n');
+  return new Response(body, { headers: { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'public, max-age=3600' } });
+}
+
+function sitemapXml(c) {
+  const day = CHANGELOG[0].date;
+  const urls = [['/', '1.0', 'weekly'], ['/terms', '0.3', 'monthly'], ['/privacy', '0.3', 'monthly']];
+  const body = `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls.map(([u, pr, f]) => `  <url><loc>${c.origin}${u}</loc><lastmod>${day}</lastmod><changefreq>${f}</changefreq><priority>${pr}</priority></url>`).join('\n')}\n</urlset>\n`;
+  return new Response(body, { headers: { 'content-type': 'application/xml; charset=utf-8', 'cache-control': 'public, max-age=3600' } });
+}
+
 function canonicalRedirect(c) {
   if (!c.env.PUBLIC_URL || (c.req.method !== 'GET' && c.req.method !== 'HEAD')) return null;
   let canon;
@@ -3722,6 +3735,8 @@ export async function handle(req, ctx) {
     if ((m = p.match(/^\/c\/([a-z2-9]{20})\/apple$/))) return await appleSave(c, m[1]);
     if ((m = p.match(/^\/c\/([a-z2-9]{20})\/manifest\.webmanifest$/))) return await cardManifest(c, m[1]);
     if (/^\/c\/[a-z2-9]{20}\/?$/.test(p)) return await page(c, '/card.html');
+    if (p === '/robots.txt') return robotsTxt(c);
+    if (p === '/sitemap.xml') return sitemapXml(c);
     if (/\.html$/.test(p)) return notFound(c);
     const res = await c.asset(p);
     return res.status === 404 ? notFound(c) : res;

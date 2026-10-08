@@ -61,3 +61,19 @@ test('صفحة الشروط والأحكام بتفتح، وفيها الأسع�
   assert.match(text, /الإلغاء والاسترجاع/);
   assert.match(text, /12 دينار/);
 });
+
+test('Google: robots.txt بيمنع اللوحة وبطاقات الزبائن، وخريطة الموقع فيها الصفحات العامة', async () => {
+  const w = await setup({ PUBLIC_URL: 'https://nuqatak.test' });
+  const c = w.client();
+  const robots = await c.get('/robots.txt');
+  assert.equal(robots.status, 200);
+  assert.match(String(robots.data), /Disallow: \/c\//);
+  assert.match(String(robots.data), /Disallow: \/app/);
+  assert.match(String(robots.data), /Sitemap: https:\/\/nuqatak\.test\/sitemap\.xml/);
+  const map = String((await c.get('/sitemap.xml')).data);
+  for (const u of ['https://nuqatak.test/', 'https://nuqatak.test/terms', 'https://nuqatak.test/privacy']) assert.ok(map.includes(`<loc>${u}</loc>`), u);
+  const { readFile } = await import('node:fs/promises');
+  const html = await readFile(new URL('../public/index.html', import.meta.url), 'utf8');
+  const ld = JSON.parse(/<script type="application\/ld\+json">(.*?)<\/script>/s.exec(html)[1]);
+  assert.equal(ld[1]['@type'], 'SoftwareApplication');
+});
