@@ -207,7 +207,7 @@ export function buildPassJson(shop, member, { passTypeId, teamId, origin, authTo
       primaryFields: [{
         key: 'reward',
         label: shop.reward_name,
-        value: p.available ? (p.available > 1 ? `🎁 ${p.available} مكافآت جاهزة` : '🎁 جاهزة') : `باقي ${p.remaining} ${stamps ? 'ختم' : 'نقطة'}`,
+        value: p.available ? (p.available > 1 ? `🎁 ${p.available} مكافآت جاهزة` : '🎁 جاهزة') : `باقي ${p.remaining} ${p.remaining >= 3 && p.remaining <= 10 ? (stamps ? 'أختام' : 'نقاط') : stamps ? 'ختم' : 'نقطة'}`,
         changeMessage: '%@',
       }],
       secondaryFields: [
