@@ -1667,14 +1667,17 @@ async function loadBilling() {
   let period = 'month';
   // الأسعار لمحلك (بخصم أول المحلات إذا إلك)
   const price = b.prices || b.plans;
-  const promo = b.promo && b.promo.monthsLeft > 0 ? b.promo : null;
-  const promoNote = promo ? html`<p class="alert ok small">🎁 <b>عرض أول ${promo.total} محل:</b> خصم ${promo.pct}% على ${promo.monthsLeft === promo.months ? `أول ${promo.months} شهور` : `الـ ${promo.monthsLeft} ${promo.monthsLeft === 1 ? 'شهر' : 'شهور'} الجاية`} من اشتراكك، وبينحسب لحاله تحت.${promo.founder ? '' : ` ضايل ${promo.left} مكان بس.`}</p>` : '';
+  // إذا عنده الخصم الخاص وعرض أول المحلات، السيرفر بيحسب الأحسن إله، فبنبيّن نفس اللي انحسب
+  const founder = b.promo && b.promo.monthsLeft > 0 ? b.promo : null;
+  const deal = b.deal && !(founder && founder.pct >= b.deal.pct) ? b.deal : null;
+  const promo = deal ? { ...deal, months: deal.monthsLeft } : founder;
+  const promoNote = deal ? html`<p class="alert ok small">🎁 <b>إلك خصم خاص:</b> ${deal.pct}% ${deal.monthsLeft == null ? 'على كل دفعة' : `على الـ ${deal.monthsLeft === 1 ? 'شهر الجاي' : `${deal.monthsLeft} شهور الجاية`}`}، وبينحسب لحاله تحت.</p>` : promo ? html`<p class="alert ok small">🎁 <b>عرض أول ${promo.total} محل:</b> خصم ${promo.pct}% على ${promo.monthsLeft === promo.months ? `أول ${promo.months} شهور` : `الـ ${promo.monthsLeft} ${promo.monthsLeft === 1 ? 'شهر' : 'شهور'} الجاية`}، أو على سنة كاملة إذا دفعت سنوي. بينحسب لحاله تحت.${promo.founder ? '' : ` ضايل ${promo.left} مكان بس.`}</p>` : '';
   const wa = b.whatsapp ? `https://wa.me/${b.whatsapp}?text=${encodeURIComponent(`مرحبا، بدي أشترك بنقاطك لمحل ${state.shop.name}`)}` : null;
   render(box, html`<h2>💳 الاشتراك</h2>${status}${promoNote}
     <div class="tier-pick" id="tierPick" role="radiogroup" aria-label="الباقة">${['basic', 'pro'].map((t) => html`<div class="tier-card ${t === tier ? 'on' : ''}" role="radio" tabindex="0" aria-checked="${t === tier}" data-tier="${t}">
         <b>${t === 'pro' ? '💎' : '⭐'} ${b.plans[t].name} ${mine === t ? html`<span class="badge ok">باقتك</span>` : ''}</b>
-        <span class="price">${promo ? html`<s class="small muted num">${b.plans[t].month}</s> ` : ''}<span class="num">${price[t].month}</span> <span class="small muted">دينار بالشهر${promo ? ` · أول ${promo.monthsLeft === 1 ? 'شهر' : `${promo.monthsLeft} شهور`}` : ''}</span></span>
-        <span class="small muted">أو <span class="num">${price[t].year}</span> بالسنة${promo ? '' : html` (وفّر <span class="num">${b.plans[t].month * 12 - b.plans[t].year}</span>)`}</span>
+        <span class="price">${promo ? html`<s class="small muted num">${b.plans[t].month}</s> ` : ''}<span class="num">${price[t].month}</span> <span class="small muted">دينار بالشهر${!promo ? '' : promo.monthsLeft == null ? ' · دايماً' : ` · أول ${promo.monthsLeft === 1 ? 'شهر' : `${promo.monthsLeft} شهور`}`}</span></span>
+        <span class="small muted">أو ${promo ? html`<s class="num">${b.plans[t].year}</s> ` : ''}<span class="num">${price[t].year}</span> بالسنة${promo ? (deal ? ' (بخصمك)' : ' (أول سنة)') : html` (وفّر <span class="num">${b.plans[t].month * 12 - b.plans[t].year}</span>)`}</span>
         <span class="small">${PLAN_BLURB[t]}</span>
       </div>`)}</div>
     <details><summary class="small">قارن الباقتين ميزة ميزة</summary>${raw(compareHTML())}</details>
@@ -1996,7 +1999,8 @@ async function admin() {
         const [label, cls] = SUB_BADGE[s.subscription.state](s.subscription);
         const tierBadge = s.subscription.state === 'active' ? html` <span class="badge">${s.plan.tier === 'basic' ? '⭐ أساسي' : '💎 مميز'}</span>` : '';
         const askedReset = s.resetAskedAt && Date.now() - s.resetAskedAt < 7 * 864e5 ? html` <span class="badge warn">🔑 نسي كلمة السر</span>` : '';
-        return html`<li style="align-items:flex-start"><div class="main"><b>${s.name} <span class="badge ${cls}">${label}</span>${tierBadge}${askedReset}</b>
+        const dealBadge = s.deal ? html` <span class="badge ok">🎁 خصم ${s.deal.pct}% · ${s.deal.months ? `${s.deal.months} ${s.deal.months === 1 ? 'شهر' : 'شهور'}` : 'دايماً'}</span>` : s.founder ? html` <span class="badge">🎁 من أول المحلات</span>` : '';
+        return html`<li style="align-items:flex-start"><div class="main"><b>${s.name} <span class="badge ${cls}">${label}</span>${tierBadge}${dealBadge}${askedReset}</b>
           <span class="small muted"><span dir="ltr">${s.ownerEmail || ''}</span> · ${fmt(s.members)} زبون · من ${fmtDate(s.createdAt)} · آخر حركة ${ago(s.lastActivity)}${s.reseller ? ` · 🤝 ${s.reseller}` : ''}</span>
           <div class="row" style="margin-top:6px">
             ${s.subscription.state === 'owner' ? '' : html`<select class="tier-sel" data-tier-for="${s.id}" aria-label="الباقة" style="width:auto;min-height:34px;padding:4px 8px">
@@ -2006,7 +2010,8 @@ async function admin() {
             ${s.subscription.state === 'active' ? html`<button class="btn sm ghost" type="button" data-plan="${s.plan.chosen === 'basic' ? 'pro' : 'basic'}" data-shop="${s.id}">⇄ ${s.plan.chosen === 'basic' ? 'رقّي للمميز' : 'نزّل للأساسي'}</button>` : ''}
             ${s.subscription.state === 'expired' ? '' : html`<button class="btn sm ghost" type="button" data-plan="stop" data-shop="${s.id}">إيقاف</button>`}`}
             <button class="btn sm ghost" type="button" data-shop-menu="${s.id}">📋 المنيو</button>
-            ${s.subscription.state === 'owner' ? '' : html`<button class="btn sm ghost" type="button" data-reset-link="${s.id}">🔑 رابط كلمة سر</button>`}
+            ${s.subscription.state === 'owner' ? '' : html`<button class="btn sm ghost" type="button" data-reset-link="${s.id}">🔑 رابط كلمة سر</button>
+            <button class="btn sm ghost" type="button" data-deal="${s.id}">🎁 خصم</button>`}
           </div><div class="reset-box"></div></div></li>`;
       })}</ul>` : html`<p class="muted">ما في محلات لسا.</p>`}
     </section>
@@ -2051,6 +2056,31 @@ async function admin() {
           try { await navigator.clipboard.writeText(text); toast('انسخ ✅', 'ok'); } catch { prompt('انسخ الرسالة:', text); }
         };
       } catch (e) { toast(e.message, 'bad'); }
+    };
+  });
+  // 🎁 خصم خاص لمحل: النسبة وعلى كم شهر، بينحسب لحاله بصفحة الدفع عنده
+  $$('[data-deal]').forEach((b) => {
+    b.onclick = () => {
+      const shop = shops.find((x) => String(x.id) === b.dataset.deal);
+      const d = shop.deal || { pct: 20, months: 3 };
+      const box = b.closest('li').querySelector('.reset-box');
+      render(box, html`<form class="alert ok small stack" style="margin-top:8px" data-deal-form>
+        <b>🎁 خصم خاص لـ ${shop.name}</b>
+        <div class="row">
+          <label class="grow">الخصم %<input name="pct" type="number" min="1" max="90" value="${d.pct}" class="num" required></label>
+          <label class="grow">لمدة<select name="months">${[[1, 'شهر'], [3, '3 شهور'], [6, '6 شهور'], [12, 'سنة'], [0, 'دايماً']].map(([v, t]) => html`<option value="${v}" ${v === d.months ? 'selected' : ''}>${t}</option>`)}</select></label>
+        </div>
+        <span class="muted">بيبلّش من الدفعة الجاية. إذا دفع سنوي بينخصم من السنة بقدر الشهور. وإذا عنده عرض أول المحلات، بياخد الأحسن إله.</span>
+        <div class="row"><button class="btn sm" type="submit">احفظ الخصم</button>
+          ${shop.deal ? html`<button class="btn sm ghost" type="button" data-deal-off>شيل الخصم</button>` : ''}</div>
+      </form>`);
+      const send = async (body) => {
+        try { await api(`/api/admin/shops/${shop.id}/deal`, { method: 'POST', body }); toast(body.pct ? 'انحفظ الخصم، ووصله إشعار ✅' : 'انشال الخصم', 'ok'); admin(); } catch (e) { toast(e.message, 'bad'); }
+      };
+      const form = box.querySelector('[data-deal-form]');
+      form.onsubmit = (e) => { e.preventDefault(); const f = new FormData(form); send({ pct: Number(f.get('pct')), months: Number(f.get('months')) }); };
+      const offBtn = box.querySelector('[data-deal-off]');
+      if (offBtn) offBtn.onclick = () => send({ pct: 0 });
     };
   });
   $$('[data-plan]').forEach((b) => {

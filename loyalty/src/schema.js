@@ -449,4 +449,9 @@ export const MIGRATIONS = [
   'ALTER TABLE shops ADD COLUMN founder_at INTEGER',
   'ALTER TABLE payments ADD COLUMN discount REAL NOT NULL DEFAULT 0',
   'ALTER TABLE payments ADD COLUMN promo_months INTEGER NOT NULL DEFAULT 0',
+  // 🎁 خصم خاص من مدير المنصة لمحل: النسبة، على كم شهر (0 = دايماً)، ومن إمتى؛ وكم شهر منه غطّت كل دفعة
+  'ALTER TABLE shops ADD COLUMN deal_pct INTEGER NOT NULL DEFAULT 0',
+  'ALTER TABLE shops ADD COLUMN deal_months INTEGER NOT NULL DEFAULT 0',
+  'ALTER TABLE shops ADD COLUMN deal_at INTEGER',
+  'ALTER TABLE payments ADD COLUMN deal_months INTEGER NOT NULL DEFAULT 0',
 ];

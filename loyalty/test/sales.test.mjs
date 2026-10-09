@@ -79,7 +79,7 @@ test('مساعد المبيعات بالموقع: بيبعت لـ Claude الت�
   assert.deepEqual(b.system[0].cache_control, { type: 'ephemeral' });
   assert.match(b.system[0].text, /أساسي 12 دينار بالشهر أو 120 دينار بالسنة/);
   assert.match(b.system[0].text, /مميز 25 دينار بالشهر أو 250 دينار بالسنة/);
-  assert.match(b.system[0].text, /العرض الوحيد بالسعر: «عرض أول المحلات»: أول 20 محل بيشتركوا بياخدوا خصم 30% على أول 3 شهور \(الأساسي 8\.4 دينار/);
+  assert.match(b.system[0].text, /العرض الوحيد بالسعر: «عرض أول المحلات»: أول 20 محل بيشتركوا بياخدوا خصم 30%: إذا دفع شهري على أول 3 شهور \(الأساسي 8\.4 دينار.*وإذا دفع سنوي على أول سنة كاملة \(الأساسي 84 دينار بدل 120 دينار، والمميز 175 دينار بدل 250 دينار\)/);
   assert.match(b.system[0].text, /غير هيك السعر ثابت/);
   assert.match(b.system[0].text, /لـ 30 يوم كحد أقصى/);
   assert.match(b.system[0].text, /https:\/\/nuqatak\.test\/#start/);

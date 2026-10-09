@@ -524,7 +524,7 @@ test('عرض أول المحلات: خصم 30% على أول 3 شهور لأول
   const { shop } = await signup(owner, { shopName: 'Cafe' });
   assert.deepEqual((await client().get('/api/site')).data.promo, { pct: 30, months: 3, total: 2, left: 2 });
   let b = (await owner.get('/api/billing')).data;
-  assert.deepEqual(b.prices, { basic: { month: 8.4, year: 109.2 }, pro: { month: 17.5, year: 227.5 } }, 'السنوي: بينخصم منه خصم 3 شهور');
+  assert.deepEqual(b.prices, { basic: { month: 8.4, year: 84 }, pro: { month: 17.5, year: 175 } }, 'الشهري والسنوي بخصم 30%');
   assert.equal(b.promo.monthsLeft, 3);
   // الشهري بالخصم، والحوالة اللي بتستنى بتحجز شهرها
   b = (await owner.post('/api/billing/claim', { plan: 'month', tier: 'pro', payer: 'أحمد' })).data;
@@ -542,9 +542,10 @@ test('عرض أول المحلات: خصم 30% على أول 3 شهور لأول
   b = (await owner.get('/api/billing')).data;
   assert.equal(b.promo.monthsLeft, 2, 'المرفوضة رجّعت شهرها');
   assert.equal(b.promo.founder, true);
-  // السنوي بعد شهر: بينخصم خصم الشهرين الباقيين، وبعدها السعر العادي
+  // السنوي بعد شهر: أول سنة بخصم 30% وبتخلّص الشهور الباقية، وبعدها السعر العادي
   b = (await owner.post('/api/billing/claim', { plan: 'year', tier: 'pro', payer: 'أحمد' })).data;
-  assert.equal(b.payments[0].amount, 235);
+  assert.equal(b.payments[0].amount, 175);
+  assert.equal(b.payments[0].discount, 75);
   await admin.post(`/api/admin/payments/${b.payments[0].id}`, { action: 'approve' });
   b = (await owner.get('/api/billing')).data;
   assert.deepEqual(b.prices.pro, { month: 25, year: 250 });
@@ -564,6 +565,34 @@ test('عرض أول المحلات: خصم 30% على أول 3 شهور لأول
   assert.deepEqual(b.prices.basic, { month: 12, year: 120 });
   assert.equal(b.promo.left, 0);
   assert.equal(b.promo.monthsLeft, 0);
+  // 🎁 خصم خاص من مدير المنصة: 50% على شهر واحد (السنوي بينخصم منه بقدر الشهر)، وبعدها السعر العادي
+  const late = (await admin.get('/api/admin/shops')).data.shops.find((x) => x.name === 'Late');
+  assert.equal((await owner3.post(`/api/admin/shops/${late.id}/deal`, { pct: 50, months: 1 })).status, 403, 'بس مدير المنصة');
+  assert.equal((await admin.post(`/api/admin/shops/${late.id}/deal`, { pct: 95, months: 1 })).status, 400);
+  let shopsList = (await admin.post(`/api/admin/shops/${late.id}/deal`, { pct: 50, months: 1 })).data.shops;
+  assert.deepEqual(shopsList.find((x) => x.id === late.id).deal, { pct: 50, months: 1 });
+  b = (await owner3.get('/api/billing')).data;
+  assert.deepEqual(b.prices.basic, { month: 6, year: 114 });
+  assert.deepEqual(b.deal, { pct: 50, monthsLeft: 1 });
+  b = (await owner3.post('/api/billing/claim', { plan: 'month', tier: 'basic', payer: 'سامي' })).data;
+  assert.equal(b.payments[0].amount, 6);
+  assert.equal(b.deal, null, 'خلص شهره');
+  assert.deepEqual(b.prices.basic, { month: 12, year: 120 });
+  // دايماً 20%، وبينشال بـ 0
+  await admin.post(`/api/admin/shops/${late.id}/deal`, { pct: 20, months: 0 });
+  b = (await owner3.get('/api/billing')).data;
+  assert.deepEqual(b.prices.basic, { month: 9.6, year: 96 });
+  assert.deepEqual(b.deal, { pct: 20, monthsLeft: null });
+  await admin.post(`/api/admin/shops/${late.id}/deal`, { pct: 0 });
+  assert.equal((await owner3.get('/api/billing')).data.deal, null);
+  // محل من أول المحلات بخصم خاص أقل: بياخد الأحسن إله
+  await admin.post(`/api/admin/shops/${shop2.id}/deal`, { pct: 10, months: 12 });
+  b = (await owner2.get('/api/billing')).data;
+  assert.equal(b.prices.basic.month, 8.4, '30% أحسن من 10%');
+  for (let i = 0; i < 2; i++) assert.equal((await owner2.post('/api/billing/claim', { plan: 'month', tier: 'basic', payer: 'خالد' })).data.payments[0].amount, 8.4, 'الشهرين الباقيين من العرض');
+  for (const x of (await admin.get('/api/admin/payments')).data.payments.filter((x) => x.status === 'pending')) await admin.post(`/api/admin/payments/${x.id}`, { action: 'approve' });
+  b = (await owner2.post('/api/billing/claim', { plan: 'month', tier: 'basic', payer: 'خالد' })).data;
+  assert.equal(b.payments[0].amount, 10.8, 'خلصت شهور العرض، فبياخد خصمه الخاص');
   const sales = await import('../src/sales.js');
   assert.match(sales.salesContext({ today: 'x', promoLeft: 0 }), /عرض أول المحلات خلص/);
   assert.match(sales.salesContext({ today: 'x', promoLeft: 7 }), /ضايل 7 مكان/);

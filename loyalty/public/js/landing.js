@@ -118,13 +118,13 @@ function drawPlans(plans = PLAN_DEFAULTS, promo = null) {
   const card = (tier, best) => {
     const p = plans[tier];
     const save = p.month * 12 - p.year;
-    const year = promo ? Math.round((p.year - (p.month * promo.months * promo.pct) / 100) * 100) / 100 : p.year;
+    const year = promo ? off(p.year, promo.pct) : p.year;
     return `<div class="plan${best ? ' best' : ''}">
       ${best ? '<span class="badge ok">الأكثر طلباً</span>' : ''}
       <h3>${tier === 'pro' ? '💎' : '⭐'} ${p.name}</h3>
       <div class="price">${promo ? `<s class="num">${p.month}</s>` : ''}<b class="num">${promo ? off(p.month, promo.pct) : p.month}</b><span>دينار / بالشهر</span></div>
       ${promo ? `<p class="small promo-note">🎁 أول ${promo.months} شهور، وبعدها ${p.month}</p>` : ''}
-      <p class="small muted">أو <b class="num">${year}</b> دينار ${promo ? 'لأول سنة' : 'بالسنة'}${save > 0 && !promo ? ` (وفّر ${save})` : ''}</p>
+      <p class="small muted">أو ${promo ? `<s class="num">${p.year}</s> ` : ''}<b class="num">${year}</b> دينار ${promo ? `لأول سنة (خصم ${promo.pct}%)` : 'بالسنة'}${save > 0 && !promo ? ` (وفّر ${save})` : ''}</p>
       <a class="btn block${best ? '' : ' ghost'}" href="#contact" data-start>ابدأ التجربة المجانية</a>
       ${featuresHTML(tier)}
     </div>`;
@@ -137,11 +137,11 @@ drawPlans();
 function showPromo(pr) {
   const taken = pr.total - pr.left;
   const band = $('#promoBand');
-  band.innerHTML = `<div><b>🎁 عرض أول ${pr.total} محل</b><span>خصم ${pr.pct}% على أول ${pr.months} شهور من الاشتراك، وبينحسب لحاله وقت الدفع.</span></div>
+  band.innerHTML = `<div><b>🎁 عرض أول ${pr.total} محل</b><span>خصم ${pr.pct}% على أول ${pr.months} شهور، أو على أول سنة كاملة إذا دفعت سنوي. بينحسب لحاله وقت الدفع.</span></div>
     <div class="promo-left"><b class="num">${pr.left}</b><span>مكان ضايل</span><i style="--w:${Math.round((taken / pr.total) * 100)}%"></i></div>`;
   band.classList.remove('hidden');
   const hero = $('#heroPromo');
-  hero.textContent = `🎁 خصم ${pr.pct}% على أول ${pr.months} شهور لأول ${pr.total} محل · ضايل ${pr.left} مكان`;
+  hero.textContent = `🎁 خصم ${pr.pct}% لأول ${pr.total} محل (أول ${pr.months} شهور أو أول سنة) · ضايل ${pr.left} مكان`;
   hero.classList.remove('hidden');
 }
 
