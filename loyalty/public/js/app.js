@@ -2540,9 +2540,17 @@ const postHour = (h) => `${h % 12 || 12}:00 ${h < 12 ? 'الصبح' : h < 17 ? '
 function socialPanel(d) {
   const c = d.cfg;
   const queued = d.posts.filter((p) => p.status === 'queued').length;
-  const conn = !d.ready ? html`<p class="alert warn small">🔌 لسا مش مربوط بـ Meta: لازم <b dir="ltr">META_TOKEN</b> بإعدادات Cloudflare (Claude بيشرحلك الخطوات).</p>`
-    : d.account && d.account.ok ? html`<p class="alert ok small">✅ مربوط: صفحة <b>${d.account.page}</b>${d.account.ig ? html` · إنستغرام <b dir="ltr">@${d.account.ig}</b>` : ' · ⚠️ ما في إنستغرام مربوط بالصفحة'}</p>`
-      : html`<p class="alert bad small">❌ Meta رفضت التوكن: <span dir="auto">${d.account ? d.account.error : ''}</span></p>`;
+  const a = d.account;
+  const connectForm = html`<form class="stack" id="socialConnect">
+      <label class="field"><span>🔑 الصق المفتاح (Access Token) من Graph API Explorer</span>
+        <input name="token" type="password" autocomplete="off" dir="ltr" required placeholder="EAA…"></label>
+      <button class="btn" type="submit">🔗 اربط فيسبوك وإنستغرام</button>
+      <span class="hint">المنصة بتحوّله لحالها لمفتاح صفحة ما بيخلص، وبتحفظه.</span>
+    </form>`;
+  const conn = !d.ready ? html`<p class="alert warn small">🔌 لسا مش مربوط بفيسبوك وإنستغرام.</p>${connectForm}`
+    : a && a.ok ? html`<p class="alert ok small">✅ مربوط: صفحة <b>${a.page}</b>${a.ig ? html` · إنستغرام <b dir="ltr">@${a.ig}</b>` : ' · ⚠️ ما في إنستغرام مربوط بالصفحة'}${a.note ? html`<br>⚠️ ${a.note}` : ''}</p>
+        ${a.source === 'saved' ? html`<button class="btn sm ghost" type="button" id="socialDisconnect">فك الربط</button>` : ''}`
+      : html`<p class="alert bad small">❌ Meta رفضت المفتاح: <span dir="auto">${a ? a.error : ''}</span></p>${a && a.source === 'saved' ? connectForm : ''}`;
   return html`<section class="panel stack" id="socialPanel">
     <h2>📣 وكيل النشر</h2>
     <p class="hint">بينشر لحاله منشور باليوم على إنستغرام وفيسبوك من الدور تحت، بالأيام والساعة اللي بتختارها. إذا المنشور ما إله نص، الوكيل بيكتبه${d.ai ? '' : ' (لازم مفتاح الذكاء الاصطناعي، وإلا بيحط نص جاهز)'}.</p>
@@ -2622,6 +2630,10 @@ function bindSocial() {
     const f = e.target;
     call('/api/admin/social', { method: 'PUT', body: { on: f.on.checked, days: [...f.querySelectorAll('[name=day]:checked')].map((x) => Number(x.value)), hour: Number(f.hour.value), ig: f.ig.checked, fb: f.fb.checked } }, 'انحفظ ✅');
   };
+  const conn = $('#socialConnect', box);
+  if (conn) conn.onsubmit = (e) => { e.preventDefault(); call('/api/admin/social/connect', { method: 'POST', body: { token: e.target.token.value.trim() } }, 'انربط ✅'); };
+  const disc = $('#socialDisconnect', box);
+  if (disc) disc.onclick = () => { if (confirm('تفك ربط فيسبوك وإنستغرام؟ النشر التلقائي بيوقف.')) call('/api/admin/social/connect', { method: 'POST', body: { action: 'disconnect' } }, 'انفك الربط'); };
   const lib = $('#socialLib', box);
   if (lib) lib.onclick = () => call('/api/admin/social/posts', { method: 'POST', body: { library: true } }, 'انضافوا للدور ✅');
   $$('[data-sp] [data-act]', box).forEach((b) => {

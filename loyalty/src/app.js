@@ -1463,10 +1463,41 @@ const SOCIAL_MAX = 60;
 const socialCfg = async (db) => social.readCfg(await jsonSetting(db, 'social_cfg'));
 const socialImage = (c, p) => `${c.origin}${p.src || `/media/social/${p.id}.jpg`}`;
 const nextSocial = (db) => db.get("SELECT * FROM social_posts WHERE status = 'queued' ORDER BY sort, id LIMIT 1");
+const socialMeta = async (c) => social.metaConfig(c.env, await jsonSetting(c.db, 'social_meta'));
+
+// 🔑 ربط من اللوحة: بتلصق المفتاح من Graph API Explorer، ومنحوّله لمفتاح صفحة ما بيخلص ومنحفظه
+async function adminSocialConnect(c) {
+  await requireAdmin(c);
+  if (c.body.action === 'disconnect') {
+    await c.db.run("DELETE FROM platform_settings WHERE k = 'social_meta'");
+    return adminSocial(c);
+  }
+  const raw = String(c.body.token || '').trim();
+  if (!/^[A-Za-z0-9_-]{40,1000}$/.test(raw)) fail(400, 'الصق المفتاح كامل (Access Token)');
+  await rateLimit(c, `socialconn:${c.user.id}`, 10, 60 * MIN, 'محاولات كتير، استنى شوي');
+  const base = social.metaConfig({ ...c.env, META_TOKEN: raw });
+  let token = raw;
+  let note = null;
+  try {
+    const app = await social.appOf(base);
+    const secret = String(c.env.META_APP_SECRET || c.env.WHATSAPP_APP_SECRET || '').trim();
+    if (secret) {
+      try { token = await social.exchange(base, app.id, secret); } catch (e) { note = `ما قدرنا نطوّل المفتاح (${clean(e.message, 120)})، ممكن يخلص بعد ساعة`; }
+    } else note = 'ناقص سر التطبيق، فالمفتاح ممكن يخلص بعد ساعة';
+  } catch (e) {
+    fail(400, `Meta رفضت المفتاح: ${clean(e.message, 200)}`);
+  }
+  let acc;
+  try {
+    acc = await social.accounts({ ...base, token });
+  } catch (e) { fail(400, `Meta: ${clean(e.message, 200)}`); }
+  await setSetting(c.db, 'social_meta', JSON.stringify({ token: acc.pageToken, pageId: acc.pageId, page: acc.pageName, ig: acc.igUser, at: Date.now(), note }));
+  return adminSocial(c);
+}
 
 async function socialJob(c, now) {
   const cfg = await socialCfg(c.db);
-  const meta = social.metaConfig(c.env);
+  const meta = await socialMeta(c);
   if (!cfg.on || !meta) return 'off';
   const t = perks.localTime('JO', now);
   if (!cfg.days.includes(t.weekday) || t.hour < cfg.hour) return 'later';
@@ -1538,13 +1569,14 @@ async function adminSocial(c) {
     if (!cfg.ig && !cfg.fb) fail(400, 'اختار إنستغرام أو فيسبوك');
     await setSetting(c.db, 'social_cfg', JSON.stringify(cfg));
   }
-  const meta = social.metaConfig(c.env);
+  const meta = await socialMeta(c);
   let account = null;
   if (meta) {
     try {
       const a = await social.accounts(meta);
-      account = { ok: true, page: a.pageName, ig: a.igUser };
-    } catch (e) { account = { ok: false, error: clean(e.message, 300) }; }
+      account = { ok: true, page: a.pageName, ig: a.igUser, source: meta.source };
+    } catch (e) { account = { ok: false, error: clean(e.message, 300), source: meta.source }; }
+    if (meta.source === 'saved') account.note = ((await jsonSetting(c.db, 'social_meta')) || {}).note || null;
   }
   const rows = await c.db.all(`SELECT id, src, caption, topic, status, error, ig_id, fb_id, created_at, posted_at FROM social_posts
     ORDER BY CASE status WHEN 'queued' THEN 0 WHEN 'failed' THEN 1 ELSE 2 END, CASE status WHEN 'queued' THEN sort ELSE -posted_at END, id LIMIT 80`);
@@ -1589,8 +1621,8 @@ async function adminSocialPost(c, id) {
   } else if (a === 'top') await c.db.run('UPDATE social_posts SET sort = (SELECT MIN(sort) FROM social_posts) - 1 WHERE id = ?', post.id);
   else if (a === 'retry') await c.db.run("UPDATE social_posts SET status = 'queued', error = NULL WHERE id = ?", post.id);
   else if (a === 'publish') {
-    const meta = social.metaConfig(c.env);
-    if (!meta) fail(400, 'حط META_TOKEN بإعدادات Cloudflare أول');
+    const meta = await socialMeta(c);
+    if (!meta) fail(400, 'اربط حسابات فيسبوك وإنستغرام أول');
     if (post.status === 'posted') fail(400, 'هالمنشور نزل قبل');
     await rateLimit(c, 'social:now', 10, DAY, 'نشرت كتير اليوم');
     const r = await publishSocial(c, post, await socialCfg(c.db), meta);
@@ -4351,6 +4383,7 @@ const API = [
   ['GET', /^\/api\/admin\/social$/, adminSocial, 'staff'],
   ['PUT', /^\/api\/admin\/social$/, adminSocial, 'staff'],
   ['POST', /^\/api\/admin\/social\/posts$/, adminSocialAdd, 'staff'],
+  ['POST', /^\/api\/admin\/social\/connect$/, adminSocialConnect, 'staff'],
   ['POST', /^\/api\/admin\/social\/posts\/(\d+)$/, adminSocialPost, 'staff'],
   ['GET', /^\/api\/admin\/testimonials$/, adminTestimonials, 'staff'],
   ['POST', /^\/api\/admin\/testimonials$/, adminTestimonials, 'staff'],

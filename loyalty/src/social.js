@@ -98,10 +98,13 @@ export function readCfg(v) {
 }
 
 // ─── Meta Graph API ───
-export const metaConfig = (env) => {
-  const token = String(env.META_TOKEN || '').trim();
+// المفتاح: META_TOKEN من Cloudflare، أو المحفوظ من ربط اللوحة (stored: { token, pageId })
+export const metaConfig = (env, stored = null) => {
+  const fromEnv = String(env.META_TOKEN || '').trim();
+  const token = fromEnv || (stored && stored.token) || '';
   if (!token) return null;
-  return { token, pageId: String(env.META_PAGE_ID || '').trim() || null, version: [env.META_GRAPH_VERSION, env.WHATSAPP_API_VERSION].find((v) => /^v\d+\.\d+$/.test(String(v || ''))) || 'v26.0', fetch: env.fetch || fetch };
+  const pageId = String(env.META_PAGE_ID || '').trim() || (!fromEnv && stored && stored.pageId) || null;
+  return { token, pageId, source: fromEnv ? 'env' : 'saved', version: [env.META_GRAPH_VERSION, env.WHATSAPP_API_VERSION].find((v) => /^v\d+\.\d+$/.test(String(v || ''))) || 'v26.0', fetch: env.fetch || fetch };
 };
 
 async function graph(cfg, path, { method = 'GET', token = cfg.token, body } = {}) {
@@ -120,6 +123,11 @@ async function graph(cfg, path, { method = 'GET', token = cfg.token, body } = {}
   }
   return data;
 }
+
+// 🔑 ربط من اللوحة: المفتاح اللي بيطلع من Graph API Explorer (توكن مستخدم قصير، ساعة أو ساعتين).
+// منحوّله لطويل بسر التطبيق، ومنه منطلّع توكن الصفحة (ما بيخلص)
+export const appOf = (cfg) => graph(cfg, 'app?fields=id,name');
+export const exchange = async (cfg, appId, secret) => (await graph(cfg, `oauth/access_token?grant_type=fb_exchange_token&client_id=${encodeURIComponent(appId)}&client_secret=${encodeURIComponent(secret)}&fb_exchange_token=${encodeURIComponent(cfg.token)}`)).access_token;
 
 // الصفحة وحساب إنستغرام المربوط فيها، وتوكن الصفحة (للنشر). إذا في أكتر من صفحة: META_PAGE_ID أو اللي معها إنستغرام.
 // التوكن ممكن يكون توكن مستخدم/نظام (فيه صفحات) أو توكن الصفحة نفسها

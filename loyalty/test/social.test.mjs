@@ -49,7 +49,7 @@ test('وكيل النشر: المنشورات الجاهزة بتنزل على �
   assert.equal((await owner.get('/api/admin/social')).status, 403, 'بس مدير المنصة');
   let s = (await p.admin.get('/api/admin/social')).data;
   assert.equal(s.ready, true);
-  assert.deepEqual(s.account, { ok: true, page: 'نقاطك - Nuqatak', ig: 'nuqatak' });
+  assert.deepEqual(s.account, { ok: true, page: 'نقاطك - Nuqatak', ig: 'nuqatak', source: 'env' });
   assert.equal(s.cfg.on, false, 'مطفي لحد ما تشغّله');
   assert.equal(s.library, LIBRARY.length);
   // المكتبة: مرة وحدة بس
@@ -134,7 +134,40 @@ test('وكيل النشر: بيقبل توكن الصفحة نفسها كمان'
     return new Response(null, { status: 201 });
   };
   const p = await platform({ fetch, META_TOKEN: 'page-token' });
-  assert.deepEqual((await p.admin.get('/api/admin/social')).data.account, { ok: true, page: 'نقاطك', ig: 'nuqatak' });
+  assert.deepEqual((await p.admin.get('/api/admin/social')).data.account, { ok: true, page: 'نقاطك', ig: 'nuqatak', source: 'env' });
+});
+
+test('وكيل النشر: بتلصق المفتاح من Graph API Explorer باللوحة، ومنحوّله لمفتاح صفحة طويل ومنحفظه', async () => {
+  const calls = [];
+  const SHORT = `EAAshort${'x'.repeat(60)}`;
+  const LONG = `EAAlong${'y'.repeat(60)}`;
+  const fetch = async (url, init = {}) => {
+    const u = String(url);
+    const json = (d, s = 200) => new Response(JSON.stringify(d), { status: s, headers: { 'content-type': 'application/json' } });
+    if (!u.startsWith('https://graph.facebook.com/')) return new Response(null, { status: 201 });
+    const auth = new Headers(init.headers).get('authorization');
+    calls.push({ u, auth });
+    if (u.includes('/app?fields=')) return auth === `Bearer ${SHORT}` ? json({ id: '777', name: 'Nuqatak Agent' }) : json({ error: { message: 'Invalid OAuth access token' } }, 400);
+    if (u.includes('/oauth/access_token')) return json({ access_token: LONG, token_type: 'bearer' });
+    if (u.includes('/me/accounts')) return auth === `Bearer ${LONG}` ? json({ data: [{ id: 'P1', name: 'نقاطك', access_token: 'page-forever', instagram_business_account: { id: 'IG1', username: 'nuqatak' } }] }) : json({ error: { message: 'bad' } }, 400);
+    if (u.includes('/P1?fields=')) return json({ id: 'P1', name: 'نقاطك', access_token: 'page-forever', instagram_business_account: { id: 'IG1', username: 'nuqatak' } });
+    return json({ error: { message: 'unknown' } }, 400);
+  };
+  const p = await platform({ fetch, WHATSAPP_APP_SECRET: 'app-secret' });
+  assert.equal((await p.admin.post('/api/admin/social/connect', { token: 'short' })).status, 400);
+  assert.equal((await p.admin.post('/api/admin/social/connect', { token: `EAAbad${'z'.repeat(60)}` })).status, 400, 'Meta رفضت');
+  const r = await p.admin.post('/api/admin/social/connect', { token: SHORT });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.equal(r.data.ready, true);
+  assert.deepEqual(r.data.account, { ok: true, page: 'نقاطك', ig: 'nuqatak', source: 'saved', note: null });
+  const ex = calls.find((x) => x.u.includes('/oauth/access_token'));
+  assert.match(ex.u, /client_id=777&client_secret=app-secret&fb_exchange_token=EAAshort/);
+  assert.equal(calls.at(-1).auth, 'Bearer page-forever', 'بعد الربط: بمفتاح الصفحة');
+  const saved = JSON.parse((await p.db.get("SELECT v FROM platform_settings WHERE k = 'social_meta'")).v);
+  assert.equal(saved.token, 'page-forever');
+  assert.equal(saved.pageId, 'P1');
+  const off = await p.admin.post('/api/admin/social/connect', { action: 'disconnect' });
+  assert.equal(off.data.ready, false);
 });
 
 test('وكيل النشر: بدون META_TOKEN بيبيّن إنه مش مربوط، والإعدادات بتتصلّح', async () => {
