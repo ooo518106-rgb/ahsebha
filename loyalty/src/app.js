@@ -3302,10 +3302,17 @@ async function waIncoming(c, wcfg, m) {
   });
   // كبس «🖼 وريني كيف بتطلع»: بنبعتله صورة البطاقة فوراً، والوكيل بيكمّل بعدها
   if (m.type === 'button' && sales.SHOW_ME_RE.test(text)) {
-    try {
-      const caption = 'هيك بتطلع بطاقة محلك بجوال الزبون 👆 بلونك وشعارك، والنقاط بتتحدّث لحالها مع كل زيارة';
-      await saveSalesMsg(c.db, p.id, 'agent', `${PROMO_TAG} ${caption}`, await wa.sendImage(wcfg, from, `${c.origin}${PROMO_IMAGE}`, caption));
-    } catch (e) { console.error('wa promo:', e.message); }
+    const caption = 'هيك بتطلع بطاقة محلك بجوال الزبون 👆 بلونك وشعارك، والنقاط بتتحدّث لحالها مع كل زيارة';
+    for (let i = 0; i < 2; i++) { // واتساب بيرفض أحياناً لثانية: منجرّب مرة كمان
+      try {
+        await saveSalesMsg(c.db, p.id, 'agent', `${PROMO_TAG} ${caption}`, await wa.sendImage(wcfg, from, `${c.origin}${PROMO_IMAGE}`, caption));
+        break;
+      } catch (e) {
+        console.error('wa promo:', e.status || '', e.message);
+        if (i) await setSetting(c.db, 'wa_last_failure', JSON.stringify({ at: Date.now(), code: e.code || null, message: clean(`صورة البطاقة: ${e.message}`, 200), name: p.name }));
+        else await sleep(1500);
+      }
+    }
   }
   if (p.paused || !aiConfig(c.env)) return;
   c.waitUntil(waReply(c, wcfg, p.id, ins.lastId).catch(async (e) => {

@@ -647,6 +647,42 @@ test('كبسة «وريني كيف بتطلع»: صورة البطاقة فور�
   assert.deepEqual(chat.map((m) => m.role), ['in', 'agent', 'agent']);
 });
 
+test('صورة البطاقة: إذا واتساب رفضها منجرّب مرة كمان، وإذا ضل يرفض بيبيّن السبب بمربع الرقم والوكيل بيرد عادي', async () => {
+  const sent = [];
+  let refuse = 0;
+  const fetch = async (url, init = {}) => {
+    const u = String(url);
+    const body = init.body ? JSON.parse(init.body) : null;
+    const json = (d, s = 200) => new Response(JSON.stringify(d), { status: s, headers: { 'content-type': 'application/json' } });
+    if (u.startsWith('https://graph.facebook.com/')) {
+      if (u.includes('?fields=')) return json({ quality_rating: 'GREEN' });
+      if (body.type === 'image' && refuse-- > 0) return json({ error: { message: 'Service temporarily unavailable', code: 131016 } }, 503);
+      sent.push(body);
+      return json({ messages: [{ id: `wamid.r${sent.length}` }] });
+    }
+    if (!u.startsWith('https://generativelanguage.googleapis.com/')) return new Response(null, { status: 201 });
+    if (u.includes('/models?')) return json({ models: [{ name: 'models/gemini-3.6-flash', supportedGenerationMethods: ['generateContent'] }] });
+    return json({ candidates: [{ content: { role: 'model', parts: [{ text: 'تفضل 👆' }] }, finishReason: 'STOP' }], usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 5 } });
+  };
+  const p = await platform({ GEMINI_API_KEY: 'g', fetch, ...WA_ENV });
+  await p.admin.post('/api/admin/prospects', { name: 'كوفي الورد', phone: '0791000001' });
+  const tap = async (id) => {
+    const meta = p.client();
+    await hook(meta, { object: 'whatsapp_business_account', entry: [{ changes: [{ field: 'messages', value: { metadata: { phone_number_id: '1234567890' }, contacts: [{ wa_id: '962791000001', profile: { name: 'x' } }], messages: [{ from: '962791000001', id, timestamp: '1760000000', type: 'button', button: { text: 'وريني كيف بتطلع', payload: 'x' } }] } }] }] });
+    await meta.flush();
+  };
+  refuse = 1;
+  await tap('wamid.t1');
+  assert.deepEqual(sent.map((m) => m.type), ['image', 'text'], 'رفض مرة ← التانية زبطت');
+  sent.length = 0;
+  refuse = 2;
+  await tap('wamid.t2');
+  assert.deepEqual(sent.map((m) => m.type), ['text'], 'الوكيل رد حتى بدون الصورة');
+  const box = (await p.admin.get('/api/admin/wa/number')).data;
+  assert.equal(box.lastFailure.name, 'كوفي الورد');
+  assert.match(box.lastFailure.message, /^صورة البطاقة: Service temporarily unavailable/);
+});
+
 // Gemini وهمي: قائمة الموديلات، والردود (نص أو استدعاء أداة)، وبحث Google
 function fakeGemini(reply) {
   const calls = [];
