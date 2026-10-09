@@ -397,8 +397,9 @@ function showMember(m) {
             <label for="amount">مبلغ الفاتورة (${s.currency})</label>
             <div class="row"><input class="grow num" id="amount" type="number" inputmode="decimal" min="0" step="0.001" placeholder="0.00" style="font-size:1.3rem" required>
             <button class="btn big" id="earnBtn" type="submit">أضف</button></div>
+            <div class="quick-amounts">${[1, 5, 10, 20].map((v) => html`<button type="button" data-plus="${v}">+${v}</button>`)}</div>
             ${invoiceRow()}
-            <div class="small muted" id="preview">&nbsp;</div>
+            <div class="small muted" id="preview"></div>
           </form>`}
       ${stamps && s.perks.invoiceMode === 'required' ? invoiceRow() : ''}
       <button class="btn ${m.progress.available ? 'big' : 'ghost'} block" id="redeemBtn" type="button" ${m.progress.available ? '' : 'disabled'}>🎁 صرف المكافأة: ${s.rewardName}</button>
@@ -429,8 +430,10 @@ function showMember(m) {
     const { mult, label } = perkMult(m);
     amount.oninput = () => {
       const pts = Math.floor(Math.floor(Number(amount.value) * s.pointsPerUnit + 1e-9) * mult + 1e-9);
-      $('#preview').textContent = pts > 0 ? `+${fmt(pts)} ${countWord(pts, 'نقطة', 'نقاط')}${label}` : ' ';
+      $('#preview').textContent = pts > 0 ? `الزبون رح ياخد +${fmt(pts)} ${countWord(pts, 'نقطة', 'نقاط')}${label}` : '';
     };
+    // مبالغ سريعة: كل كبسة بتزيد على المبلغ
+    $$('[data-plus]').forEach((b) => { b.onclick = () => { amount.value = Math.round(((Number(amount.value) || 0) + Number(b.dataset.plus)) * 1000) / 1000; amount.oninput(); }; });
     $('#earnForm').onsubmit = (e) => { e.preventDefault(); earn(m, { amount: amount.value, invoice: invoiceVal() }); };
     bindReceipt(() => amount.oninput());
     if (matchMedia('(pointer: fine)').matches) amount.focus();

@@ -1,0 +1,127 @@
+/* 🌙 نقاطك — هوية «ليل وذهب»: كحلي عميق للمنصة، ذهبي دافي للتفاصيل، كريمي للخلفيات.
+   بتنحمّل بعد style.css وبتغيّر الألوان والقطع الرئيسية بس. صفحات الزبون بتضل بلون المحل (setBrand). */
+
+:root {
+  --navy: #0f2433;
+  --navy-2: #17364b;
+  --navy-3: #22475f;
+  --gold: #d6a75c;
+  --gold-2: #efcf91;
+  --gold-3: #b8843f;
+  --brand: #10283a;
+  --brand-text: #10283a;
+  --caramel: var(--gold);
+  --caramel-2: var(--gold-2);
+  --espresso: #0b1a25;
+  --bg: #f7f3ec;
+  --bg-2: #eee7db;
+  --card: #ffffff;
+  --card-2: #f8f4ee;
+  --text: #0f1d27;
+  --muted: #5f6d77;
+  --border: rgba(15, 36, 51, .09);
+  --border-strong: rgba(15, 36, 51, .17);
+  --shadow-sm: 0 1px 2px rgba(15, 36, 51, .06);
+  --shadow: 0 1px 2px rgba(15, 36, 51, .04), 0 12px 30px -12px rgba(15, 36, 51, .16);
+  --shadow-lg: 0 30px 60px -20px rgba(15, 36, 51, .34);
+  --ring: rgba(214, 167, 92, .38);
+  --chev: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' fill='none' stroke='%235f6d77' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M1 1.5l5 5 5-5'/%3E%3C/svg%3E");
+  --orbits: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='1200' height='900' viewBox='0 0 1200 900' fill='none'%3E%3Cg stroke='%23d6a75c' stroke-opacity='.22'%3E%3Cellipse cx='600' cy='450' rx='560' ry='400'/%3E%3Cellipse cx='600' cy='450' rx='390' ry='280'/%3E%3Cellipse cx='600' cy='450' rx='220' ry='160'/%3E%3C/g%3E%3Ccircle cx='190' cy='250' r='7' fill='%23d6a75c' fill-opacity='.8'/%3E%3Ccircle cx='1010' cy='660' r='5' fill='%23d6a75c' fill-opacity='.7'/%3E%3Ccircle cx='840' cy='160' r='4' fill='%23efcf91' fill-opacity='.7'/%3E%3C/svg%3E");
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --brand-text: var(--gold-2);
+    --bg: #09131b;
+    --bg-2: #0d1a24;
+    --card: #10202c;
+    --card-2: #152838;
+    --text: #edf2f5;
+    --muted: #93a3ae;
+    --border: rgba(220, 235, 245, .08);
+    --border-strong: rgba(220, 235, 245, .16);
+    --glass: rgba(16, 32, 44, .72);
+    --ring: rgba(239, 207, 145, .3);
+    --chev: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' fill='none' stroke='%2393a3ae' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M1 1.5l5 5 5-5'/%3E%3C/svg%3E");
+  }
+}
+
+/* الشعار: تلات نقاط ذهبية */
+.brand img { border-radius: 0; box-shadow: none; }
+.mark-dots { display: inline-block; width: 1.15em; height: 1.15em; background: url("/img/mark.svg") center/contain no-repeat; vertical-align: -.18em; }
+
+/* ─── الصفحة الرئيسية ─── */
+.lp { background: var(--bg); }
+.site-nav { background: rgba(9, 22, 32, .62); }
+.site-nav.scrolled { background: rgba(9, 22, 32, .86); }
+.site-nav .nav-cta, .btn.glow {
+  background: linear-gradient(180deg, var(--gold-2), var(--gold) 70%, var(--gold-3)); color: var(--navy);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .55), 0 14px 34px -12px rgba(214, 167, 92, .8);
+}
+.hero { background: radial-gradient(90% 70% at 70% 10%, var(--navy-3) 0%, transparent 60%), radial-gradient(80% 70% at 10% 100%, #0b2030 0%, transparent 70%), var(--espresso); }
+.hero-bg .b1 { background: #2c5a78; opacity: .45; }
+.hero-bg .b2 { background: #0e2e44; }
+.hero-bg .b3 { background: var(--gold); opacity: .16; }
+.hero-bg .grid-lines { background-image: var(--orbits); background-size: min(1200px, 160%) auto; background-position: 30% 40%; background-repeat: no-repeat; opacity: 1; -webkit-mask-image: none; mask-image: none; }
+.grad { background: linear-gradient(90deg, var(--gold-2), var(--gold), #ffe7b8, var(--gold-2)); background-size: 250% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; }
+.hero-copy .lead { color: rgba(226, 236, 242, .8); }
+.eyebrow .dot { background: var(--gold-2); box-shadow: 0 0 0 0 rgba(239, 207, 145, .6); }
+.trust li::before { background: rgba(214, 167, 92, .18); color: var(--gold-2); }
+.hero-promo { background: rgba(214, 167, 92, .14); border-color: rgba(214, 167, 92, .38); color: var(--gold-2); }
+.phone-screen { background: radial-gradient(120% 70% at 80% 0%, #2c5a78 0%, transparent 60%), radial-gradient(100% 60% at 0% 100%, #0b2030, transparent 70%), linear-gradient(180deg, #0f2433, #071018); }
+.float-chip b { color: var(--gold-3); }
+.btn.glass .play { color: var(--navy); }
+.tile-dark { background: radial-gradient(90% 80% at 100% 0%, var(--navy-3) 0%, transparent 60%), radial-gradient(70% 70% at 0% 100%, #0b2030, transparent 70%), var(--espresso); }
+.tile-dark::after { content: ""; position: absolute; inset: 0; background: var(--orbits) center/180% auto no-repeat; opacity: .6; pointer-events: none; }
+.cta-band { background: radial-gradient(70% 120% at 100% 0%, var(--navy-3), transparent 60%), radial-gradient(60% 100% at 0% 100%, #0b2030, transparent 70%), var(--espresso); }
+.cta-band::before { content: ""; position: absolute; inset: 0; z-index: -1; background: var(--orbits) center/140% auto no-repeat; opacity: .7; }
+.btn.light { color: var(--navy); }
+.plan.best { background: linear-gradient(var(--card), var(--card)) padding-box, conic-gradient(from var(--angle), var(--gold), var(--navy-2), var(--gold-2), var(--gold-3), var(--gold)) border-box; box-shadow: 0 30px 60px -28px rgba(214, 167, 92, .75); }
+.plan .promo-note, .promo-left b { color: var(--gold-3); }
+.wallet-stack i:nth-child(1) { background: linear-gradient(135deg, var(--navy-2), var(--navy)); }
+.wallet-stack i:nth-child(2) { background: linear-gradient(135deg, var(--gold-2), var(--gold-3)); }
+.wallet-stack i:nth-child(3) { background: linear-gradient(135deg, #2f5d50, #1d3d34); }
+.kicker { color: var(--gold-3); background: rgba(214, 167, 92, .14); }
+.section-title { color: var(--text); }
+
+/* ─── لوحة المحل: كحلي وذهبي للأدوات، ولون المحل على بطاقته بس ─── */
+body.app { --brand: var(--navy); --brand-ink: #fff; --brand-text: var(--navy); }
+@media (prefers-color-scheme: dark) { body.app { --brand: #1f4a66; --brand-text: var(--gold-2); } }
+body.app .topbar { background: rgba(11, 26, 37, .92); color: #fff; border-bottom: 1px solid rgba(214, 167, 92, .18); }
+body.app .topbar .muted { color: rgba(226, 236, 242, .65); }
+body.app .topbar .logo { box-shadow: 0 0 0 2px var(--navy), 0 0 0 3.5px var(--gold); }
+body.app .topbar .btn.ghost { background: rgba(255, 255, 255, .08); color: #fff; border-color: rgba(255, 255, 255, .16); box-shadow: none; }
+body.app .tabs { background: rgba(11, 26, 37, .9); border-color: rgba(214, 167, 92, .2); }
+body.app .tabs a { color: rgba(226, 236, 242, .62); }
+body.app .tabs a.on { color: var(--navy); background: linear-gradient(180deg, var(--gold-2), var(--gold)); box-shadow: 0 8px 18px -8px rgba(214, 167, 92, .8); }
+body.app .btn:not(.ghost):not(.soft):not(.danger):not(.wa):not(.light) { background-color: var(--navy); background-image: linear-gradient(180deg, rgba(255, 255, 255, .12), rgba(255, 255, 255, 0) 60%); color: #fff; }
+body.app .btn.soft { background-color: rgba(214, 167, 92, .16); color: var(--navy); }
+@media (prefers-color-scheme: dark) { body.app .btn.soft { color: var(--gold-2); } body.app .btn:not(.ghost):not(.soft):not(.danger):not(.wa):not(.light) { background-color: #1f4a66; } }
+body.app .subnav button.on { background: var(--navy); border-color: var(--navy); color: var(--gold-2); }
+body.app .panel h2 { letter-spacing: -.01em; }
+body.app .stat b { color: var(--navy); }
+@media (prefers-color-scheme: dark) { body.app .stat b { color: var(--gold-2); } }
+body.app .member-head .avatar { background: linear-gradient(135deg, var(--navy-2), var(--navy)); color: var(--gold-2); }
+body.app .balance { color: var(--navy); }
+@media (prefers-color-scheme: dark) { body.app .balance { color: var(--gold-2); } }
+body.app .bar i { background: linear-gradient(90deg, var(--gold), var(--gold-2)); }
+
+/* الكاشير: مبالغ سريعة، ومعاينة النقاط بارزة */
+.quick-amounts { display: flex; gap: 6px; }
+.quick-amounts button { flex: 1; min-height: 40px; border-radius: 12px; border: 1px solid var(--border-strong); background: var(--card-2); color: var(--text); font: inherit; font-weight: 600; cursor: pointer; }
+.quick-amounts button:active { transform: scale(.96); }
+#preview:not(:empty) { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-radius: 16px; background: linear-gradient(135deg, rgba(214, 167, 92, .2), rgba(214, 167, 92, .06)); color: var(--text); font-weight: 700; font-size: 1rem; }
+#preview:not(:empty)::before { content: ""; width: 26px; height: 26px; flex: none; background: url("/img/mark.svg") center/contain no-repeat; }
+
+/* سطح المكتب: الأدوات على اليمين متل لوحة التحكم */
+@media (min-width: 1100px) {
+  body.app .tabs { position: fixed; top: 0; bottom: 0; inset-inline-start: 0; inset-inline-end: auto; width: 220px; margin: 0; border-radius: 0; flex-direction: column; gap: 4px; padding: 84px 14px 20px; overflow-y: auto; box-shadow: none; border: 0; border-inline-end: 1px solid rgba(214, 167, 92, .18); background: var(--espresso); }
+  body.app .tabs a { justify-content: start; padding: 11px 14px; font-size: .95rem; border-radius: 14px; }
+  body.app .topbar { padding-inline-start: 220px; position: sticky; z-index: 35; }
+  body.app #view, body.app #subBanner { margin-inline-start: max(236px, calc((100vw - 1080px) / 2 + 110px)); margin-inline-end: auto; max-width: 1080px; }
+  body.app .topbar::before { content: ""; position: fixed; top: 14px; inset-inline-start: 22px; width: 150px; height: 40px; background: url("/img/wordmark-light.png") right center/contain no-repeat; z-index: 40; }
+}
+
+/* ─── صفحات الزبون: لون المحل نفسه، بس الخلفية والحروف أنعم ─── */
+.cust { background: radial-gradient(120% 50% at 50% -10%, color-mix(in srgb, var(--brand) 14%, transparent), transparent 70%), var(--bg); }
+.powered { display: flex; align-items: center; justify-content: center; gap: 6px; margin: 26px 0 8px; font-size: .78rem; color: var(--muted); text-decoration: none; }
+.powered i { width: 16px; height: 16px; background: url("/img/mark.svg") center/contain no-repeat; }
