@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { encryptPayload, fromB64url, sendPush, validEndpoint, generateVapidKeys } from '../src/webpush.js';
 import { fakeDevice, setup, signup } from './helpers.mjs';
+import { runScheduled } from '../src/app.js';
 
 test('التشفير بينفك عند الجهاز بنفس النص', async () => {
   const d = await fakeDevice();
@@ -193,4 +194,61 @@ test('توقيع VAPID واحد لكل خدمة بالدفعة، حتى لو ا�
   await Promise.all(devices.map((d, i) => sendPush({ endpoint: `https://web.push.apple.com/d${i}`, ...d }, { title: 'x' }, { vapid, subject: 's', fetchImpl, cache })));
   assert.equal(auths.length, 5);
   assert.equal(new Set(auths).size, 1, 'نفس التوقيع للخمسة (توقيع ECDSA عشوائي، فلو انعمل 5 مرات كانوا اختلفوا)');
+});
+
+test('⏰ رسائل مجدولة: بتنبعت لحالها بوقتها على دفعات، لمجموعة أو للكل، والأسبوعية بترجع تنجدول، والملغية ما بتنبعت', async () => {
+  const sent = [];
+  const devices = new Map();
+  const fetchImpl = async (url, init) => {
+    const d = devices.get(url);
+    sent.push({ url, msg: d ? JSON.parse(await d.decrypt(new Uint8Array(init.body))) : null });
+    return new Response(null, { status: 201 });
+  };
+  const { db, env, client } = await setup({ fetch: fetchImpl, PUBLIC_URL: 'https://nuqatak.test' });
+  const owner = client();
+  const { shop } = await signup(owner, { shopName: 'Mocha' });
+  for (let i = 0; i < 14; i++) {
+    const t = (await client().post(`/api/shops/${shop.slug}/join`, { name: `زبون ${i}`, phone: `07933${String(i).padStart(5, '0')}` })).data.token;
+    const dev = await fakeDevice();
+    devices.set(`https://web.push.apple.com/c${i}`, dev);
+    await client().post(`/api/cards/${t}/push`, { endpoint: `https://web.push.apple.com/c${i}`, keys: { p256dh: dev.p256dh, auth: dev.auth } });
+  }
+  // وقت المحل (عمّان +3)
+  const local = (ms) => new Date(ms + 3 * 3600e3).toISOString().slice(0, 16);
+  const at = Math.floor((Date.now() + 2 * 86400e3) / 60000) * 60000;
+  const bad = (b) => owner.post('/api/campaigns', { body: 'عرض الجمعة ☕', segment: 'all', at: local(at), ...b });
+  assert.equal((await bad({ at: local(Date.now() - 60e3) })).status, 400, 'وقت فات');
+  assert.equal((await bad({ at: local(Date.now() + 100 * 86400e3) })).status, 400, 'بعيد كتير');
+  assert.equal((await bad({ at: '2026-13-40T99:00' })).status, 400);
+  assert.equal((await bad({ segment: 'everyone' })).status, 400);
+  assert.equal((await bad({ body: ' ' })).status, 400);
+  const weekly = await owner.post('/api/campaigns', { header: 'عرض الجمعة', body: 'القهوة التانية ببلاش ☕', segment: 'all', at: local(at), repeat: 'weekly' });
+  assert.equal(weekly.status, 200, JSON.stringify(weekly.data));
+  assert.equal(weekly.data.campaigns[0].sendAt, at, 'بتوقيت المحل');
+  await owner.post('/api/campaigns', { body: 'اشتقنالك', segment: 'absent', at: local(at) });
+  const canceled = (await owner.post('/api/campaigns', { body: 'ملغية', segment: 'all', at: local(at) })).data.campaigns.find((k) => k.body === 'ملغية');
+  assert.equal((await owner.del(`/api/campaigns/${canceled.id}`)).status, 200);
+  assert.equal((await client().get('/api/campaigns')).status, 401);
+
+  const cron = (now) => runScheduled({ db, env, waitUntil: (x) => x }, now);
+  assert.equal((await cron(at - 60e3)).campaigns, 0, 'لسا ما إجا وقتها');
+  assert.equal(sent.length, 0);
+  await cron(at + 60e3);
+  assert.equal(sent.length, 10, '10 إشعارات بالتشغيلة (حد الخطة المجانية)');
+  assert.equal((await owner.get('/api/campaigns')).data.campaigns.find((k) => k.body === 'القهوة التانية ببلاش ☕').status, 'sending');
+  await cron(at + 6 * 60e3);
+  assert.equal(sent.length, 14, 'كمّلت بالتشغيلة الجاية');
+  assert.ok(sent.every((x) => x.msg.title === 'عرض الجمعة' && x.msg.body === 'القهوة التانية ببلاش ☕'));
+  const list = (await owner.get('/api/campaigns')).data.campaigns;
+  const w = list.find((k) => k.repeat === 'weekly');
+  assert.deepEqual([w.status, w.sendAt, w.runs, w.sent], ['scheduled', at + 7 * 86400e3, 1, 14], 'الأسبوعية رجعت للأسبوع الجاي');
+  const absent = list.find((k) => k.body === 'اشتقنالك');
+  assert.deepEqual([absent.status, absent.sent], ['sent', 0], 'ما في حدا غايب: ما انبعتت لحدا');
+  assert.equal(list.find((k) => k.body === 'ملغية').status, 'canceled');
+  assert.equal((await db.get('SELECT COUNT(*) AS n FROM broadcasts WHERE shop_id = ?', shop.id)).n, 2, 'بتبيّن بسجل الرسائل');
+  // الأسبوع الجاي بتنبعت مرة تانية
+  await cron(at + 7 * 86400e3 + 60e3);
+  await cron(at + 7 * 86400e3 + 6 * 60e3);
+  assert.equal(sent.length, 28);
+  assert.equal((await owner.get('/api/campaigns')).data.campaigns.find((k) => k.repeat === 'weekly').runs, 2);
 });

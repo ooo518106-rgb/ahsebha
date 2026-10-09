@@ -7,6 +7,8 @@ export { generateKeyAndCsr } from '../public/js/csr.js';
 import { crc32, hexToRgb } from './png.js';
 import { progress, rewardRule, unitWord } from '../public/js/rules.js';
 
+const NEWS_DAYS = 30;
+
 const OID = {
   rsaEncryption: '1.2.840.113549.1.1.1',
   sha256WithRSA: '1.2.840.113549.1.1.11',
@@ -235,6 +237,8 @@ export function buildPassJson(shop, member, { passTypeId, teamId, origin, authTo
         },
       ],
       backFields: [
+        // 📣 آخر رسالة من المحل (آخر 30 يوم): لما تتغيّر بتطلع إشعار على شاشة القفل
+        ...(member.news && member.news_at > Date.now() - NEWS_DAYS * 864e5 ? [{ key: 'news', label: `📣 ${shop.name}`, value: member.news, changeMessage: '%@' }] : []),
         ...(menuUrl ? [{ key: 'menu', label: '📋 المنيو', value: menuUrl, attributedValue: link(menuUrl, 'افتح المنيو') }] : []),
         // التقييم ما بيصير جوّا المحفظة: الرابط بيفتح البطاقة على الويب عند النجوم
         ...(shop.review_on ? [{ key: 'rate', label: 'التقييم', value: `${cardUrl}#rate`, attributedValue: link(`${cardUrl}#rate`, '⭐ قيّم زيارتك') }] : []),

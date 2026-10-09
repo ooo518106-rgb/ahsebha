@@ -719,13 +719,14 @@ async function activity() {
       <div class="stat"><b class="num">${fmt(s.earnedMonth)}</b><span class="small muted">${state.shop.programType === 'stamps' ? 'أختام' : 'نقاط'} هالشهر</span></div>
       <div class="stat"><b class="num">${fmt(s.redeemedMonth)}</b><span class="small muted">مكافآت هالشهر</span></div>
     </div>
+    ${isOwner() ? html`<section class="panel" id="healthBox" style="margin-top:14px"><h2>🩺 صحة المحل</h2><p class="muted small">جاري الحساب…</p></section>` : ''}
     <section class="panel" style="margin-top:14px">
       <h2>آخر الحركات</h2>
       ${r.recent.length ? html`<ul class="list" id="alist">${r.recent.map((t) => txnRow(t, true))}</ul>` : html`<p class="muted">لسا ما في حركات. ابدأ من الكاشير 👆</p>`}
     </section>`);
   const list = $('#alist');
   if (list) list.onclick = (e) => { const li = e.target.closest('[data-member]'); if (li && li.dataset.member) memberDialog(li.dataset.member); };
-  if (isOwner()) loadReports();
+  if (isOwner()) { loadHealth(); loadReports(); }
 }
 
 // ─── التقارير (للمالك) ───
@@ -1234,7 +1235,7 @@ function broadcastPanel() {
         <button class="btn ghost grow" type="button" id="bcTest">جرّب على جوالي أول</button>
         <button class="btn soft grow" type="submit">ابعت لكل الزبائن</button>
       </div>
-      <p class="hint">بتوصل لـ <b class="num">${n}</b> زبون فعّلوا الإشعارات${state.google.enabled ? '، وللي حافظين البطاقة بمحفظة Google' : ''}.
+      <p class="hint">بتوصل لـ <b class="num">${n}</b> زبون فعّلوا الإشعارات، وللي حافظين البطاقة بمحفظة الآيفون${state.google.enabled ? ' وGoogle' : ''}.
         «جرّب على جوالي» بتوصلك إنت بس (لازم تكون مفعّل «🔔 تنبيهات إلك»). ما في حد للرسائل، بس كترها بيزعج الزبائن وممكن يسكّروا الإشعارات.</p>
     </form>`;
 }
@@ -1501,7 +1502,8 @@ function bindBroadcast() {
       }
       bc.reset();
       const gmsg = r.google === 'ok' ? ' + محفظة Google' : r.google ? ' (محفظة Google ما زبطت)' : '';
-      toast(`انبعتت الرسالة لـ ${sent} جهاز${gmsg} ✅`, r.google && r.google !== 'ok' ? 'bad' : 'ok');
+      const amsg = r.apple ? ` + ${r.apple} آيفون` : '';
+      toast(`انبعتت الرسالة لـ ${sent} جهاز${amsg}${gmsg} ✅`, r.google && r.google !== 'ok' ? 'bad' : 'ok');
     } catch (err) { toast(err.message, 'bad'); }
     btn.disabled = false;
     btn.textContent = 'ابعت لكل الزبائن';
@@ -1529,6 +1531,7 @@ function offers() {
     <div class="grid2 group" data-group="msgs">
       <section class="panel stack">${broadcastPanel()}</section>
       <section class="panel stack" id="couponsPanel"><h2>🎟️ كوبونات</h2><p class="muted small">جاري التحميل…</p></section>
+      <section class="panel stack" id="campaignsPanel"><h2>⏰ رسائل مجدولة</h2><p class="muted small">جاري التحميل…</p></section>
     </div>
     <div class="grid2 group" data-group="points">
       <form class="panel stack" data-perks="boosts">
@@ -1610,6 +1613,7 @@ function offers() {
   }
   bindBroadcast();
   loadCoupons();
+  loadCampaigns();
 
   const drawBoosts = () => {
     render($('#boosts'), boosts.length ? html`${boosts.map((b, i) => html`<div class="boost" data-i="${i}">
@@ -1864,6 +1868,82 @@ async function loadCoupons() {
       try { await api(`/api/coupons/${b.dataset.stop}`, { method: 'DELETE' }); loadCoupons(); } catch (e) { toast(e.message, 'bad'); }
     };
   });
+}
+
+// ⏰ رسائل مجدولة: بتكتبها هلأ وبتنبعت لحالها بالوقت اللي بتختاره (بتوقيت محلك)، مرة أو كل أسبوع
+const CAMPAIGN_ST = { scheduled: ['⏰ مجدولة', ''], sending: ['📤 عم تنبعت', 'talking'], sent: ['✅ انبعتت', 'won'], canceled: ['ملغية', 'lost'] };
+const localInput = (ms) => { const d = new Date(ms - new Date(ms).getTimezoneOffset() * 60000); return d.toISOString().slice(0, 16); };
+const fmtWhen = (ms) => new Intl.DateTimeFormat('ar-u-nu-latn', { weekday: 'long', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }).format(new Date(ms));
+async function loadCampaigns() {
+  const box = $('#campaignsPanel');
+  if (!box) return;
+  if (isBasic()) { render(box, html`<h2>⏰ رسائل مجدولة 💎</h2>${proLock('الرسائل المجدولة')}`); return; }
+  let r;
+  try { r = await api('/api/campaigns'); } catch (e) { render(box, html`<h2>⏰ رسائل مجدولة</h2><p class="alert bad">${e.message}</p>`); return; }
+  const soon = new Date(Date.now() + 60 * 60000);
+  soon.setMinutes(0, 0, 0);
+  render(box, html`<h2>⏰ رسائل مجدولة</h2>
+    <p class="hint">اكتب الرسالة هلأ واختار إمتى تنبعت (بتوقيت محلك): مثلاً «عرض الجمعة» كل خميس الساعة 7 المسا. بتوصل للإشعارات ومحفظة الآيفون${state.google.enabled ? ' وGoogle' : ''}.</p>
+    <form class="stack" id="campaignForm">
+      <input name="header" placeholder="العنوان (اختياري): ${state.shop.name}" maxlength="40">
+      <textarea name="body" rows="2" placeholder="مثلاً: بكرا الجمعة، القهوة التانية ببلاش ☕" maxlength="300" required></textarea>
+      <div class="row">
+        <div class="field grow"><label for="cmAt">إمتى</label><input id="cmAt" name="at" type="datetime-local" value="${localInput(+soon)}" required></div>
+        <div class="field grow"><label for="cmSeg">لمين</label><select id="cmSeg" name="segment">${r.segments.map((g) => html`<option value="${g.key}">${g.name}</option>`)}</select></div>
+      </div>
+      <label class="check"><input type="checkbox" name="weekly"> تنعاد كل أسبوع بنفس اليوم والساعة</label>
+      <button class="btn" type="submit">⏰ جدول الرسالة</button>
+    </form>
+    ${r.campaigns.length ? html`<ul class="list">${r.campaigns.map((k) => {
+      const [label, cls] = CAMPAIGN_ST[k.status] || [k.status, ''];
+      const live = k.status === 'scheduled' || k.status === 'sending';
+      return html`<li><div class="main"><b>${k.body}</b>
+        <span class="small muted"><span class="st ${cls}">${label}</span> ${live ? fmtWhen(k.sendAt) : k.lastSentAt ? fmtWhen(k.lastSentAt) : ''}${k.repeat === 'weekly' ? ' · 🔁 كل أسبوع' : ''} · ${k.segmentName}${k.runs ? ` · انبعتت ${k.runs} مرة (${fmt(k.sent)} جهاز)` : ''}</span></div>
+        ${live ? html`<button class="btn ghost sm" type="button" data-cancel-campaign="${k.id}">إلغاء</button>` : ''}</li>`;
+    })}</ul>` : ''}`);
+  const form = $('#campaignForm', box);
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    const f = Object.fromEntries(new FormData(form));
+    try {
+      await api('/api/campaigns', { method: 'POST', body: { header: f.header, body: f.body, segment: f.segment, at: f.at, repeat: f.weekly ? 'weekly' : 'none' } });
+      toast('انجدولت ✅ بتنبعت لحالها بالوقت اللي اخترته', 'ok');
+      loadCampaigns();
+    } catch (err) { toast(err.message, 'bad'); }
+  };
+  $$('[data-cancel-campaign]', box).forEach((b) => {
+    b.onclick = async () => {
+      if (!confirm('تلغي هالرسالة؟')) return;
+      try { await api(`/api/campaigns/${b.dataset.cancelCampaign}`, { method: 'DELETE' }); loadCampaigns(); } catch (err) { toast(err.message, 'bad'); }
+    };
+  });
+}
+
+// 🩺 صحة المحل: رقم من 100، وكل مؤشر ضعيف معه نصيحة وزر بيوديك للمكان الصح
+async function loadHealth() {
+  const box = $('#healthBox');
+  if (!box) return;
+  let r;
+  try { r = await api('/api/health'); } catch { box.remove(); return; }
+  if (r.locked) { render(box, html`<h2>🩺 صحة المحل 💎</h2>${proLock('لوحة صحة المحل')}`); return; }
+  if (r.early) { render(box, html`<h2>🩺 صحة المحل</h2><p class="small muted">بتطلع لما يصير عندك 5 زبائن (هلأ ${fmt(r.members)}). ابدأ بطباعة ملصق الـ QR من تبويب «الانضمام».</p>`); return; }
+  const color = r.score >= 75 ? 'var(--ok, #12b76a)' : r.score >= 50 ? '#f79009' : 'var(--bad, #f04438)';
+  const trend = r.visits.prev ? Math.round(((r.visits.now - r.visits.prev) / r.visits.prev) * 100) : null;
+  render(box, html`<div class="row" style="justify-content:space-between;align-items:center">
+      <h2 style="margin:0">🩺 صحة المحل</h2>
+      <div class="health-score" style="--c:${color};--p:${r.score}"><b class="num">${r.score}</b><span class="small">${r.label}</span></div>
+    </div>
+    <p class="small muted">زيارات آخر 30 يوم: <b class="num">${fmt(r.visits.now)}</b>${trend == null ? '' : html` (${trend >= 0 ? `⬆️ ${trend}%` : `⬇️ ${-trend}%`} عن الشهر اللي قبله)`}</p>
+    <ul class="health-list">${r.parts.map((p) => html`<li>
+      <div class="row" style="justify-content:space-between"><span class="small">${p.title}</span><b class="num small">${p.value}</b></div>
+      <div class="bar"><i style="width:${Math.round(p.score * 100)}%;background:${p.score >= 0.7 ? 'var(--ok, #12b76a)' : p.score >= 0.4 ? '#f79009' : 'var(--bad, #f04438)'}"></i></div>
+      ${p.tip ? html`<a class="small health-tip" href="${p.href}">💡 ${p.tip} ←</a>` : ''}
+    </li>`)}</ul>
+    ${r.atRisk.length ? html`<p class="small" style="margin:10px 0 4px"><b>⚠️ زبائن منيحين غابوا 3 أسابيع:</b></p>
+      <ul class="list">${r.atRisk.map((m) => html`<li data-member="${m.id}"><div class="main"><b>${m.name}</b><span class="small muted">${fmt(m.visits)} زيارة · آخر مرة ${ago(m.lastVisit)}</span></div></li>`)}</ul>
+      <p class="hint">ابعتلهم كوبون من «العروض ← 📣 رسائل وكوبونات» (مجموعة «اللي غابوا 30 يوم»).</p>` : ''}`);
+  const list = $('.list', box);
+  if (list) list.onclick = (e) => { const li = e.target.closest('[data-member]'); if (li) memberDialog(li.dataset.member); };
 }
 
 async function loadStaff(data) {

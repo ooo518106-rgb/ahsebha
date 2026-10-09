@@ -209,6 +209,21 @@ async function apnsConfig(c) {
 async function applePush(c, serials, { limit = 300 } = {}) {
   if (!serials.length) return null;
   const regs = await c.db.all(`SELECT DISTINCT push_token FROM apple_regs WHERE serial IN (${serials.map(() => '?').join(',')}) LIMIT ${limit}`, ...serials);
+  return apnsSend(c, regs);
+}
+
+// 🍎 دور أجهزة الآيفون (رسالة جديدة لكتير زبائن): كل طلب لـ Apple طلب فرعي، والخطة المجانية بتسمح بـ 50 بالتشغيلة
+const APPLE_BATCH = 25;
+async function appleQueueDrain(c, max = APPLE_BATCH) {
+  const rows = await c.db.all('SELECT push_token FROM apple_queue ORDER BY queued_at LIMIT ?', max);
+  if (!rows.length) return 0;
+  const mine = [];
+  for (const r of rows) if ((await c.db.run('DELETE FROM apple_queue WHERE push_token = ?', r.push_token)).changes) mine.push(r); // ما ينبعت مرتين
+  const out = await apnsSend(c, mine);
+  return out ? out.sent : 0;
+}
+
+async function apnsSend(c, regs) {
   if (!regs.length) return null;
   const cfg = await apnsConfig(c);
   if (!cfg) return null;
@@ -715,6 +730,7 @@ export async function runScheduled(ctx, now = Date.now()) {
   };
   const out = { birthdays: 0, reviews: 0, winback: 0 };
   out.birthdays = await birthdayJob(c, shopOf, now);
+  if (c.budget > 0) out.campaigns = await campaignJob(c, shopOf, now);
   if (c.budget > 0) out.reviews = await reviewAskJob(c, shopOf, now);
   if (c.budget > 0) out.winback = await winbackJob(c, shopOf, now);
   if (c.budget > 0) out.summaries = await summaryJob(c, now);
@@ -722,6 +738,7 @@ export async function runScheduled(ctx, now = Date.now()) {
   out.outreach = await salesOutreachJob(c, now).catch((e) => { console.error('outreach:', e.message); return 0; });
   Object.assign(out, await expiryJob(c, shopOf, now));
   out.giftsRefunded = await giftRefundJob(c, now);
+  out.apple = await appleQueueDrain(c).catch((e) => { console.error('apple queue:', e.message); return 0; });
   out.backup = await backupJob(c, now).catch((e) => { console.error('backup:', e.message); return 'error'; });
   out.social = await socialJob(c, now).catch((e) => { console.error('social:', e.message); return 'error'; });
   const day = localDayKey('JO', now);
@@ -2987,7 +3004,23 @@ async function broadcast(c) {
     }
   }
   if (c.shop.demo) return json({ id: r.lastId, google: null, push: { sent: 0, failed: 0, next: null }, demo: true });
-  return json({ id: r.lastId, google, push: await broadcastBatch(c, r.lastId, 0) });
+  // 🍎 الآيفون: الرسالة بتنحط على ضهر البطاقة، وكل الأجهزة بيوصلها «تحدّثت» (إشعار على شاشة القفل)
+  const apple = await shopNews(c, c.shop, 'all', newsText(c.shop, header, body), Date.now());
+  if (apple) c.waitUntil(appleQueueDrain(c, 30).catch((e) => console.error('apple news:', e.message)));
+  return json({ id: r.lastId, google, apple, push: await broadcastBatch(c, r.lastId, 0) });
+}
+
+const newsText = (shop, header, body) => (header && header !== shop.name ? `${header}: ${body}` : body);
+// آخر رسالة للزبائن (كلهم أو مجموعة) على بطاقة الآيفون، وأجهزتهم بتدخل دور الإشعارات. بيرجّع كم جهاز
+async function shopNews(c, shop, segment, text, now) {
+  const seg = SEGMENTS[segment] || SEGMENTS.all;
+  const r = await c.db.run(`UPDATE members SET news = ?, news_at = ?, updated_at = ? WHERE shop_id = ? AND ${seg.where}`, clean(text, 300), now, now, shop.id, ...seg.args(shop, now));
+  if (!r.changes || !(await c.db.get('SELECT 1 FROM apple_config WHERE id = 1 AND cert IS NOT NULL AND apns_key IS NOT NULL'))) return 0;
+  const q = await c.db.run(
+    'INSERT OR IGNORE INTO apple_queue (push_token, queued_at) SELECT DISTINCT r.push_token, ? FROM apple_regs r JOIN members m ON m.token = r.serial WHERE m.shop_id = ? AND m.news_at = ?',
+    now, shop.id, now,
+  );
+  return q.changes;
 }
 
 // تجربة الرسالة على أجهزة صاحب المحل بس (ما بتنحسب من رسائل اليوم)
@@ -3000,6 +3033,175 @@ async function broadcastTest(c) {
   await rateLimit(c, `bctest:${c.user.id}`, 10, 60 * MIN, 'جرّبت كتير، استنى شوي');
   const r = await pushTo(c, subs, () => ({ title: header, body, icon: logoUrl(c.shop, c.origin), url: `${c.origin}/app#offers` }), 'user_push_subs');
   return json({ sent: r.ok, failed: r.error, reason: (r.results.find((x) => x.result !== 'ok') || {}).reason || null });
+}
+
+// ─── ⏰ الرسائل المجدولة (💎): بتنبعت لحالها بالوقت اللي اخترته (بتوقيت المحل)، مرة أو كل أسبوع، لكل الزبائن أو لمجموعة ───
+const CAMPAIGN_MAX = 20;
+const CAMPAIGN_LIVE = "('scheduled', 'sending')";
+const campaignView = (k) => ({
+  id: k.id, header: k.header, body: k.body, segment: k.segment, segmentName: (SEGMENTS[k.segment] || SEGMENTS.all).name,
+  sendAt: k.send_at, repeat: k.repeat, status: k.status, sent: k.sent, runs: k.runs, lastSentAt: k.last_sent_at,
+});
+
+async function listCampaigns(c) {
+  const rows = await c.db.all(
+    `SELECT * FROM campaigns WHERE shop_id = ? AND (status IN ${CAMPAIGN_LIVE} OR COALESCE(last_sent_at, created_at) > ?)
+     ORDER BY CASE WHEN status IN ${CAMPAIGN_LIVE} THEN 0 ELSE 1 END, CASE WHEN status IN ${CAMPAIGN_LIVE} THEN send_at ELSE -COALESCE(last_sent_at, created_at) END LIMIT 40`,
+    c.shop.id, Date.now() - 30 * DAY,
+  );
+  return json({ campaigns: rows.map(campaignView), segments: Object.entries(SEGMENTS).map(([key, v]) => ({ key, name: v.name })), locked: !isPro(c.shop) });
+}
+
+// «2026-10-20T19:30» بتوقيت المحل ← وقت عالمي
+function localToUtc(country, text) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/.exec(String(text || ''));
+  if (!m) return null;
+  const wall = Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5]);
+  if (Number.isNaN(wall)) return null;
+  let t = wall - tzOffset(country, wall);
+  t = wall - tzOffset(country, t); // مرة تانية عشان أيام تغيير الساعة
+  return t;
+}
+
+async function createCampaign(c) {
+  requirePro(c, 'الرسائل المجدولة');
+  await requireActive(c);
+  const header = clean(c.body.header, 40) || c.shop.name;
+  const body = clean(c.body.body, 300);
+  if (body.length < 2) fail(400, 'اكتب نص الرسالة');
+  const segment = String(c.body.segment || 'all');
+  if (!SEGMENTS[segment]) fail(400, 'اختار لمين الرسالة');
+  const repeat = c.body.repeat === 'weekly' ? 'weekly' : 'none';
+  const now = Date.now();
+  const at = localToUtc(c.shop.country, c.body.at);
+  if (!at || at < now + 2 * MIN) fail(400, 'اختار وقت جاي (بعد دقيقتين على الأقل)');
+  if (at > now + 90 * DAY) fail(400, 'لحد 3 شهور لقدّام');
+  const n = await c.db.get(`SELECT COUNT(*) AS n FROM campaigns WHERE shop_id = ? AND status IN ${CAMPAIGN_LIVE}`, c.shop.id);
+  if (n.n >= CAMPAIGN_MAX) fail(400, `عندك ${n.n} رسالة مجدولة، وهاد الحد. الغي وحدة أول`);
+  await c.db.run('INSERT INTO campaigns (shop_id, header, body, segment, send_at, repeat, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)', c.shop.id, header, body, segment, at, repeat, now);
+  return listCampaigns(c);
+}
+
+async function cancelCampaign(c, id) {
+  const r = await c.db.run(`UPDATE campaigns SET status = 'canceled' WHERE id = ? AND shop_id = ? AND status IN ${CAMPAIGN_LIVE}`, Number(id), c.shop.id);
+  if (!r.changes) fail(404, 'ما لقينا الرسالة (يمكن انبعتت)');
+  return listCampaigns(c);
+}
+
+// كل تشغيلة: بتكمّل اللي عم تنبعت، وبتبلّش اللي إجا وقتها. الإشعارات على الويب بالميزانية، والآيفون بالدور، وGoogle برسالة وحدة
+async function campaignJob(c, shopOf, now) {
+  let done = 0;
+  for (let i = 0; i < 5 && c.budget > 0; i++) {
+    const k = await c.db.get(`SELECT * FROM campaigns WHERE status = 'sending' OR (status = 'scheduled' AND send_at <= ?)
+      ORDER BY CASE status WHEN 'sending' THEN 0 ELSE 1 END, send_at, id LIMIT 1`, now);
+    if (!k) break;
+    const shop = await shopOf(k.shop_id);
+    // المحل وقف أو نزل للأساسي: هالمرة ما بتنبعت (والأسبوعية بتستنى الأسبوع الجاي)
+    if (!shop || !isPro(shop)) {
+      await finishCampaign(c, k, now, 0, false);
+      continue;
+    }
+    if (k.status === 'scheduled') {
+      const claim = await c.db.run("UPDATE campaigns SET status = 'sending', cursor = 0 WHERE id = ? AND status = 'scheduled'", k.id);
+      if (!claim.changes) continue;
+      await startCampaign(c, shop, k, now);
+      k.cursor = 0;
+    }
+    const seg = SEGMENTS[k.segment] || SEGMENTS.all;
+    const take = Math.min(c.budget, PUSH_BATCH);
+    const subs = shop.demo ? [] : await c.db.all(
+      `SELECT p.*, m.token FROM push_subs p JOIN members m ON m.id = p.member_id
+       WHERE p.shop_id = ? AND p.id > ? AND p.member_id IN (SELECT id FROM members WHERE shop_id = ? AND ${seg.where}) ORDER BY p.id LIMIT ?`,
+      shop.id, k.cursor, shop.id, ...seg.args(shop, now), take,
+    );
+    c.budget -= subs.length;
+    const icon = logoUrl(shop, c.origin);
+    const r = await pushTo(c, subs, (x) => ({ title: k.header, body: k.body, icon, url: `${c.origin}/c/${x.token}`, tag: `campaign-${k.id}` }));
+    if (subs.length && subs.length === take) {
+      await c.db.run("UPDATE campaigns SET cursor = ?, sent = sent + ? WHERE id = ? AND status = 'sending'", subs[subs.length - 1].id, r.ok, k.id);
+      continue;
+    }
+    await finishCampaign(c, k, now, r.ok, true);
+    done++;
+  }
+  return done;
+}
+
+async function startCampaign(c, shop, k, now) {
+  await c.db.run('INSERT INTO broadcasts (shop_id, header, body, created_at) VALUES (?, ?, ?, ?)', shop.id, k.header, k.body, now);
+  await c.db.run('UPDATE campaigns SET sent = 0 WHERE id = ?', k.id);
+  if (shop.demo) return; // حساب العرض ما بيبعت لأجهزة حقيقية
+  const cfg = k.segment === 'all' ? gw.googleConfig(c.env) : null; // رسالة Google بتوصل لكل حاملي البطاقة، فبس لـ «كل الزبائن»
+  if (cfg) {
+    try {
+      if (!shop.gw_synced_at) await syncClass(c, shop);
+      await gw.addClassMessage(cfg, shop.id, { header: k.header, body: k.body });
+    } catch (e) { console.error('campaign google:', e.message); }
+  }
+  const apple = await shopNews(c, shop, k.segment, newsText(shop, k.header, k.body), now);
+  if (apple) await c.db.run('UPDATE campaigns SET sent = sent + ? WHERE id = ?', apple, k.id);
+}
+
+async function finishCampaign(c, k, now, ok, ran) {
+  if (k.repeat === 'weekly') {
+    let next = k.send_at + 7 * DAY;
+    while (next <= now) next += 7 * DAY;
+    await c.db.run(`UPDATE campaigns SET status = 'scheduled', send_at = ?, cursor = 0, sent = sent + ?, runs = runs + ?, last_sent_at = CASE WHEN ? THEN ? ELSE last_sent_at END WHERE id = ? AND status IN ${CAMPAIGN_LIVE}`,
+      next, ok, ran ? 1 : 0, ran ? 1 : 0, now, k.id);
+  } else {
+    await c.db.run(`UPDATE campaigns SET status = ?, sent = sent + ?, runs = runs + ?, last_sent_at = CASE WHEN ? THEN ? ELSE last_sent_at END WHERE id = ? AND status IN ${CAMPAIGN_LIVE}`,
+      ran ? 'sent' : 'canceled', ok, ran ? 1 : 0, ran ? 1 : 0, now, k.id);
+  }
+}
+
+// ─── 🩺 صحة المحل (💎): رقم من 100 من خمس مؤشرات، ولكل مؤشر ضعيف نصيحة بتوديك للمكان الصح ───
+async function shopHealth(c) {
+  if (!isPro(c.shop)) return json({ locked: true });
+  const id = c.shop.id;
+  const now = Date.now();
+  const d30 = now - 30 * DAY;
+  const d60 = now - 60 * DAY;
+  const [m, t, risk] = await Promise.all([
+    c.db.get(`SELECT COUNT(*) AS members,
+        SUM(CASE WHEN visits >= 1 THEN 1 ELSE 0 END) AS visited,
+        SUM(CASE WHEN last_visit >= ? THEN 1 ELSE 0 END) AS active,
+        SUM(CASE WHEN visits >= 2 THEN 1 ELSE 0 END) AS repeaters,
+        SUM(CASE WHEN visits >= 1 AND COALESCE(last_visit, 0) < ? THEN 1 ELSE 0 END) AS away,
+        SUM(CASE WHEN created_at >= ? THEN 1 ELSE 0 END) AS new30,
+        SUM(CASE WHEN created_at >= ? AND created_at < ? THEN 1 ELSE 0 END) AS newPrev,
+        SUM(CASE WHEN gw_object = 1 OR EXISTS (SELECT 1 FROM apple_regs r WHERE r.serial = members.token) OR EXISTS (SELECT 1 FROM push_subs p WHERE p.member_id = members.id) THEN 1 ELSE 0 END) AS reachable
+      FROM members WHERE shop_id = ?`, d30, d30, d30, d60, d30, id),
+    c.db.get(`SELECT SUM(CASE WHEN kind = 'earn' AND created_at >= ? THEN 1 ELSE 0 END) AS visits30,
+        SUM(CASE WHEN kind = 'earn' AND created_at < ? THEN 1 ELSE 0 END) AS visitsPrev,
+        SUM(CASE WHEN kind = 'redeem' AND created_at >= ? THEN 1 ELSE 0 END) AS redeems30
+      FROM txns WHERE shop_id = ? AND created_at >= ?`, d30, d30, d30, id, d60),
+    // زبائن منيحين (3 زيارات وأكتر) غابوا 3 أسابيع: أول ناس بدك ترجّعهم
+    c.db.all('SELECT id, name, visits, last_visit AS lastVisit FROM members WHERE shop_id = ? AND visits >= 3 AND last_visit < ? ORDER BY visits DESC, last_visit DESC LIMIT 5', id, now - 21 * DAY),
+  ]);
+  const n = (v) => v || 0;
+  if (n(m.members) < 5) return json({ early: true, members: n(m.members) });
+  const ratio = (a, b) => (b ? a / b : 0);
+  const pct = (a, b) => Math.round(ratio(a, b) * 100);
+  const part = (key, title, weight, score, value, tip, href) => ({ key, title, weight, score: Math.max(0, Math.min(1, score)), value, tip: score < 0.7 ? tip : null, href });
+  const visits30 = n(t.visits30);
+  const parts = [
+    part('active', 'زبائن نشيطين (زاروا آخر 30 يوم)', 25, ratio(ratio(n(m.active), n(m.visited)), 0.4), `${pct(n(m.active), n(m.visited))}%`,
+      `${n(m.away)} زبون غابوا أكتر من شهر: ابعتلهم كوبون أو رسالة لـ «اللي غابوا 30 يوم»، أو شغّل «اشتقنالك» التلقائي`, '#offers'),
+    part('return', 'بيرجعوا مرة تانية', 25, ratio(ratio(n(m.repeaters), n(m.visited)), 0.5), `${pct(n(m.repeaters), n(m.visited))}%`,
+      'قرّب المكافأة شوي (أختام أقل) أو شغّل النقاط الدبل بالأيام الهادية، عشان الزبون يحس إنه قريب', '#offers/points'),
+    part('new', 'زبائن جداد هالشهر', 20, ratio(n(m.new30), 10), `${n(m.new30)}${n(m.newPrev) ? ` (قبلها ${n(m.newPrev)})` : ''}`,
+      'حط ملصق الـ QR جنب الكاشير وعلى الطاولات، وخلّي الكاشير يعرض البطاقة على كل زبون، وشغّل «ادعُ صاحبك»', '#join'),
+    part('reach', 'بتقدر توصلهم (محفظة أو إشعارات)', 15, ratio(ratio(n(m.reachable), n(m.members)), 0.6), `${pct(n(m.reachable), n(m.members))}%`,
+      'اطلب من الزبون يحفظ البطاقة بالمحفظة (Apple أو Google) لما ينضم: هيك بتوصله رسائلك وعروضك', '#settings/wallet'),
+    part('rewards', 'مكافآت انصرفت هالشهر', 15, n(t.redeems30) > 0 ? 1 : visits30 < 20 ? 0.5 : 0, String(n(t.redeems30)),
+      'ما حدا وصل للمكافأة هالشهر: الزبون بيحمى لما يشوف ناس عم تاخد. قرّب المكافأة أو اعمل هدية ترحيب', '#settings'),
+  ];
+  const score = Math.round(parts.reduce((a, p) => a + p.weight * p.score, 0));
+  return json({
+    score, label: score >= 75 ? 'ممتاز' : score >= 50 ? 'منيح' : 'محتاج اهتمام', parts,
+    visits: { now: visits30, prev: n(t.visitsPrev) },
+    atRisk: risk,
+  });
 }
 
 // ─── الكوبونات: عرض لمجموعة زبائن، وكل زبون بيصرفه مرة وحدة عند الكاشير ───
@@ -4704,6 +4906,10 @@ const API = [
   ['GET', /^\/api\/admin\/stats$/, adminStats, 'staff'],
   ['POST', /^\/api\/shop\/sync$/, syncNow, 'owner'],
   ['POST', /^\/api\/broadcast$/, broadcast, 'owner'],
+  ['GET', /^\/api\/campaigns$/, listCampaigns, 'owner'],
+  ['POST', /^\/api\/campaigns$/, createCampaign, 'owner'],
+  ['DELETE', /^\/api\/campaigns\/(\d+)$/, cancelCampaign, 'owner'],
+  ['GET', /^\/api\/health$/, shopHealth, 'owner'],
   ['POST', /^\/api\/broadcast\/(\d+)\/continue$/, broadcastContinue, 'owner'],
   ['POST', /^\/api\/broadcast\/test$/, broadcastTest, 'owner'],
   ['GET', /^\/api\/coupons$/, listCoupons, 'owner'],

@@ -257,6 +257,24 @@ test('🔔 تحديث بطاقات الآيفون لحالها: مفتاح APNs�
   await admin.flush();
   assert.equal(pushes.length, 1);
 
+  // 📣 رسالة لكل الزبائن: بتنكتب على ضهر بطاقة الآيفون (مع إشعار)، والجهاز بيوصله «تحدّثت» من الدور
+  pushes.length = 0;
+  const bc = await admin.post('/api/broadcast', { body: 'خصم 20% اليوم على كل المشروبات' });
+  assert.equal(bc.status, 200);
+  assert.equal(bc.data.apple, 1);
+  await admin.flush();
+  assert.equal(pushes.length, 1);
+  assert.equal(pushes[0].url, 'https://api.push.apple.com/3/device/aa11');
+  assert.equal((await db.get('SELECT COUNT(*) AS n FROM apple_queue')).n, 0, 'الدور فضي');
+  const changed = await guest.req('GET', `/apple/v1/devices/dev1/registrations/pass.com.nuqatak.test?passesUpdatedSince=${Date.now() - 60e3}`);
+  assert.deepEqual(changed.data.serialNumbers, [token]);
+  const fresh = await guest.req('GET', `/apple/v1/passes/pass.com.nuqatak.test/${token}`, undefined, auth);
+  assert.equal(fresh.status, 200);
+  const passJson = JSON.parse(unzipAll(fresh.data)['pass.json'].toString());
+  const news = passJson.storeCard.backFields[0];
+  assert.deepEqual([news.key, news.value, news.changeMessage], ['news', 'خصم 20% اليوم على كل المشروبات', '%@']);
+  assert.match(news.label, /موكا/);
+
   // الجهاز شال البطاقة (410): منشيل التسجيل
   reply = () => ({ status: 410, body: { reason: 'Unregistered' } });
   await admin.post(`/api/members/${memberId}/earn`, { amount: 3 });

@@ -359,7 +359,7 @@ test('صفحة الخصوصية وإيميل التواصل', async () => {
   const { PLANS } = await import('../src/app.js');
   const { PLAN_DEFAULTS, FEATURES } = await import('../public/js/plans.js');
   assert.deepEqual(PLAN_DEFAULTS, PLANS, 'أسعار صفحة البيع نفس أسعار السيرفر');
-  assert.equal(FEATURES.length, 15);
+  assert.equal(FEATURES.length, 16);
   assert.deepEqual((await c.get('/api/site')).data, { contactEmail: 'privacy@example.com', whatsapp: null, signupOpen: true, apple: false, plans: PLANS, promo: { pct: 30, months: 3, total: 20, left: 20 }, testimonials: [], sales: false });
   const { client: client2 } = await setup({ WHATSAPP_NUMBER: '962798900911', SIGNUP_CODE: 'x', PROMO_TOTAL: '0' });
   assert.deepEqual((await client2().get('/api/site')).data, { contactEmail: null, whatsapp: '962798900911', signupOpen: false, apple: false, plans: PLANS, promo: null, testimonials: [], sales: false });
@@ -657,4 +657,30 @@ test('الدومين الرسمي: صفحات العنوان القديم بتت
   // على الدومين الرسمي نفسه ما في تحويل
   const { client: same } = await setup({ PUBLIC_URL: 'https://loyalty.test' });
   assert.equal((await same().get('/')).status, 200);
+});
+
+test('🩺 صحة المحل: بتستنى 5 زبائن، وبعدها رقم من 100 ونصائح للمؤشرات الضعيفة', async () => {
+  const { client } = await setup();
+  const owner = client();
+  const { shop } = await signup(owner, { shopName: 'Mocha' });
+  assert.equal((await client().get('/api/health')).status, 401);
+  assert.deepEqual((await owner.get('/api/health')).data, { early: true, members: 0 });
+  const ids = [];
+  for (let i = 0; i < 6; i++) {
+    const t = (await client().post(`/api/shops/${shop.slug}/join`, { name: `زبون ${i}`, phone: `07944${String(i).padStart(5, '0')}` })).data.token;
+    ids.push((await owner.get(`/api/members/lookup?code=${t}`)).data.member.id);
+  }
+  for (const id of ids.slice(0, 3)) await owner.post(`/api/members/${id}/earn`, { amount: 2 });
+  const h = (await owner.get('/api/health')).data;
+  assert.equal(typeof h.score, 'number');
+  assert.ok(h.score > 0 && h.score <= 100);
+  assert.deepEqual(h.parts.map((p) => p.key), ['active', 'return', 'new', 'reach', 'rewards']);
+  assert.equal(h.parts.reduce((a, p) => a + p.weight, 0), 100);
+  const ret = h.parts.find((p) => p.key === 'return');
+  assert.equal(ret.value, '0%', 'ما حدا رجع لسا');
+  assert.ok(ret.tip && ret.href, 'مؤشر ضعيف: نصيحة ورابط');
+  assert.equal(h.parts.find((p) => p.key === 'active').tip, null, 'كلهم زاروا هالشهر');
+  assert.equal(h.parts.find((p) => p.key === 'reach').value, '0%', 'ما حدا حفظ البطاقة ولا فعّل الإشعارات');
+  assert.equal(h.visits.now, 3);
+  assert.deepEqual(h.atRisk, []);
 });

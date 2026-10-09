@@ -67,6 +67,28 @@ export const SCHEMA = [
     used_at INTEGER,
     PRIMARY KEY (user_id, code_hash)
   )`,
+  // 📣 الرسائل المجدولة: الرسالة، لمين (segment)، إمتى، وإذا بتنعاد كل أسبوع. status: scheduled، sending، sent، canceled
+  `CREATE TABLE IF NOT EXISTS campaigns (
+    id INTEGER PRIMARY KEY,
+    shop_id INTEGER NOT NULL REFERENCES shops(id),
+    header TEXT NOT NULL,
+    body TEXT NOT NULL,
+    segment TEXT NOT NULL DEFAULT 'all',
+    send_at INTEGER NOT NULL,
+    repeat TEXT NOT NULL DEFAULT 'none',
+    status TEXT NOT NULL DEFAULT 'scheduled',
+    cursor INTEGER NOT NULL DEFAULT 0,
+    sent INTEGER NOT NULL DEFAULT 0,
+    runs INTEGER NOT NULL DEFAULT 0,
+    last_sent_at INTEGER,
+    created_at INTEGER NOT NULL
+  )`,
+  'CREATE INDEX IF NOT EXISTS campaigns_due ON campaigns(status, send_at)',
+  // 🍎 أجهزة آيفون لازم يوصلها «البطاقة تحدّثت» (رسالة جديدة): بتنبعت على دفعات من المهام الدورية
+  `CREATE TABLE IF NOT EXISTS apple_queue (
+    push_token TEXT PRIMARY KEY,
+    queued_at INTEGER NOT NULL
+  )`,
   `CREATE TABLE IF NOT EXISTS members (
     id INTEGER PRIMARY KEY,
     shop_id INTEGER NOT NULL REFERENCES shops(id),
@@ -512,4 +534,7 @@ export const MIGRATIONS = [
   'ALTER TABLE users ADD COLUMN totp_secret TEXT',
   'ALTER TABLE users ADD COLUMN totp_pending TEXT',
   'ALTER TABLE users ADD COLUMN totp_step INTEGER NOT NULL DEFAULT 0',
+  // 📣 آخر رسالة من المحل للزبون (بتطلع على ضهر بطاقة الآيفون مع إشعار)
+  'ALTER TABLE members ADD COLUMN news TEXT',
+  'ALTER TABLE members ADD COLUMN news_at INTEGER',
 ];
