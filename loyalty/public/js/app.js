@@ -2123,6 +2123,62 @@ const SUB_BADGE = {
 };
 const fmtDay = (ms) => new Intl.DateTimeFormat('ar-u-nu-latn', { dateStyle: 'medium' }).format(new Date(ms));
 
+// 🚨 صحة المنصة: كل جزء شغّال؟ (المشاكل الحمرا بتوصلك إشعار وواتساب لحالها)
+const OPS_DOT = { ok: '🟢', warn: '🟡', bad: '🔴' };
+async function loadOps() {
+  const box = $('#opsPanel');
+  if (!box) return;
+  let r;
+  try { r = await api('/api/admin/ops'); } catch (e) { render(box, html`<h2>🚨 صحة المنصة</h2><p class="alert bad small">${e.message}</p>`); return; }
+  const bad = r.checks.filter((x) => x.state === 'bad').length;
+  render(box, html`<h2>🚨 صحة المنصة ${bad ? html`<span class="st lost">${bad} مشكلة</span>` : html`<span class="st won">كله تمام</span>`}</h2>
+    <ul class="list">${r.checks.map((x) => html`<li><div class="main"><b>${OPS_DOT[x.state]} ${x.name}</b><span class="small muted">${x.detail}${x.at ? ` · ${ago(x.at)}` : ''}</span></div></li>`)}</ul>
+    <p class="hint">بنفحص كل ساعة. أي إشي بيصير 🔴 بيوصلك إشعار ورسالة واتساب (لنفس المشكلة مرة كل 12 ساعة).</p>`);
+}
+
+// 💰 الربح: الدخل بعد الخصومات ناقص التكاليف (المصاريف الثابتة بتعدّلها إنت)
+async function loadFinance(data) {
+  const box = $('#financePanel');
+  if (!box) return;
+  let r = data;
+  if (!r) { try { r = await api('/api/admin/finance'); } catch (e) { render(box, html`<h2>💰 الربح هالشهر</h2><p class="alert bad small">${e.message}</p>`); return; } }
+  const m = r.month;
+  const k = m.costs;
+  const row = (label, v, cls = '') => html`<tr><td>${label}</td><td class="num ${cls}" style="text-align:left">${fmt(v)}</td></tr>`;
+  render(box, html`<h2>💰 الربح هالشهر <span class="small muted">(دينار)</span></h2>
+    <div class="stats">
+      <div class="stat"><b class="num" style="color:${m.profit >= 0 ? 'var(--ok, #12b76a)' : 'var(--bad, #f04438)'}">${fmt(m.profit)}</b><span class="small muted">صافي الربح</span></div>
+      <div class="stat"><b class="num">${fmt(r.mrr.now)}</b><span class="small muted">دخل شهري متكرر (فعلي)</span></div>
+      <div class="stat"><b class="num">${fmt(r.mrr.list)}</b><span class="small muted">بعد ما تخلص الخصومات</span></div>
+    </div>
+    <table class="mini" style="width:100%">
+      ${row('الدخل بالسعر الكامل', m.gross)}
+      ${row('− الخصومات (عرض أول المحلات والخاص)', m.discounts, 'minus')}
+      ${row('= الدخل الفعلي', m.net)}
+      ${row('− عمولات المندوبين', k.commissions, 'minus')}
+      ${row('− الذكاء الاصطناعي', k.aiJod, 'minus')}
+      ${row(`− واتساب (${fmt(k.waSent)} رسالة تعريف)`, k.waJod, 'minus')}
+      ${row('− المصاريف الثابتة', k.fixedJod, 'minus')}
+      ${row('= صافي الربح', m.profit)}
+    </table>
+    <p class="small muted">الشهر الماضي: دخل ${fmt(r.prev.net)} (خصومات ${fmt(r.prev.discounts)}، عمولات ${fmt(r.prev.commissions)})${r.mrr.free ? ` · ${r.mrr.free} محل مجاني دائماً` : ''}</p>
+    <details><summary class="small">⚙️ المصاريف الثابتة وسعر رسالة واتساب (بالدولار)</summary>
+      <form class="stack" id="financeForm" style="margin-top:8px">
+        ${[...r.cfg.fixed, { name: '', usd: '' }, { name: '', usd: '' }].map((x) => html`<div class="row"><input class="grow" name="fname" value="${x.name}" placeholder="مثلاً: Cloudflare المدفوع" maxlength="60"><input class="num" name="fusd" type="number" step="0.01" min="0" value="${x.usd}" placeholder="$ بالشهر" style="width:110px"></div>`)}
+        <label class="small">سعر رسالة واتساب التعريف ($)<input class="num" name="waUsd" type="number" step="0.001" min="0" max="1" value="${r.cfg.waUsd}"></label>
+        <p class="hint">${r.cfg.saved ? '' : 'هاي أرقام مقترحة، عدّلها واحفظ. '}بنحوّلها للدينار (1$ = ${r.usdJod}). سعر رسائل Meta بالأردن بيختلف حسب نوع القالب: شوفه بـ WhatsApp Manager ← الفواتير.</p>
+        <button class="btn ghost" type="submit">حفظ</button>
+      </form></details>`);
+  const f = $('#financeForm', box);
+  f.onsubmit = async (e) => {
+    e.preventDefault();
+    const names = $$('[name=fname]', f).map((i) => i.value.trim());
+    const usds = $$('[name=fusd]', f).map((i) => i.value);
+    const fixed = names.map((name, i) => ({ name, usd: usds[i] })).filter((x) => x.name && x.usd !== '').map((x) => ({ name: x.name, usd: Number(x.usd) }));
+    try { loadFinance(await api('/api/admin/finance', { method: 'PUT', body: { fixed, waUsd: Number(f.waUsd.value) } })); toast('انحفظ ✅', 'ok'); } catch (err) { toast(err.message, 'bad'); }
+  };
+}
+
 // 💾 النسخ الاحتياطي: تنزيل هلأ، وكل أسبوع على الإيميل
 function backupPanel(b) {
   const last = b.last;
@@ -2136,6 +2192,8 @@ function backupPanel(b) {
       ${b.mail ? html`<button class="btn ghost" type="button" id="backupSend">📧 ابعت نسخة على إيميلي هلأ</button>` : ''}
     </div>
     ${b.downloadedAt ? html`<p class="hint">آخر تنزيل ${ago(b.downloadedAt)}</p>` : ''}
+    ${restoreLine(b.restoreCheck)}
+    <div class="row"><button class="btn ghost sm" type="button" id="restoreCheck">🧪 افحص الاسترجاع هلأ</button><a class="btn ghost sm" href="/api/admin/backup/restore.sql" download>⬇️ ملف الاسترجاع (SQL)</a></div>
     ${resetMailLine(b)}
     <p class="hint">🔒 الملف فيه كل بيانات المحلات والزبائن: خليه عندك (مثلاً iCloud Drive) وما تبعته لحدا.</p>`;
 }
@@ -2148,7 +2206,25 @@ function resetMailLine(b) {
   return html`<p class="alert warn small">🔑 «نسيت كلمة السر»: ${r ? html`آخر محاولة إيميل ما زبطت (${ago(r.at)}): <span dir="ltr">${r.error}</span><br>` : ''}لهلأ الطلب بيوصلك إشعار وإنت بتبعتله الرابط. ليصير الرابط يوصل لحاله على إيميله: Cloudflare ← Workers Paid ($5 بالشهر) وبعدين Email Sending لـ nuqatak.com.</p>`;
 }
 
+function restoreLine(r) {
+  if (!r) return html`<p class="small muted">🧪 لسا ما انفحص الاسترجاع. كل نسخة أسبوعية بتنفحص لحالها قبل ما تنبعت.</p>`;
+  return r.ok
+    ? html`<p class="alert ok small">🧪 فحص الاسترجاع ${ago(r.at)}: الملف بينفك وبيرجع كامل ✅ (${fmt(r.tables)} جدول، ${fmt(r.rows)} صف)</p>`
+    : html`<p class="alert bad small">🧪 فحص الاسترجاع ${ago(r.at)} لقى مشاكل: ${r.issues.join('، ')}</p>`;
+}
+
 function bindBackup() {
+  const rc = $('#restoreCheck');
+  if (rc) rc.onclick = async () => {
+    rc.disabled = true;
+    rc.textContent = '🧪 عم بفحص…';
+    try {
+      const r = await api('/api/admin/backup/verify', { method: 'POST' });
+      toast(r.ok ? 'النسخة سليمة وبترجع كاملة ✅' : `لقى مشاكل: ${r.issues.join('، ')}`, r.ok ? 'ok' : 'bad');
+      render($('#backupPanel'), backupPanel(await api('/api/admin/backup/status')));
+      bindBackup();
+    } catch (e) { toast(e.message, 'bad'); rc.disabled = false; rc.textContent = '🧪 افحص الاسترجاع هلأ'; }
+  };
   const btn = $('#backupSend');
   if (!btn) return;
   btn.onclick = async () => {
@@ -2216,6 +2292,8 @@ async function admin() {
       <div class="stat"><b class="num">${fmt(stats.counts.basic || 0)}</b><span class="small muted">⭐ أساسي</span></div>
       <div class="stat"><b class="num">${fmt(stats.counts.newMonth)}</b><span class="small muted">سجّلوا هالشهر</span></div>
     </div>
+    <section class="panel stack" id="opsPanel" style="margin-top:14px"><h2>🚨 صحة المنصة</h2><p class="muted small">جاري الفحص…</p></section>
+    <section class="panel stack" id="financePanel" style="margin-top:14px"><h2>💰 الربح هالشهر</h2><p class="muted small">جاري الحساب…</p></section>
     ${stats.ending.length ? html`<section class="panel" style="margin-top:14px"><h2>⏳ بتخلص خلال 7 أيام</h2>
       <ul class="list">${stats.ending.map((e) => html`<li><div class="main"><b>${e.name}</b><span class="small muted">${e.state === 'trial' ? 'تجربة' : 'اشتراك'} · باقي ${e.daysLeft} ${e.daysLeft === 1 ? 'يوم' : 'أيام'} · <span dir="ltr">${e.ownerEmail || ''}</span></span></div></li>`)}</ul>
       <p class="hint">صاحب المحل بيوصله تذكير لحاله قبل 3 أيام وقبل يوم (إذا مفعّل التنبيهات). أحسن وقت تحكي معه.</p></section>` : ''}
@@ -2280,6 +2358,8 @@ async function admin() {
     <div class="group" data-group="updates">${updatesPanel(stats)}</div>`);
   bindSubnav('admin', 'overview');
   bindBackup();
+  loadOps();
+  loadFinance();
   $('[data-goto-updates]').onclick = (e) => { e.preventDefault(); $('[data-subnav="admin"] [data-g="updates"]').click(); };
   bindApple();
   bindPayments();

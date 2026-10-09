@@ -5,6 +5,7 @@
 import { readFileSync } from 'node:fs';
 import { gunzipSync } from 'node:zlib';
 import { MEMBER_DELETE_GUARD } from '../src/schema.js';
+import { restoreSql } from '../src/backup.js';
 
 const file = process.argv[2];
 if (!file) {
@@ -12,15 +13,6 @@ if (!file) {
   process.exit(1);
 }
 const data = JSON.parse(gunzipSync(readFileSync(file)).toString('utf8'));
-if (data.app !== 'nuqatak' || data.format !== 1) throw new Error('هاد مش ملف نسخة احتياطية من نقاطك');
 
-const lit = (v) => (v === null || v === undefined ? 'NULL' : typeof v === 'number' ? String(v) : typeof v === 'boolean' ? (v ? '1' : '0') : `'${String(v).replace(/'/g, "''")}'`);
-const out = ['PRAGMA defer_foreign_keys = true;', 'DROP TRIGGER IF EXISTS protect_member_funds;', 'DELETE FROM sessions;'];
-for (const [table, { columns, rows }] of Object.entries(data.tables)) {
-  out.push(`DELETE FROM "${table}";`);
-  const cols = columns.map((c) => `"${c}"`).join(', ');
-  for (const r of rows) out.push(`INSERT INTO "${table}" (${cols}) VALUES (${r.map(lit).join(', ')});`);
-}
-out.push(`${MEMBER_DELETE_GUARD};`);
-process.stdout.write(`${out.join('\n')}\n`);
+process.stdout.write(restoreSql(data, MEMBER_DELETE_GUARD));
 console.error(`✅ ${Object.keys(data.tables).length} جدول من نسخة ${data.exportedAt}`);

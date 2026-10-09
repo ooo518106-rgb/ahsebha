@@ -15,6 +15,7 @@ import * as wa from './whatsapp.js';
 import { defaultLogoPng } from './png.js';
 import { heroKey, parseKey, peekStrip, renderKey, stripFiles, stripKey, STRIP_VERSION } from './strip.js';
 import * as backup from './backup.js';
+import { MEMBER_DELETE_GUARD } from './schema.js';
 import * as social from './social.js';
 import * as totp from './totp.js';
 import { extendUntilSql } from './subscription.js';
@@ -729,6 +730,7 @@ export async function runScheduled(ctx, now = Date.now()) {
     }
     return shops.get(id);
   };
+  await setSetting(c.db, 'cron_last', now); // 💓 المهام شغّالة (المراقبة بتنبّهك إذا وقفت)
   const out = { birthdays: 0, reviews: 0, winback: 0 };
   out.birthdays = await birthdayJob(c, shopOf, now);
   if (c.budget > 0) out.campaigns = await campaignJob(c, shopOf, now);
@@ -736,12 +738,13 @@ export async function runScheduled(ctx, now = Date.now()) {
   if (c.budget > 0) out.winback = await winbackJob(c, shopOf, now);
   if (c.budget > 0) out.summaries = await summaryJob(c, now);
   if (c.budget > 0) out.reminders = await reminderJob(c, platformShop, now);
-  out.outreach = await salesOutreachJob(c, now).catch((e) => { console.error('outreach:', e.message); return 0; });
+  out.outreach = await salesOutreachJob(c, now).catch(async (e) => { console.error('outreach:', e.message); await noteError(c, 'cron: الإرسال للمحلات', e); return 0; });
   Object.assign(out, await expiryJob(c, shopOf, now));
   out.giftsRefunded = await giftRefundJob(c, now);
-  out.apple = await appleQueueDrain(c).catch((e) => { console.error('apple queue:', e.message); return 0; });
-  out.backup = await backupJob(c, now).catch((e) => { console.error('backup:', e.message); return 'error'; });
-  out.social = await socialJob(c, now).catch((e) => { console.error('social:', e.message); return 'error'; });
+  out.apple = await appleQueueDrain(c).catch(async (e) => { console.error('apple queue:', e.message); await noteError(c, 'cron: إشعارات الآيفون', e); return 0; });
+  out.backup = await backupJob(c, now).catch(async (e) => { console.error('backup:', e.message); await noteError(c, 'cron: النسخة الاحتياطية', e); return 'error'; });
+  out.social = await socialJob(c, now).catch(async (e) => { console.error('social:', e.message); await noteError(c, 'cron: وكيل النشر', e); return 'error'; });
+  out.ops = await opsJob(c, now).catch((e) => { console.error('ops:', e.message); return 'error'; });
   const day = localDayKey('JO', now);
   // حساب العرض بيرجع لحاله كل يوم الساعة 4 الصبح، أو فوراً لما ينضافله إشي جديد (رقم النسخة تغيّر)
   const demoOld = (await getSetting(c.db, 'demo_version')) !== String(DEMO_VERSION);
@@ -1457,6 +1460,163 @@ async function isPlatformAdmin(c) {
   return !!(c.user && first && first.id === c.user.id);
 }
 
+// ─── 🚨 مراقبة التشغيل: كل جزء من المنصة شغّال؟ وإذا وقع إشي، إشعار إلك (لنفس المشكلة مرة كل 12 ساعة) ───
+const OPS_EVERY = 12 * 36e5;
+async function noteError(c, where, e) {
+  try {
+    const hour = Math.floor(Date.now() / 36e5);
+    await c.db.run('INSERT INTO rate_hits (k, n, expires_at) VALUES (?, 1, ?) ON CONFLICT(k) DO UPDATE SET n = n + 1', `err:${hour}`, (hour + 2) * 36e5);
+    await setSetting(c.db, 'err_last', JSON.stringify({ at: Date.now(), where: clean(where, 80), message: clean(e && e.message, 200) }));
+  } catch { /* المراقبة ما بتوقّع السيرفر */ }
+}
+
+async function opsChecks(c, now = Date.now()) {
+  const items = [];
+  const add = (key, name, state, detail, at = null) => items.push({ key, name, state, detail, at });
+  const cronLast = Number(await getSetting(c.db, 'cron_last')) || 0;
+  add('cron', '⏱️ المهام الدورية (كل 5 دقايق)', !cronLast ? 'warn' : now - cronLast > 30 * MIN ? 'bad' : 'ok', !cronLast ? 'لسا ما اشتغلت' : now - cronLast > 30 * MIN ? 'واقفة! الإشعارات والرسائل المجدولة والنسخ ما عم تنبعت' : 'شغّالة', cronLast || null);
+  const hour = Math.floor(now / 36e5);
+  const errs = (await c.db.all('SELECT k, n FROM rate_hits WHERE k IN (?, ?)', `err:${hour}`, `err:${hour - 1}`)).reduce((a, r) => a + r.n, 0);
+  const lastErr = await jsonSetting(c.db, 'err_last');
+  add('errors', '🧯 أخطاء السيرفر (آخر ساعتين)', errs >= 20 ? 'bad' : errs >= 5 ? 'warn' : 'ok', errs ? `${errs} خطأ${lastErr ? ` · آخر واحد: ${lastErr.where}: ${lastErr.message}` : ''}` : 'ما في', lastErr && errs ? lastErr.at : null);
+  const bk = await jsonSetting(c.db, 'backup_last');
+  const rc = await jsonSetting(c.db, 'restore_check');
+  if (!c.env.MAIL) add('backup', '💾 النسخة الاحتياطية', 'warn', 'الإيميل مش مربوط: نزّل نسخة بإيدك كل فترة');
+  else if (bk && !bk.ok) add('backup', '💾 النسخة الاحتياطية', 'bad', `آخر محاولة فشلت: ${bk.error || ''}`, bk.failedAt || null);
+  else if (!bk || now - bk.at > 8 * DAY) add('backup', '💾 النسخة الاحتياطية', 'warn', bk ? 'آخر نسخة أقدم من أسبوع' : 'لسا ما انبعتت ولا نسخة', bk ? bk.at : null);
+  else add('backup', '💾 النسخة الاحتياطية', 'ok', 'كل أسبوع على الإيميل', bk.at);
+  if (rc && !rc.ok) add('restore', '🧪 فحص الاسترجاع', 'bad', rc.issues.join('، '), rc.at);
+  else add('restore', '🧪 فحص الاسترجاع', rc && now - rc.at < 35 * DAY ? 'ok' : 'warn', rc ? `${rc.tables} جدول و ${rc.rows} صف` : 'لسا ما انفحص', rc ? rc.at : null);
+  if (wa.waConfig(c.env)) {
+    const f = await jsonSetting(c.db, 'wa_last_failure');
+    const stop = await jsonSetting(c.db, 'sales_stop');
+    const recentStop = stop && stop.at && now - stop.at < DAY && (await getSetting(c.db, 'sales_auto')) !== '1';
+    add('whatsapp', '💬 واتساب الوكيل', recentStop ? 'bad' : f && now - f.at < DAY ? 'warn' : 'ok', recentStop ? `الإرسال وقف لحاله: ${stop.why}` : f && now - f.at < DAY ? `آخر رسالة ما وصلت: ${f.message}` : 'شغّال', recentStop ? stop.at : f && now - f.at < DAY ? f.at : null);
+  }
+  if (aiConfig(c.env)) {
+    const ok = await jsonSetting(c.db, 'ai_last_ok');
+    const err = await jsonSetting(c.db, 'ai_last_error');
+    const broken = err && (!ok || err.at > ok.at) && now - err.at < DAY;
+    add('ai', '🤖 الذكاء الاصطناعي (وكيل المبيعات)', broken ? 'bad' : 'ok', broken ? `آخر طلب فشل: ${err.message || err.status || ''}` : 'شغّال', broken ? err.at : ok ? ok.at : null);
+  }
+  const ap = await c.db.get('SELECT cert_expires, apns_key, apns_last FROM apple_config WHERE id = 1 AND cert IS NOT NULL');
+  if (ap) {
+    const days = ap.cert_expires ? Math.floor((ap.cert_expires - now) / DAY) : null;
+    const last = ap.apns_last ? JSON.parse(ap.apns_last) : null;
+    const failing = last && !last.sent && last.failed && now - last.at < DAY;
+    add('apple', '🍎 Apple Wallet', days != null && days < 7 ? 'bad' : (days != null && days < 30) || failing || !ap.apns_key ? 'warn' : 'ok',
+      days != null && days < 30 ? `شهادة Apple بتخلص بعد ${days} يوم: جدّدها` : failing ? `إشعارات الآيفون ما عم توصل: ${last.reason || ''}` : !ap.apns_key ? 'مفتاح APNs مش مرفوع: البطاقات ما بتتحدّث لحالها' : `الشهادة لحد ${new Date(ap.cert_expires).toISOString().slice(0, 10)}`);
+    const queue = (await c.db.get('SELECT COUNT(*) AS n FROM apple_queue')).n;
+    if (queue > 300) add('appleQueue', '🍎 دور إشعارات الآيفون', 'warn', `${queue} جهاز بيستنوا (بتنبعت 25 كل 5 دقايق)`);
+  }
+  const stuck = (await c.db.get("SELECT COUNT(*) AS n FROM campaigns WHERE status = 'sending' AND send_at < ?", now - 6 * 36e5)).n;
+  if (stuck) add('campaigns', '⏰ الرسائل المجدولة', 'warn', `${stuck} رسالة عالقة أكتر من 6 ساعات`);
+  const sc = await socialCfg(c.db);
+  if (sc.on) {
+    const sl = await jsonSetting(c.db, 'social_last');
+    const bad = sl && sl.error && now - sl.at < 2 * DAY;
+    add('social', '📣 وكيل النشر', bad ? 'warn' : 'ok', bad ? `آخر منشور ما نزل: ${sl.error}` : 'شغّال', sl ? sl.at : null);
+  }
+  return items;
+}
+
+// كل ساعة من المهام الدورية: المشاكل الجديدة بتوصلك إشعار وواتساب
+async function opsJob(c, now) {
+  if (now - (Number(await getSetting(c.db, 'ops_check_at')) || 0) < 36e5) return 'later';
+  await setSetting(c.db, 'ops_check_at', now);
+  return opsAlert(c, (await opsChecks(c, now)).filter((x) => x.state === 'bad'), now);
+}
+
+async function opsAlert(c, bad, now) {
+  const alerted = (await jsonSetting(c.db, 'ops_alerted')) || {};
+  const fresh = bad.filter((x) => !(alerted[x.key] > now - OPS_EVERY));
+  if (!fresh.length) return 0;
+  for (const x of fresh) alerted[x.key] = now;
+  await setSetting(c.db, 'ops_alerted', JSON.stringify(alerted));
+  const title = `🚨 ${fresh.length === 1 ? fresh[0].name : `${fresh.length} مشاكل بالمنصة`}`;
+  const body = fresh.map((x) => `${x.name}: ${x.detail}`).join(' · ').slice(0, 300);
+  await notifyAdmin(c, { title, body, url: `${c.origin}/app#admin` });
+  await alertOwnerWa(c, { event: 'مشكلة بالمنصة', who: fresh.map((x) => x.name).join('، ').slice(0, 60), about: body, key: `ops:${fresh.map((x) => x.key).join(',')}`, every: OPS_EVERY });
+  return fresh.length;
+}
+
+// المهام الدورية ما بتقدر تنبّه إذا هي نفسها وقفت: أي حدا بيفتح اللوحة بيشيّك
+async function cronWatch(c) {
+  const last = Number(await getSetting(c.db, 'cron_last')) || 0;
+  if (!last || Date.now() - last < 30 * MIN) return;
+  await opsAlert(c, [{ key: 'cron', name: '⏱️ المهام الدورية', detail: 'واقفة! الإشعارات والرسائل المجدولة والنسخ ما عم تنبعت' }], Date.now());
+}
+
+async function adminOps(c) {
+  await requireAdmin(c);
+  return json({ checks: await opsChecks(c), alerted: (await jsonSetting(c.db, 'ops_alerted')) || {} });
+}
+
+// ─── 💰 الربح الحقيقي: الدخل بعد الخصومات، ناقص عمولات المندوبين والذكاء الاصطناعي ورسائل واتساب والمصاريف الثابتة ───
+const USD_JOD = 0.709; // الدينار مربوط بالدولار
+const FINANCE_DEFAULT = { waUsd: 0.035, fixed: [{ name: 'Apple Developer (99$ بالسنة)', usd: 8.25 }, { name: 'الدومين nuqatak.com', usd: 1 }, { name: 'Cloudflare', usd: 0 }] };
+async function financeCfg(db) {
+  const v = (await jsonSetting(db, 'finance_costs')) || {};
+  return { waUsd: Number.isFinite(v.waUsd) ? v.waUsd : FINANCE_DEFAULT.waUsd, fixed: Array.isArray(v.fixed) ? v.fixed : FINANCE_DEFAULT.fixed, saved: !!v.fixed };
+}
+
+async function adminFinance(c) {
+  await requireAdmin(c);
+  if (c.req.method === 'PUT') {
+    const waUsd = Number(c.body.waUsd);
+    if (!Number.isFinite(waUsd) || waUsd < 0 || waUsd > 1) fail(400, 'سعر رسالة واتساب لازم يكون بين 0 و 1 دولار');
+    const fixed = (Array.isArray(c.body.fixed) ? c.body.fixed : []).slice(0, 15).map((x) => ({ name: clean(x && x.name, 60), usd: Number(x && x.usd) }))
+      .filter((x) => x.name && Number.isFinite(x.usd) && x.usd >= 0 && x.usd <= 100000);
+    await setSetting(c.db, 'finance_costs', JSON.stringify({ waUsd, fixed }));
+  }
+  const now = Date.now();
+  const t = perks.localTime('JO', now);
+  const monthStart = Date.UTC(t.year, t.month - 1, 1) - 3 * 36e5;
+  const prevStart = Date.UTC(t.month === 1 ? t.year - 1 : t.year, t.month === 1 ? 11 : t.month - 2, 1) - 3 * 36e5;
+  const cfg = await financeCfg(c.db);
+  const month = async (from, to) => {
+    const p = await c.db.get(`SELECT COALESCE(SUM(p.amount), 0) AS net, COALESCE(SUM(p.discount), 0) AS discounts, COUNT(*) AS n,
+        COALESCE(SUM(CASE WHEN r.id IS NOT NULL THEN p.amount * r.pct / 100.0 ELSE 0 END), 0) AS commissions
+      FROM payments p JOIN shops s ON s.id = p.shop_id LEFT JOIN resellers r ON r.id = s.reseller_id
+      WHERE p.status = 'approved' AND p.decided_at >= ? AND p.decided_at < ?`, from, to);
+    return { net: money2(p.net), discounts: money2(p.discounts), gross: money2(p.net + p.discounts), payments: p.n, commissions: money2(p.commissions) };
+  };
+  const [cur, prev] = await Promise.all([month(monthStart, now + 1), month(prevStart, monthStart)]);
+  const ai = await aiMonth(c.db);
+  const aiCfg = aiConfig(c.env);
+  const aiModel = aiCfg ? (aiCfg.provider === 'gemini' ? aiCfg.model || ((await jsonSetting(c.db, 'ai_last_ok')) || {}).model || null : aiCfg.model) : null;
+  const aiUsd = aiCfg ? aiCost(aiModel || aiCfg.provider, ai) || 0 : 0;
+  const waSent = (await c.db.get('SELECT COUNT(*) AS n FROM prospects WHERE sent_at >= ?', monthStart)).n;
+  const waUsd = waSent * cfg.waUsd;
+  const fixedUsd = cfg.fixed.reduce((a, x) => a + x.usd, 0);
+  const costs = { aiJod: money2(aiUsd * USD_JOD), waJod: money2(waUsd * USD_JOD), waSent, fixedJod: money2(fixedUsd * USD_JOD), commissions: cur.commissions };
+  const totalCosts = money2(costs.aiJod + costs.waJod + costs.fixedJod + costs.commissions);
+  // الدخل الشهري المتكرر: من آخر دفعة فعلية لكل محل مشترك (بعد الخصم)، والسنوي ÷ 12؛ وقدّيش بيصير لما تخلص الخصومات
+  const platformShop = await platformShopId(c.db);
+  const shops = await c.db.all(`SELECT s.*, (SELECT p.amount FROM payments p WHERE p.shop_id = s.id AND p.status = 'approved' ORDER BY p.decided_at DESC LIMIT 1) AS lastAmount,
+      (SELECT p.plan FROM payments p WHERE p.shop_id = s.id AND p.status = 'approved' ORDER BY p.decided_at DESC LIMIT 1) AS lastPlan
+    FROM shops s WHERE s.demo = 0 AND s.id <> ?`, platformShop ?? 0);
+  let mrrNow = 0;
+  let mrrList = 0;
+  let free = 0;
+  for (const s of shops) {
+    const sub = subscriptionOf(s, platformShop);
+    if (sub.state !== 'active') continue;
+    if (sub.free) { free++; continue; }
+    const tier = readTier(s.plan);
+    const per = s.lastPlan === 'year' ? 12 : 1;
+    mrrNow += s.lastAmount != null ? s.lastAmount / per : planPrice(tier, s.lastPlan === 'year' ? 'year' : 'month') / per;
+    mrrList += planPrice(tier, s.lastPlan === 'year' ? 'year' : 'month') / per;
+  }
+  return json({
+    month: { ...cur, costs, totalCosts, profit: money2(cur.net - totalCosts) },
+    prev,
+    mrr: { now: money2(mrrNow), list: money2(mrrList), free },
+    cfg: { waUsd: cfg.waUsd, fixed: cfg.fixed, saved: cfg.saved },
+    usdJod: USD_JOD,
+  });
+}
+
 // ─── 💾 النسخ الاحتياطي ───
 // كل أسبوع (ليلة الجمعة، 3 الصبح بعمّان) بتنبعت نسخة على إيميل مدير المنصة، إذا الإيميل مربوط (MAIL)
 const BACKUP_EVERY = 7 * DAY;
@@ -1473,19 +1633,23 @@ async function sendBackup(c, now = Date.now()) {
   const count = (t) => (rows.find((r) => r[0] === t) || [0, 0])[1];
   const filename = backup.backupName(now);
   const host = new URL(c.origin).hostname;
+  // 🧪 قبل ما تنبعت: بنفك الملف نفسه وبنفحص إنه بيسترجع (كل الجداول والأعمدة وعدد الصفوف)
+  const check = await backup.verifyBackup(c.db, await backup.gunzipJson(gz), MEMBER_DELETE_GUARD);
+  await setSetting(c.db, 'restore_check', JSON.stringify({ at: now, ...check }));
   const text = [
     'نسخة احتياطية من نقاطك 💾',
     '',
     `المحلات: ${count('shops')} · الزبائن: ${count('members')} · الحركات: ${count('txns')}`,
     `حجم الملف: ${(gz.length / 1024).toFixed(0)} KB`,
     '',
+    check.ok ? '🧪 فحص الاسترجاع: الملف سليم ✅' : `⚠️ فحص الاسترجاع لقى مشاكل: ${check.issues.join('، ')}`,
     'خلّي الإيميل عندك: الملف فيه كل بيانات المحلات والزبائن.',
-    'الاسترجاع (إذا احتجت): node scripts/restore-backup.mjs الملف > restore.sql ثم npx wrangler d1 execute loyalty --remote --file=restore.sql',
+    'الاسترجاع (إذا احتجت): نزّل «ملف الاسترجاع (SQL)» من 👑 المنصة ← 💾 النسخ (أو node scripts/restore-backup.mjs الملف > restore.sql)، ثم npx wrangler d1 execute loyalty --remote --file=restore.sql',
   ].join('\n');
   const raw = backup.mimeMessage({ from: `backup@${host}`, fromName: 'نقاطك', to, subject: `💾 نسخة نقاطك الاحتياطية ${filename.slice(16, 26)}`, text, filename, data: gz, now });
   const EmailMessage = c.env.EmailMessage || (await import('cloudflare:email')).EmailMessage;
   await c.env.MAIL.send(new EmailMessage(`backup@${host}`, to, raw));
-  const last = { at: now, ok: true, to, size: gz.length, shops: count('shops'), members: count('members') };
+  const last = { at: now, ok: true, to, size: gz.length, shops: count('shops'), members: count('members'), verified: check.ok };
   await setSetting(c.db, 'backup_last', JSON.stringify(last));
   return last;
 }
@@ -1702,6 +1866,26 @@ async function adminBackup(c) {
   });
 }
 
+// 🧪 فحص الاسترجاع هلأ: نسخة جديدة، بنضغطها وبنفكها وبنفحصها
+async function adminBackupVerify(c) {
+  await requireAdmin(c);
+  await rateLimit(c, 'backup:verify', 10, HOUR);
+  const now = Date.now();
+  const gz = await backup.gzipJson(await backup.exportDb(c.db, now));
+  const check = await backup.verifyBackup(c.db, await backup.gunzipJson(gz), MEMBER_DELETE_GUARD);
+  const v = { at: now, size: gz.length, ...check };
+  await setSetting(c.db, 'restore_check', JSON.stringify(v));
+  return json(v);
+}
+
+// ملف restore.sql جاهز (بدون ما تحتاج node): npx wrangler d1 execute loyalty --remote --file=restore.sql
+async function adminRestoreSql(c) {
+  await requireAdmin(c);
+  const now = Date.now();
+  const sql = backup.restoreSql(await backup.exportDb(c.db, now), MEMBER_DELETE_GUARD);
+  return new Response(sql, { headers: { 'content-type': 'application/sql; charset=utf-8', 'content-disposition': `attachment; filename="${backup.backupName(now).replace('.json.gz', '.sql')}"`, 'cache-control': 'no-store' } });
+}
+
 async function adminBackupStatus(c) {
   await requireAdmin(c);
   if (c.req.method === 'POST') {
@@ -1715,6 +1899,7 @@ async function adminBackupStatus(c) {
     last: await jsonSetting(c.db, 'backup_last'),
     downloadedAt: Number(await getSetting(c.db, 'backup_download')) || null,
     resetMail: await jsonSetting(c.db, 'reset_mail_last'),
+    restoreCheck: await jsonSetting(c.db, 'restore_check'),
   });
 }
 
@@ -2373,6 +2558,7 @@ async function resetPassword(c) {
 
 async function me(c) {
   const isAdmin = await isPlatformAdmin(c);
+  c.waitUntil(cronWatch(c).catch(() => {}));
   // المهام الدورية ما إلها طلب، فبنحفظ رابط الموقع من زيارات صاحب المنصة بس (عشان ما حدا يغيّر روابط الإشعارات)
   if (isAdmin && !c.env.PUBLIC_URL && (await getSetting(c.db, 'origin')) !== c.origin) await setSetting(c.db, 'origin', c.origin);
   return json({
@@ -4909,6 +5095,11 @@ const API = [
   ['GET', /^\/api\/admin\/backup$/, adminBackup, 'staff'],
   ['GET', /^\/api\/admin\/backup\/status$/, adminBackupStatus, 'staff'],
   ['POST', /^\/api\/admin\/backup\/status$/, adminBackupStatus, 'staff'],
+  ['POST', /^\/api\/admin\/backup\/verify$/, adminBackupVerify, 'staff'],
+  ['GET', /^\/api\/admin\/backup\/restore\.sql$/, adminRestoreSql, 'staff'],
+  ['GET', /^\/api\/admin\/ops$/, adminOps, 'staff'],
+  ['GET', /^\/api\/admin\/finance$/, adminFinance, 'staff'],
+  ['PUT', /^\/api\/admin\/finance$/, adminFinance, 'staff'],
   ['GET', /^\/api\/admin\/payments$/, adminPayments, 'staff'],
   ['POST', /^\/api\/admin\/payments\/(\d+)$/, adminPaymentDecide, 'staff'],
   ['GET', /^\/api\/admin\/settings$/, adminSettings, 'staff'],
@@ -5113,6 +5304,7 @@ export async function handle(req, ctx) {
   } catch (e) {
     if (e instanceof HttpError) return json({ error: e.message, ...(e.extra || {}) }, e.status);
     console.error(e);
+    await noteError(c, `${req.method} ${p}`, e);
     return json({ error: 'صار خطأ بالسيرفر، جرّب كمان شوي' }, 500);
   }
 }
