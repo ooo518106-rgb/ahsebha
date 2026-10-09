@@ -3,6 +3,7 @@ import { $, $$, ago, api, cardHTML, fmt, fmtDate, html, newKey, qrSVG, raw, rend
 import { generateKeyAndCsr } from './csr.js';
 import { countWord, parseLatLng } from './rules.js';
 import { startCameraScan } from './scan.js';
+import { parseReceipt } from './receipt.js';
 import { parseBirthday, readCsv, readXlsx } from './sheet.js';
 import { PLAN_BLURB, PLAN_DEFAULTS, compareHTML } from './plans.js';
 
@@ -194,6 +195,7 @@ function cashier() {
         </form>
         <p class="hint">قارئ QR موصول بالكمبيوتر؟ خلّي المؤشر بالخانة وامسح.</p>
         <button class="btn soft block" id="newBtn" type="button">+ زبون جديد</button>
+        <button class="btn ghost block" id="refundBtn" type="button">↩️ استرجاع فاتورة</button>
         ${state.me.user.branchId ? html`<p class="small muted center">📍 فرعك: <b>${branchName(state.me.user.branchId)}</b></p>`
           : isOwner() && state.shop.locations.length > 1 ? html`<label class="small">📍 الفرع: <select id="branchSel" style="width:auto">
               <option value="">بدون</option>${state.shop.locations.map((l) => html`<option value="${l.id}" ${l.id === state.branch ? 'selected' : ''}>${l.name}</option>`)}</select></label>` : ''}
@@ -217,6 +219,7 @@ function cashier() {
   };
   $('#findForm').onsubmit = (e) => { e.preventDefault(); const v = $('#code').value.trim(); if (v) findMember(v); };
   $('#newBtn').onclick = () => newMemberDialog();
+  $('#refundBtn').onclick = () => refundDialog();
   const ob = $('#obHide');
   if (ob) ob.onclick = async () => { await api('/api/shop/onboard', { method: 'POST', body: { step: 'dismissed' } }).catch(() => {}); state.me.onboarding = null; cashier(); };
   const bs = $('#branchSel');
@@ -263,6 +266,112 @@ function memberSummary(m) {
       : html`<div class="small muted">باقي <b class="num">${p.remaining}</b> ${s.unit} لـ ${s.rewardName}</div>`}`;
 }
 
+// 🧾 رقم الفاتورة: بتنكتب أو بتنقرا من QR الفاتورة (المبلغ كمان إذا موجود فيه)
+function invoiceRow() {
+  const mode = state.shop.perks.invoiceMode || 'optional';
+  if (mode === 'off') return '';
+  const must = mode === 'required' && !isOwner();
+  return html`<div class="row" id="invoiceRow">
+      <input class="grow" id="invoice" placeholder="رقم الفاتورة${must ? '' : ' (اختياري)'}" maxlength="60" autocomplete="off" ${must ? 'required' : ''}>
+      <button class="btn ghost" type="button" id="receiptBtn">📷 الفاتورة</button>
+    </div>
+    <div class="scanner hidden" id="receiptScan"><video id="receiptVideo" muted playsinline></video></div>`;
+}
+const invoiceVal = () => { const el = $('#invoice'); return el && el.value.trim() ? el.dataset.ref || el.value.trim() : undefined; };
+function bindReceipt(after = () => {}) {
+  const btn = $('#receiptBtn');
+  if (!btn) return;
+  const inv = $('#invoice');
+  inv.oninput = () => { delete inv.dataset.ref; };
+  btn.onclick = async () => {
+    if (state.stopScan) { stopCamera(); $('#receiptScan').classList.add('hidden'); btn.textContent = '📷 الفاتورة'; return; }
+    $('#receiptScan').classList.remove('hidden');
+    btn.textContent = 'سكّر';
+    try {
+      state.stopScan = await startCameraScan($('#receiptVideo'), (code) => {
+        const r = parseReceipt(code);
+        if (!r) return;
+        if (r.card) { toast('هاد QR بطاقة زبون، مش فاتورة', 'bad'); return; }
+        stopCamera();
+        $('#receiptScan').classList.add('hidden');
+        btn.textContent = '📷 الفاتورة';
+        // البصمة (qr-…) بتنحفظ بس ما بتنكتب بالخانة: الكاشير بيشوف «✓ فاتورة ممسوحة»
+        inv.value = r.invoice.startsWith('qr-') ? '✓ فاتورة ممسوحة' : r.invoice;
+        inv.dataset.ref = r.invoice;
+        const amount = $('#amount');
+        if (amount && r.amount) { amount.value = r.amount; after(); toast(`🧾 قرينا المبلغ من الفاتورة: ${fmt(r.amount)} ${state.shop.currency}. تأكد وكبس «أضف»`, 'ok'); }
+        else if (amount) { toast('🧾 انقرت الفاتورة، بس ما فيها مبلغ واضح: اكتبه بإيدك', ''); amount.focus(); }
+      });
+    } catch (e) {
+      $('#receiptScan').classList.add('hidden');
+      btn.textContent = '📷 الفاتورة';
+      toast(e.name === 'NotAllowedError' ? 'اسمح للمتصفح يستخدم الكاميرا' : e.message || 'ما قدرنا نفتح الكاميرا', 'bad');
+    }
+  };
+}
+
+// ↩️ استرجاع فاتورة: برقمها أو بمسح الـ QR تبعها، بيشيل نقاطها (كلها أو حسب المبلغ اللي رجع)
+function refundDialog() {
+  const body = openDialog('↩️ استرجاع فاتورة', html`<div class="stack">
+    <form class="row" id="rfFind"><input class="grow" id="rfInvoice" placeholder="رقم الفاتورة" maxlength="60" autocomplete="off" required><button class="btn ghost" type="button" id="rfScan">📷</button><button class="btn" type="submit">دوّر</button></form>
+    <div class="scanner hidden" id="rfScanBox"><video id="rfVideo" muted playsinline></video></div>
+    <div id="rfResult"></div>
+    <p class="hint">أو افتح ملف الزبون وكبس ↩️ جنب الحركة.</p></div>`);
+  let ref = null;
+  const find = async () => {
+    const v = ref || $('#rfInvoice', body).value.trim();
+    if (!v) return;
+    try {
+      const r = await api(`/api/invoices?invoice=${encodeURIComponent(v)}`);
+      refundForm($('#rfResult', body), r.txn);
+    } catch (e) { render($('#rfResult', body), html`<p class="alert bad small">${e.message}</p>`); }
+  };
+  $('#rfFind', body).onsubmit = (e) => { e.preventDefault(); find(); };
+  $('#rfInvoice', body).oninput = () => { ref = null; };
+  $('#rfScan', body).onclick = async () => {
+    if (state.stopScan) { stopCamera(); $('#rfScanBox', body).classList.add('hidden'); return; }
+    $('#rfScanBox', body).classList.remove('hidden');
+    try {
+      state.stopScan = await startCameraScan($('#rfVideo', body), (code) => {
+        const r = parseReceipt(code);
+        if (!r || r.card) return;
+        stopCamera();
+        $('#rfScanBox', body).classList.add('hidden');
+        ref = r.invoice;
+        $('#rfInvoice', body).value = r.invoice.startsWith('qr-') ? '✓ فاتورة ممسوحة' : r.invoice;
+        find();
+      });
+    } catch (e) { $('#rfScanBox', body).classList.add('hidden'); toast(e.message || 'ما قدرنا نفتح الكاميرا', 'bad'); }
+  };
+  $('#dlg').onclose = () => stopCamera();
+}
+
+function refundForm(box, t) {
+  const left = t.delta - t.refunded;
+  const unit = state.shop.unit;
+  render(box, html`<div class="panel stack" style="padding:12px">
+    <div><b>${t.name || ''}</b> <span class="small muted num">${t.cardNo || ''}</span></div>
+    <div class="small muted">${t.amount ? `${fmt(t.amount)} ${state.shop.currency} · ` : ''}+${fmt(t.delta)} ${unit} · ${ago(t.at)}${t.refunded ? ` · انسترجع ${fmt(t.refunded)} قبل` : ''}</div>
+    ${left <= 0 ? html`<p class="alert ok small">انسترجعت كاملة ✓</p>` : html`<form class="stack" id="rfForm">
+      ${t.amount ? html`<label class="small">المبلغ اللي رجع للزبون (فاضي = كل الفاتورة)<input class="num" name="amount" type="number" inputmode="decimal" min="0" max="${t.amount}" step="0.001" placeholder="${t.amount}"></label>` : ''}
+      <button class="btn" type="submit">↩️ استرجع ${t.amount ? '' : `${fmt(left)} ${unit}`}</button></form>`}
+  </div>`);
+  const f = $('#rfForm', box);
+  if (!f) return;
+  f.onsubmit = async (e) => {
+    e.preventDefault();
+    const amount = f.amount && f.amount.value ? Number(f.amount.value) : undefined;
+    if (!confirm(amount ? `تسترجع نقاط ${fmt(amount)} ${state.shop.currency} من الفاتورة؟` : 'تسترجع نقاط الفاتورة كاملة؟')) return;
+    try {
+      const r = await api(`/api/txns/${t.id}/refund`, { method: 'POST', body: { amount } });
+      toast(`↩️ انشال ${fmt(r.removed)} ${unit} من ${r.member.name}${r.removed < r.refunded ? ` (الباقي كان انصرف)` : ''}`, 'ok');
+      if (state.member && state.member.id === r.member.id) state.member = r.member;
+      $('#dlg').close();
+      if ((location.hash || '#cashier') === '#cashier') showMember(state.member);
+    } catch (err) { toast(err.message, 'bad'); }
+  };
+}
+
 function showMember(m) {
   const panel = $('#memberPanel');
   if (!panel) return;
@@ -288,8 +397,10 @@ function showMember(m) {
             <label for="amount">مبلغ الفاتورة (${s.currency})</label>
             <div class="row"><input class="grow num" id="amount" type="number" inputmode="decimal" min="0" step="0.001" placeholder="0.00" style="font-size:1.3rem" required>
             <button class="btn big" id="earnBtn" type="submit">أضف</button></div>
+            ${invoiceRow()}
             <div class="small muted" id="preview">&nbsp;</div>
           </form>`}
+      ${stamps && s.perks.invoiceMode === 'required' ? invoiceRow() : ''}
       <button class="btn ${m.progress.available ? 'big' : 'ghost'} block" id="redeemBtn" type="button" ${m.progress.available ? '' : 'disabled'}>🎁 صرف المكافأة: ${s.rewardName}</button>
       <div id="memberCoupons"></div>
       ${s.perks.creditOn || m.credit > 0 ? html`<div class="credit-box stack">
@@ -311,7 +422,8 @@ function showMember(m) {
     const sync = () => { $('#count').value = count; $('#count').textContent = count; $('#earnBtn').textContent = count === 1 ? 'أضف ختم' : `أضف ${count} أختام`; };
     $('#minus').onclick = () => { count = Math.max(1, count - 1); sync(); };
     $('#plus').onclick = () => { count = Math.min(50, count + 1); sync(); };
-    $('#earnBtn').onclick = () => earn(m, { count });
+    $('#earnBtn').onclick = () => earn(m, { count, invoice: invoiceVal() });
+    bindReceipt();
   } else {
     const amount = $('#amount');
     const { mult, label } = perkMult(m);
@@ -319,7 +431,8 @@ function showMember(m) {
       const pts = Math.floor(Math.floor(Number(amount.value) * s.pointsPerUnit + 1e-9) * mult + 1e-9);
       $('#preview').textContent = pts > 0 ? `+${fmt(pts)} ${countWord(pts, 'نقطة', 'نقاط')}${label}` : ' ';
     };
-    $('#earnForm').onsubmit = (e) => { e.preventDefault(); earn(m, { amount: amount.value }); };
+    $('#earnForm').onsubmit = (e) => { e.preventDefault(); earn(m, { amount: amount.value, invoice: invoiceVal() }); };
+    bindReceipt(() => amount.oninput());
     if (matchMedia('(pointer: fine)').matches) amount.focus();
   }
 }
@@ -576,9 +689,12 @@ function shareCard(m, url, title) {
 const KIND = { earn: 'إضافة', redeem: 'مكافأة', adjust: 'تعديل' };
 function txnRow(t, withMember = false) {
   const plus = t.delta > 0;
+  const inv = t.invoice ? (t.invoice.startsWith('qr-') ? '🧾 فاتورة ممسوحة · ' : `🧾 #${t.invoice} · `) : '';
+  const canRefund = !withMember && t.kind === 'earn' && t.delta - (t.refunded || 0) > 0;
   return html`<li class="${withMember ? 'click' : ''}" data-member="${withMember ? t.memberId : ''}">
     <div class="main"><b>${withMember ? t.member : KIND[t.kind]}${t.kind === 'redeem' ? ' 🎁' : ''}</b>
-      <span class="small muted">${withMember ? `${KIND[t.kind]} · ` : ''}${t.amount ? `${fmt(t.amount)} ${state.shop.currency} · ` : ''}${t.note ? `${t.note} · ` : ''}${t.branch && state.shop.locations.length > 1 ? `📍 ${branchName(t.branch)} · ` : ''}${t.by || ''} · ${ago(t.at)}</span></div>
+      <span class="small muted">${withMember ? `${KIND[t.kind]} · ` : ''}${t.amount ? `${fmt(Math.abs(t.amount))} ${state.shop.currency} · ` : ''}${inv}${t.refunded ? `↩️ انسترجع ${fmt(t.refunded)} · ` : ''}${t.note ? `${t.note} · ` : ''}${t.branch && state.shop.locations.length > 1 ? `📍 ${branchName(t.branch)} · ` : ''}${t.by || ''} · ${ago(t.at)}</span></div>
+    ${canRefund ? html`<button class="btn ghost sm" type="button" data-refund="${t.id}" title="استرجاع" aria-label="استرجاع">↩️</button>` : ''}
     <span class="delta num ${plus ? 'plus' : 'minus'}">${plus ? '+' : ''}${fmt(t.delta)}</span></li>`;
 }
 
@@ -634,6 +750,16 @@ async function memberDialog(id) {
     } catch (e) { render(ch.querySelector('div'), html`<p class="alert bad">${e.message}</p>`); }
   };
   $('#useMember', body).onclick = () => { $('#dlg').close(); selectMember(m); };
+  $$('[data-refund]', body).forEach((b) => {
+    b.onclick = () => {
+      const t = d.txns.find((x) => String(x.id) === b.dataset.refund);
+      const li = b.closest('li');
+      const box = document.createElement('div');
+      li.after(box);
+      b.remove();
+      refundForm(box, { ...t, name: m.name, cardNo: m.cardNo });
+    };
+  });
   const del = $('#delMember', body);
   if (del) del.onclick = async () => {
     if (!confirm(`حذف ${m.name} نهائياً مع نقاطه وكل سجله؟ (مثلاً لما يطلب الزبون حذف بياناته)`)) return;
@@ -1320,6 +1446,9 @@ async function settings() {
       <div class="field grow"><label for="g-day">أكتر إشي باليوم لنفس الزبون</label><input id="g-day" name="guardDaily" type="number" min="0" max="50" value="${s.perks.guardDaily}" class="num"></div>
       </div>
       <div class="field"><label for="g-big">نبّهني إذا كاشير ضاف بمرة وحدة أكتر من (${s.unit})</label><input id="g-big" name="guardBig" type="number" min="1" value="${s.perks.guardBig}" class="num"></div>
+      <div class="field"><label for="g-inv">🧾 رقم الفاتورة مع النقاط</label><select id="g-inv" name="invoiceMode">
+        ${[['optional', 'خانة اختيارية'], ['required', 'إجباري للكاشيرية'], ['off', 'مخفي']].map(([v, l]) => html`<option value="${v}" ${(s.perks.invoiceMode || 'optional') === v ? 'selected' : ''}>${l}</option>`)}</select>
+        <div class="hint">نفس الفاتورة ما بتاخد نقاط مرتين. والكاشير بيقدر يمسح QR الفاتورة فيقرأ المبلغ لحاله (إذا الفاتورة فيها).</div></div>
       <p class="hint">بتنطبق على الكاشيرية بس، إنت مستثنى. 0 = بدون حد. لما حدا يحاول يتجاوز الحد بيوصلك تنبيه (فعّل «🔔 تنبيهات إلك»)، وبتلاقي شغل كل موظف بـ 📊 النشاط.</p>
       <button class="btn" type="submit">حفظ</button>
       </form>

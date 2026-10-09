@@ -95,6 +95,7 @@ function perksView(shop) {
     guardCooldown: shop.guard_cooldown,
     guardDaily: shop.guard_daily,
     guardBig: guardBig(shop),
+    invoiceMode: shop.invoice_mode || 'optional',
     creditOn: !!shop.credit_on,
     creditBonus: shop.credit_bonus,
     expiryMonths: shop.expiry_months,
@@ -2533,7 +2534,7 @@ async function lookup(c) {
 async function memberDetail(c, id) {
   const m = await memberOf(c, id);
   const txns = await c.db.all(
-    `SELECT t.id, t.kind, t.delta, t.amount, t.note, t.created_at AS at, u.name AS by FROM txns t LEFT JOIN users u ON u.id = t.user_id
+    `SELECT t.id, t.kind, t.delta, t.amount, t.note, t.invoice, t.refunded, t.refund_of AS refundOf, t.created_at AS at, u.name AS by FROM txns t LEFT JOIN users u ON u.id = t.user_id
      WHERE t.member_id = ? AND t.shop_id = ? ORDER BY t.created_at DESC, t.id DESC LIMIT 30`,
     m.id, c.shop.id,
   );
@@ -2549,8 +2550,15 @@ async function applyTxn(c, statements) {
     return await c.db.batch(statements);
   } catch (e) {
     if (isUniqueError(e) && /idem/.test(e.message)) return null;
+    if (isUniqueError(e) && /invoice/.test(e.message)) fail(409, 'هاي الفاتورة انضافلها نقاط قبل. إذا في غلط، استرجعها من «↩️ استرجاع فاتورة»');
     throw e;
   }
+}
+
+// 🧾 رقم الفاتورة: نص قصير، أو بصمة QR الفاتورة (qr-…)
+const invoiceOf = (v) => { const s = clean(v, 60); return s.length >= 1 ? s : null; };
+async function invoiceTaken(c, invoice) {
+  return c.db.get(`SELECT t.created_at AS at, m.name FROM txns t JOIN members m ON m.id = t.member_id WHERE t.shop_id = ? AND t.invoice = ? AND t.kind = 'earn'`, c.shop.id, invoice);
 }
 
 // الحركة المشروطة ما انطبقت: يا الرصيد مش كافي، يا هاي إعادة لطلب نجح قبل (فالرصيد نقص من أول مرة)
@@ -2578,6 +2586,12 @@ async function earn(c, id) {
   const now = Date.now();
   // إعادة لطلب نجح قبل (نت ضعيف): ما بنعدّه محاولة مكررة
   if (await seenKey(c, c.body.key)) return respondMember(c, m.id, { duplicate: true });
+  const invoice = c.shop.invoice_mode === 'off' ? null : invoiceOf(c.body.invoice);
+  if (!invoice && c.shop.invoice_mode === 'required' && c.user.role === 'staff') fail(400, 'اكتب رقم الفاتورة (أو امسح QR الفاتورة)');
+  if (invoice) {
+    const taken = await invoiceTaken(c, invoice);
+    if (taken) fail(409, `هاي الفاتورة انضافلها نقاط قبل (${taken.name}). إذا في غلط، استرجعها من «↩️ استرجاع فاتورة»`);
+  }
   await guardEarn(c, m, now);
   // العروض: نقاط دبل بالوقت، رجعة الزبون الغايب، والمستوى
   const p = perks.applyPerks(c.shop, m, r.delta, now);
@@ -2589,7 +2603,7 @@ async function earn(c, id) {
   const guardSql = staffGuard ? ` AND (? <= 0 OR last_visit IS NULL OR last_visit <= ?) AND (? <= 0 OR (SELECT COUNT(*) FROM txns WHERE member_id = members.id AND kind = 'earn' AND created_at >= ?) < ?)` : '';
   const guardArgs = staffGuard ? [c.shop.guard_cooldown, now - c.shop.guard_cooldown * MIN, c.shop.guard_daily, dayStart, c.shop.guard_daily] : [];
   const res = await applyTxn(c, [
-    [`INSERT INTO txns (shop_id, member_id, kind, delta, amount, user_id, note, idem, branch_id, created_at) SELECT ?, id, 'earn', ?, ?, ?, ?, ?, ?, ? FROM members WHERE id = ? AND shop_id = ?${guardSql}`, [c.shop.id, p.delta, r.amount, c.user.id, note, key, branchFor(c), now, m.id, c.shop.id, ...guardArgs]],
+    [`INSERT INTO txns (shop_id, member_id, kind, delta, amount, user_id, note, idem, branch_id, invoice, created_at) SELECT ?, id, 'earn', ?, ?, ?, ?, ?, ?, ?, ? FROM members WHERE id = ? AND shop_id = ?${guardSql}`, [c.shop.id, p.delta, r.amount, c.user.id, note, key, branchFor(c), invoice, now, m.id, c.shop.id, ...guardArgs]],
     ["UPDATE members SET balance = balance + ?, lifetime = lifetime + ?, visits = visits + 1, last_visit = ?, updated_at = ? WHERE id = ? AND shop_id = ? AND EXISTS (SELECT 1 FROM txns WHERE shop_id = ? AND member_id = members.id AND kind = 'earn' AND idem = ?)", [p.delta, p.delta, now, now, m.id, c.shop.id, c.shop.id, key]],
   ]);
   if (res && !res[0].changes) fail(409, 'وصل الزبون لحد الزيارات أو انضافت له نقاط قبل شوي. خلّي المالك يراجع العملية.');
@@ -2710,6 +2724,53 @@ async function removeMember(c, id) {
   const m = await memberOf(c, id);
   await deleteMember(c, c.shop, m);
   return json({ ok: true });
+}
+
+// ↩️ استرجاع فاتورة: بيشيل نقاطها (كلها، أو حسب المبلغ اللي رجع)، ومرة وحدة بس لكل نقطة
+async function findInvoice(c) {
+  const invoice = invoiceOf(c.url.searchParams.get('invoice'));
+  if (!invoice) fail(400, 'اكتب رقم الفاتورة');
+  const t = await c.db.get(
+    `SELECT t.id, t.delta, t.amount, t.refunded, t.invoice, t.created_at AS at, m.id AS memberId, m.name, m.card_no AS cardNo
+     FROM txns t JOIN members m ON m.id = t.member_id WHERE t.shop_id = ? AND t.invoice = ? AND t.kind = 'earn'`, c.shop.id, invoice,
+  );
+  if (!t) fail(404, 'ما لقينا فاتورة بهالرقم انضافلها نقاط');
+  return json({ txn: t });
+}
+
+async function refundTxn(c, id) {
+  await requireActive(c);
+  const t = await c.db.get("SELECT * FROM txns WHERE id = ? AND shop_id = ? AND kind = 'earn'", Number(id), c.shop.id);
+  if (!t) fail(404, 'ما لقينا الحركة');
+  const left = t.delta - t.refunded;
+  if (left <= 0) fail(409, 'هاي الفاتورة انسترجعت كاملة قبل');
+  let pts = left;
+  let amount = null;
+  if (c.body.amount !== undefined && c.body.amount !== null && c.body.amount !== '') {
+    amount = Number(c.body.amount);
+    if (!t.amount) fail(400, 'هاي الحركة ما إلها مبلغ: بتسترجعها كاملة');
+    if (!Number.isFinite(amount) || amount <= 0 || amount > t.amount) fail(400, `المبلغ اللي رجع لازم يكون بين 0 و ${t.amount}`);
+    pts = Math.min(left, Math.max(1, Math.round((t.delta * amount) / t.amount)));
+  }
+  const m = await memberOf(c, t.member_id);
+  const removed = Math.min(pts, Math.max(0, m.balance)); // إذا صرف المكافأة قبل: بنشيل الموجود بس
+  const now = Date.now();
+  const label = t.invoice && !t.invoice.startsWith('qr-') ? `#${t.invoice}` : '';
+  const note = clean(`↩️ استرجاع فاتورة ${label}${removed < pts ? ` · انشال ${removed} من ${pts}، الباقي كان انصرف` : ''}`, 120);
+  const idem = `rf:${t.id}:${t.refunded}`;
+  const mine = 'EXISTS (SELECT 1 FROM txns WHERE shop_id = ? AND idem = ? AND refund_of = ?)';
+  // التلاتة سوا: الاسترجاع بينكتب بس إذا ما حدا سبقنا عليه والرصيد لسا بيكفي، والباقي بيمشي بس إذا انكتب
+  const res = await applyTxn(c, [
+    [`INSERT INTO txns (shop_id, member_id, kind, delta, amount, user_id, note, idem, branch_id, refund_of, created_at)
+      SELECT ?, ?, 'adjust', ?, ?, ?, ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM txns WHERE id = ? AND refunded = ?) AND EXISTS (SELECT 1 FROM members WHERE id = ? AND balance >= ?)`,
+    [c.shop.id, m.id, -removed, amount ? -amount : null, c.user.id, note, idem, branchFor(c), t.id, now, t.id, t.refunded, m.id, removed]],
+    [`UPDATE txns SET refunded = refunded + ? WHERE id = ? AND refunded = ? AND ${mine}`, [pts, t.id, t.refunded, c.shop.id, idem, t.id]],
+    [`UPDATE members SET balance = balance - ?, lifetime = MAX(0, lifetime - ?), updated_at = ? WHERE id = ? AND shop_id = ? AND ${mine}`,
+      [removed, pts, now, m.id, c.shop.id, c.shop.id, idem, t.id]],
+  ]);
+  if (!res || !res[0].changes) fail(409, 'صار تغيير بنفس اللحظة (استرجاع من جهاز تاني أو صرف رصيد). حدّث وجرّب كمان مرة');
+  if (c.user.role === 'staff') await alertOwner(c, `refund:${c.user.id}`, { title: '↩️ استرجاع فاتورة', body: `${c.user.name} استرجع ${pts} ${unitWord(c.shop, pts)} من ${m.name}${amount ? ` (${amount} ${c.shop.currency})` : ''}` });
+  return respondMember(c, m.id, { refunded: pts, removed });
 }
 
 async function adjust(c, id) {
@@ -2942,6 +3003,7 @@ async function updatePerks(c) {
     guard_cooldown: num('guardCooldown', 'guard_cooldown', 0, 240, 'الدقايق لازم تكون بين 0 و 240'),
     guard_daily: num('guardDaily', 'guard_daily', 0, 50, 'عدد المرات لازم يكون بين 0 و 50'),
     guard_big: num('guardBig', 'guard_big', 1, 1000000, 'حد التنبيه لازم يكون عدد صحيح'),
+    invoice_mode: b.invoiceMode === undefined ? s.invoice_mode : ['optional', 'required', 'off'].includes(b.invoiceMode) ? b.invoiceMode : fail(400, 'اختيار رقم الفاتورة غلط'),
     credit_on: flag('creditOn', 'credit_on'),
     credit_bonus: num('creditBonus', 'credit_bonus', 0, 100, 'هدية الشحن لازم تكون بين 0 و 100%'),
     expiry_months: num('expiryMonths', 'expiry_months', 0, 24, 'المدة لازم تكون 0 أو 6 أو 12 أو 24 شهر'),
@@ -4905,6 +4967,8 @@ const API = [
   ['POST', /^\/api\/shop\/onboard$/, onboardStep, 'owner'],
   ['GET', /^\/api\/admin\/stats$/, adminStats, 'staff'],
   ['POST', /^\/api\/shop\/sync$/, syncNow, 'owner'],
+  ['GET', /^\/api\/invoices$/, findInvoice, 'staff'],
+  ['POST', /^\/api\/txns\/(\d+)\/refund$/, refundTxn, 'staff'],
   ['POST', /^\/api\/broadcast$/, broadcast, 'owner'],
   ['GET', /^\/api\/campaigns$/, listCampaigns, 'owner'],
   ['POST', /^\/api\/campaigns$/, createCampaign, 'owner'],

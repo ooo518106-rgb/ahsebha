@@ -537,4 +537,11 @@ export const MIGRATIONS = [
   // 📣 آخر رسالة من المحل للزبون (بتطلع على ضهر بطاقة الآيفون مع إشعار)
   'ALTER TABLE members ADD COLUMN news TEXT',
   'ALTER TABLE members ADD COLUMN news_at INTEGER',
+  // 🧾 رقم الفاتورة مع النقاط (نفس الفاتورة ما بتاخد نقاط مرتين)، وكم نقطة منها انسترجعت، والاسترجاع بيأشّر على حركته الأصلية
+  'ALTER TABLE txns ADD COLUMN invoice TEXT',
+  'ALTER TABLE txns ADD COLUMN refunded INTEGER NOT NULL DEFAULT 0',
+  'ALTER TABLE txns ADD COLUMN refund_of INTEGER',
+  "CREATE UNIQUE INDEX IF NOT EXISTS txns_invoice ON txns(shop_id, invoice) WHERE invoice IS NOT NULL AND kind = 'earn'",
+  // رقم الفاتورة عند الكاشير: optional (خانة اختيارية)، required (إجباري للموظفين)، off (مخفي)
+  "ALTER TABLE shops ADD COLUMN invoice_mode TEXT NOT NULL DEFAULT 'optional'",
 ];
