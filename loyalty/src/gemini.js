@@ -101,7 +101,7 @@ export async function geminiFindShops(cfg, { system, ask, shopsSchema }) {
   const usage = emptyUsage();
   const found = await call(cfg, `models/${model}:generateContent`, {
     systemInstruction: { parts: [{ text: system }] },
-    contents: [{ role: 'user', parts: [{ text: `${ask}\n\nاكتب كل المحلات اللي لقيتها بالتفصيل (الاسم، المنطقة، النوع، الرقم، الانستغرام، الصفحة، جملة عنه، وأول رسالة إله).` }] }],
+    contents: [{ role: 'user', parts: [{ text: `${ask}\n\nاكتب كل المحلات اللي لقيتها بالتفصيل (الاسم، المنطقة، النوع، الرقم، الانستغرام، الصفحة، جملة عنه، أول رسالة إله، وبرنامج الولاء: ما في أو كرت ورق أو رقمي أو ما تأكدت، مع وين فحصت بالزبط وكم إنت متأكد).` }] }],
     tools: [{ google_search: {} }],
     generationConfig: { maxOutputTokens: 8192 },
   });

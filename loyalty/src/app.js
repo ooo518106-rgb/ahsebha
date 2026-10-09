@@ -3497,6 +3497,8 @@ async function introFailed(c, p, code, msg) {
   return false;
 }
 
+const LOYALTY_ORDER = "CASE loyalty WHEN 'paper' THEN 0 WHEN 'none' THEN 1 WHEN 'digital' THEN 3 ELSE 2 END";
+
 // كل 5 دقايق: لحد رسالتين، بأوقات الدوام بالأردن (10 الصبح لـ 8 المسا، مش الجمعة)، وضمن الحد باليوم
 async function salesOutreachJob(c, now) {
   const wcfg = wa.waConfig(c.env);
@@ -3509,7 +3511,8 @@ async function salesOutreachJob(c, now) {
   if (!(await qualityOk(c, wcfg, now))) return 0;
   let n = 0;
   for (let room = Math.min(2, daily - sent); room > 0; room--) {
-    const p = await c.db.get("SELECT * FROM prospects WHERE status = 'new' AND wa IS NOT NULL AND paused = 0 ORDER BY id LIMIT 1");
+    // اللي عندهم كرت ورق أول، بعدين اللي ما عندهم برنامج، بعدين الباقي
+    const p = await c.db.get(`SELECT * FROM prospects WHERE status = 'new' AND wa IS NOT NULL AND paused = 0 ORDER BY ${LOYALTY_ORDER}, id LIMIT 1`);
     if (!p) break;
     try {
       if (await sendIntro(c, wcfg, p, now)) n++;
@@ -3905,6 +3908,7 @@ function prospectView(p, offer, ctx) {
   const message = sales.outreachText(p, ctx);
   return {
     id: p.id, name: p.name, area: p.area, kind: p.kind, phone: p.phone, wa: p.wa, instagram: p.instagram, website: p.website, why: p.why,
+    loyalty: p.loyalty || null, loyaltySrc: p.loyalty_src || null, loyaltyConf: p.loyalty_conf || null,
     ownerName: p.owner_name, note: p.note, guide: p.guide || null, status: p.status, source: p.source, paused: !!p.paused, error: p.error, shopId: p.shop_id,
     sentAt: p.sent_at, lastInAt: p.last_in_at, lastOutAt: p.last_out_at, openedAt: p.opened_at, createdAt: p.created_at, deliveredAt: p.delivered_at || null, readAt: p.read_at || null,
     message, link: `${ctx.origin}/?p=${p.code}`,
@@ -3978,22 +3982,24 @@ async function adminSalesSearch(c) {
   const count = Math.min(20, Math.max(3, Number(c.body.count) || 10));
   await rateLimit(c, `search:${c.user.id}`, 20, DAY, 'دوّرت كتير اليوم، كمّل بكرا');
   const known = await c.db.all('SELECT name FROM prospects ORDER BY id DESC LIMIT 120');
+  const hasLoyalty = (await jsonSetting(c.db, 'sales_has_loyalty')) || []; // اللي طلع عندهم برنامج رقمي: ما بنرجع نجيبهم
+  const ask = sales.searchAsk(query, known.map((k) => k.name), hasLoyalty.slice(-80));
   let found = [];
   let r;
   try {
     if (cfg.provider === 'gemini') {
       // Gemini: بحث Google، وبعدين ترتيب النتايج حسب مخطط save_shops
-      r = await geminiFindShops(cfg, { system: sales.searchSystem(count), ask: sales.searchAsk(query, known.map((k) => k.name)), shopsSchema: sales.SAVE_SHOPS.input_schema });
-      found = r.shops.slice(0, count);
+      r = await geminiFindShops(cfg, { system: sales.searchSystem(count), ask, shopsSchema: sales.SAVE_SHOPS.input_schema });
+      found = r.shops.slice(0, count * 3);
     } else {
       const runTool = async (name, input) => {
         if (name !== 'save_shops') throw new Error(`أداة مش معروفة: ${name}`);
-        found = Array.isArray(input.shops) ? input.shops.slice(0, count) : [];
+        found = Array.isArray(input.shops) ? input.shops.slice(0, count * 3) : [];
         return { saved: found.length };
       };
       r = await chat(cfg, {
         system: sales.searchSystem(count),
-        messages: [{ role: 'user', content: sales.searchAsk(query, known.map((k) => k.name)) }],
+        messages: [{ role: 'user', content: ask }],
         tools: [{ type: 'web_search_20260209', name: 'web_search', max_uses: 8, user_location: { type: 'approximate', country: 'JO', city: 'Amman', timezone: 'Asia/Amman' } }, sales.SAVE_SHOPS],
         runTool, stopOn: 'save_shops', maxTokens: 12000, effort: 'medium', timeout: 180_000, maxRounds: 8,
       });
@@ -4006,20 +4012,28 @@ async function adminSalesSearch(c) {
   await logAi(c, 'search', r.usage);
   const now = Date.now();
   let added = 0;
+  const skipped = [];
   const names = new Set(known.map((k) => k.name.trim().toLowerCase()));
   for (const s of found) {
     const name = clean(s && s.name, 60);
     if (name.length < 2 || names.has(name.toLowerCase())) continue;
+    const loyalty = sales.LOYALTY.includes(s.loyalty) ? s.loyalty : 'unknown';
+    const conf = sales.CONFIDENCE.includes(s.loyalty_confidence) ? s.loyalty_confidence : 'low';
+    // عنده برنامج رقمي والوكيل شاف دليل: ما بنضيّع عليه رسالة، بس بنتذكره
+    if (loyalty === 'digital' && conf !== 'low') { skipped.push(name); names.add(name.toLowerCase()); continue; }
+    if (added >= count) continue;
     names.add(name.toLowerCase());
     const phone = clean(s.phone, 30);
     const num = phone ? wa.waNumber(phone) : null;
     const res = await c.db.run(
-      `INSERT INTO prospects (name, area, kind, phone, wa, instagram, website, why, opener, code, status, source, search, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'search', ?, ?) ON CONFLICT DO NOTHING`,
-      name, clean(s.area, 60), clean(s.kind, 40), phone || null, num, instaUrl(s.instagram), webUrl(s.website), clean(s.why, 300), clean(s.opener, 400) || null, randomToken(8), num ? 'new' : 'manual', query, now,
+      `INSERT INTO prospects (name, area, kind, phone, wa, instagram, website, why, opener, loyalty, loyalty_src, loyalty_conf, code, status, source, search, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'search', ?, ?) ON CONFLICT DO NOTHING`,
+      name, clean(s.area, 60), clean(s.kind, 40), phone || null, num, instaUrl(s.instagram), webUrl(s.website), clean(s.why, 300), clean(s.opener, 400) || null,
+      loyalty, clean(s.loyalty_source, 300) || null, conf, randomToken(8), num ? 'new' : 'manual', query, now,
     );
     if (res.changes) added++;
   }
-  return json({ added, found: found.length, searches: r.usage.web_search_requests, ...(await salesState(c)) });
+  if (skipped.length) await setSetting(c.db, 'sales_has_loyalty', JSON.stringify([...hasLoyalty.filter((n) => !skipped.includes(n)), ...skipped].slice(-200)));
+  return json({ added, skipped: skipped.length, found: found.length, searches: r.usage.web_search_requests, ...(await salesState(c)) });
 }
 
 async function adminAddProspect(c) {

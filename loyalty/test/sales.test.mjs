@@ -184,6 +184,47 @@ test('البحث عن محلات: بالإنترنت (web search)، وبيحفظ
   assert.equal((await p.admin.get('/api/admin/stats')).data.ai.searches, 8);
 });
 
+test('البحث: بيصنّف المحلات حسب برنامج الولاء، بيتجاهل اللي عندهم برنامج رقمي وبيتذكرهم، واللي عندهم كرت ورق أول بالدور', async () => {
+  const shop = (name, phone, loyalty, src, conf) => ({ name, area: 'عبدون', kind: 'كوفي شوب', phone, instagram: '', website: '', why: '', opener: '', loyalty, loyalty_source: src, loyalty_confidence: conf });
+  const shops = [
+    shop('كوفي ألف', '0791000011', 'none', 'انستغرامه ومراجعات Google', 'medium'),
+    shop('كوفي تطبيق', '0791000013', 'digital', 'https://apps.apple.com/jo/app/x', 'high'),
+    shop('كوفي باء', '0791000012', 'paper', 'https://instagram.com/p/abc', 'high'),
+    shop('كوفي مش أكيد', '0791000014', 'digital', 'مراجعة وحدة', 'low'),
+    shop('كوفي غريب', '0791000015', 'weird', '', 'x'),
+  ];
+  const f = fakes((body) => (body.tools && body.tools.some((t) => t.name === 'save_shops') ? { tool: 'save_shops', input: { shops }, searches: 3 } : { text: 'أهلا!' }));
+  const p = await platform({ ANTHROPIC_API_KEY: 'sk-test', fetch: f.fetch, ...WA_ENV });
+  const r = await p.admin.post('/api/admin/sales/search', { query: 'كوفي بعبدون', count: 3 });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.equal(r.data.added, 3, 'اللي عنده برنامج رقمي ما بينحسب من العدد');
+  assert.equal(r.data.skipped, 1);
+  assert.match(JSON.stringify(f.claude[0].body.system), /بطاقة ولاء/);
+  assert.equal(f.claude[0].body.tools.find((t) => t.name === 'save_shops').input_schema.properties.shops.items.properties.loyalty.enum.length, 4);
+  const by = (list, n) => list.find((x) => x.name === n);
+  assert.equal(by(r.data.prospects, 'كوفي تطبيق'), undefined, 'عنده تطبيق: ما بنضيّع عليه رسالة');
+  const paper = by(r.data.prospects, 'كوفي باء');
+  assert.deepEqual([paper.loyalty, paper.loyaltyConf, paper.loyaltySrc], ['paper', 'high', 'https://instagram.com/p/abc']);
+  assert.deepEqual([by(r.data.prospects, 'كوفي ألف').loyalty, by(r.data.prospects, 'كوفي ألف').loyaltySrc], ['none', 'انستغرامه ومراجعات Google']);
+  assert.equal(by(r.data.prospects, 'كوفي مش أكيد').loyalty, 'digital', 'دليل ضعيف: بينحفظ مع تنبيه');
+  // البحث الجاي: بيقله مين عنده برنامج عشان ما يرجّعه، والباقي (اللي ما لحق) بينضاف
+  const r2 = await p.admin.post('/api/admin/sales/search', { query: 'كوفي بعبدون', count: 3 });
+  assert.match(f.claude[1].body.messages[0].content, /برنامج ولاء رقمي، ما ترجّعهم: كوفي تطبيق/);
+  assert.equal(r2.data.added, 1);
+  const odd = by(r2.data.prospects, 'كوفي غريب');
+  assert.deepEqual([odd.loyalty, odd.loyaltyConf], ['unknown', 'low'], 'قيم غريبة بتصير «ما تأكدنا»');
+  // الدور: الكرت الورق أول، بعدين اللي ما عنده برنامج
+  assert.equal((await p.admin.put('/api/admin/sales/settings', { auto: true, daily: 2 })).status, 200);
+  assert.equal((await runScheduled({ db: p.db, env: p.env, waitUntil: (x) => x }, SUNDAY_NOON)).outreach, 2);
+  assert.deepEqual(f.graph.filter((g) => g.body.to).map((g) => g.body.to), ['962791000012', '962791000011']);
+  // الوكيل بيعرف إنه عنده كرت ورق
+  const meta = p.client();
+  await hook(meta, incomingMsg('962791000012', 'مين معي؟', 'wamid.l1'));
+  await meta.flush();
+  const ctx = f.claude.at(-1).body.system[1].text;
+  assert.match(ctx, /عنده كرت أختام ورق/);
+});
+
 test('واتساب: الإرسال التلقائي بأوقات الدوام وضمن الحد باليوم، ومشكلة القالب بتوقفه', async () => {
   const f = fakes();
   const p = await platform({ ANTHROPIC_API_KEY: 'sk-test', fetch: f.fetch, ...WA_ENV });

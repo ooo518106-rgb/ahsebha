@@ -491,4 +491,8 @@ export const MIGRATIONS = [
       AND t.kind = 'spend' AND t.amount = credit_gifts.amount AND t.created_at = credit_gifts.created_at AND t.note = '🎁 هدية لصاحب')
   ) WHERE from_token IS NULL`,
   MEMBER_DELETE_GUARD,
+  // 🔎 البحث: عند المحل برنامج ولاء؟ none (فحصنا وما في)، paper (كرت أختام ورق)، digital (تطبيق أو نقاط رقمية)، unknown؛ ووين فحص الوكيل وكم متأكد
+  'ALTER TABLE prospects ADD COLUMN loyalty TEXT',
+  'ALTER TABLE prospects ADD COLUMN loyalty_src TEXT',
+  'ALTER TABLE prospects ADD COLUMN loyalty_conf TEXT',
 ];

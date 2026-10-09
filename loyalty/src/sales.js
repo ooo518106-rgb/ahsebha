@@ -110,6 +110,9 @@ export function salesContext({ channel, today, prospect, firstMessage, offer, of
     if (prospect.kind) lines.push(`- النوع: ${prospect.kind}`);
     if (prospect.area) lines.push(`- المنطقة: ${prospect.area}`);
     if (prospect.why) lines.push(`- ملاحظات من البحث عنه: ${prospect.why}`);
+    if (prospect.loyalty === 'paper') lines.push('- حسب البحث عنده كرت أختام ورق: احكيله إنه نقاطك بتحوّل نفس الكرت لبطاقة بمحفظة الجوال، ما بتضيع ولا بتنزوّر، وبيعرف مين زبائنه وبيبعتلهم عروض.');
+    else if (prospect.loyalty === 'none') lines.push('- حسب البحث ما عنده برنامج ولاء: احكيله كيف البطاقة بترجّع الزبون مرة تانية.');
+    else if (prospect.loyalty === 'digital') lines.push('- حسب البحث يمكن عنده برنامج ولاء رقمي: اسأله بلطف شو بيستعمل، وما تنتقد غيرنا، احكي شو بيميّز نقاطك (بدون تطبيق، بالمحفظة، سعر).');
     if (prospect.note) lines.push(`- ملاحظات من المحادثة: ${prospect.note}`);
     if (firstMessage) lines.push(`- أول رسالة بعتناله: «${firstMessage}»`);
     if (pageLink) lines.push(`- رابط صفحته الخاصة (فيها المحل التجريبي وكل التفاصيل): ${pageLink}`);
@@ -187,6 +190,8 @@ export const webTools = () => [MAKE_OFFER, SAVE_CONTACT_WEB];
 export const waTools = () => [MAKE_OFFER, SAVE_CONTACT_WA, CALL_OWNER, SET_STATUS];
 
 // ─── 🔎 البحث عن محلات ───
+export const LOYALTY = ['none', 'paper', 'digital', 'unknown'];
+export const CONFIDENCE = ['high', 'medium', 'low'];
 export const SAVE_SHOPS = {
   name: 'save_shops',
   description: 'احفظ المحلات اللي لقيتها مرة وحدة بالآخر. ما تحط رقم إذا ما لقيته منشور (اتركه فاضي).',
@@ -206,8 +211,11 @@ export const SAVE_SHOPS = {
             website: str('موقع أو صفحة (خرائط Google، طلبات…)، أو فاضي'),
             why: str('جملة عن المحل بتفيد بالحديث معه (شو بيميّزه، فروع، تقييمات)'),
             opener: str('أول رسالة واتساب لصاحب المحل: جملتين بلهجة أردنية ودودة، فيها اسم المحل وإشي محدد عنه، بدون رابط وبدون أسعار'),
+            loyalty: { type: 'string', enum: LOYALTY, description: 'عنده برنامج ولاء؟ none: فحصت وما لقيت، paper: كرت أختام ورق، digital: تطبيق أو نقاط رقمية، unknown: ما قدرت تفحص' },
+            loyalty_source: str('وين فحصت بالزبط: رابط المنشور أو الصفحة اللي فيها الدليل، أو الأماكن اللي دوّرت فيها وما لقيت (انستغرامه، مراجعات Google، متجر التطبيقات)'),
+            loyalty_confidence: { type: 'string', enum: CONFIDENCE, description: 'high: شفت دليل واضح أو فحصت كل الأماكن، medium: فحصت مكانين، low: فحص سريع' },
           },
-          required: ['name', 'area', 'kind', 'phone', 'instagram', 'website', 'why', 'opener'],
+          required: ['name', 'area', 'kind', 'phone', 'instagram', 'website', 'why', 'opener', 'loyalty', 'loyalty_source', 'loyalty_confidence'],
           additionalProperties: false,
         },
       },
@@ -223,15 +231,24 @@ export function searchSystem(count) {
     `- لاقي لحد ${count} محل بيطابقوا الطلب. فضّل المحلات المستقلة، وتجنّب السلاسل الكبيرة اللي عندها تطبيقها (متل ستاربكس).`,
     '- خذ معلومات التواصل المنشورة للمحل بس (رقم الواتساب أو الجوال، الانستغرام، صفحته على الخرائط). ما تخترع أرقام ولا حسابات: إذا ما لقيت، اتركها فاضية.',
     '- أرقام الموبايل بالأردن بتبلّش بـ 077 أو 078 أو 079 (أو +9627). الأرقام الأرضية (06…) حطها كمان بس ما عليها واتساب.',
-    '- لكل محل اكتب opener: أول رسالة واتساب قصيرة وشخصية (متلاً بتمدح إشي حقيقي عنه)، وبتقول إنه نقاطك بطاقة ولاء بمحفظة الجوال بدون تطبيق، وبتنتهي بسؤال خفيف. الرابط منضيفه إحنا بعدها.',
+    '- إحنا بندوّر على محلات ما عندها برنامج ولاء. لكل محل افحص: دوّر على اسمه مع كلمات متل «بطاقة ولاء»، «نقاط»، «أختام»، «ستامب»، «القهوة العاشرة مجاناً»، loyalty، points، stamp card؛ وشوف منشورات انستغرامه ومراجعاته على Google، وإذا إله تطبيق على App Store أو Google Play أو بيستعمل منصة نقاط.',
+    '- loyalty: none إذا فحصت وما لقيت إشي؛ paper إذا عنده كرت أختام ورق (هدول أحسن ناس إلنا: بنحوّل كرتهم للجوال)؛ digital إذا عنده تطبيق خاص أو نقاط رقمية؛ unknown إذا ما قدرت تفحص.',
+    '- loyalty_source: وين شفت الدليل بالزبط (رابط)، أو وين دوّرت وما لقيت. loyalty_confidence: high إذا الدليل واضح أو فحصت كل الأماكن، medium إذا فحصت مكانين، low إذا فحص سريع. ما تخترع دليل.',
+    `- المحلات اللي عندها برنامج رقمي واضح حطها كمان بـ digital (عشان نتذكرها وما نرجع نجيبها)، بس ما بتنحسب من الـ ${count}.`,
+    '- لكل محل اكتب opener: أول رسالة واتساب قصيرة وشخصية (متلاً بتمدح إشي حقيقي عنه)، وبتقول إنه نقاطك بطاقة ولاء بمحفظة الجوال بدون تطبيق، وبتنتهي بسؤال خفيف. إذا عنده كرت ورق، قلّه إنه نفس الكرت بصير بالجوال وما بيضيع. الرابط منضيفه إحنا بعدها.',
     '- لما تخلّص، استدعي save_shops مرة وحدة بكل المحلات.',
   ].join('\n');
 }
 
-export function searchAsk(query, exclude) {
+export function searchAsk(query, exclude, hasLoyalty = []) {
   const ex = exclude.length ? `\n\nهدول عنا من قبل، ما ترجّعهم: ${exclude.join('، ')}` : '';
-  return `دوّر على: ${query}${ex}`;
+  const dig = hasLoyalty.length ? `\n\nوهدول عندهم برنامج ولاء رقمي، ما ترجّعهم: ${hasLoyalty.join('، ')}` : '';
+  return `دوّر على: ${query}${ex}${dig}`;
 }
+
+// 🔎 تصنيف المحل حسب برنامج الولاء (للوحة ولوكيل المبيعات)
+export const LOYALTY_AR = { none: 'ما عنده برنامج ولاء', paper: 'عنده كرت أختام ورق', digital: 'يمكن عنده برنامج ولاء رقمي', unknown: 'ما تأكدنا إذا عنده برنامج ولاء' };
+export const CONFIDENCE_AR = { high: 'متأكدين', medium: 'غالباً', low: 'فحص سريع' };
 
 // ─── 🧑‍💼 صاحب المنصة بيحكي مع رقم الإيجنت من رقمه: الوكيل بيصير مساعده وبيجاوبه من بيانات المنصة ───
 export function ownerSystem({ report, now, origin }) {

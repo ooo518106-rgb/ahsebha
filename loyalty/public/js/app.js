@@ -2148,6 +2148,17 @@ const CHANNEL_ICON = { web: '🌐', wa: '💬', manual: '📲' };
 // أرقام الأردن بنفس الشكل دايماً (07…)، سواء انكتبت 07 أو جات من واتساب +962
 const localPhone = (v) => { const d = String(v || '').replace(/\D/g, ''); return /^9627\d{8}$/.test(d) ? `0${d.slice(3)}` : v; };
 
+// 🔎 برنامج الولاء عند المحل (من البحث): شو لقى الوكيل، وين فحص، وكم متأكد
+const LOYALTY_ST = { paper: ['🃏 كرت أختام ورق', 'hot'], none: ['✅ ما عنده برنامج', 'won'], unknown: ['❔ ما تأكدنا', ''], digital: ['⚠️ يمكن عنده برنامج', 'lost'] };
+const CONF_AR = { high: 'متأكدين', medium: 'غالباً', low: 'فحص سريع' };
+function loyaltyLine(p) {
+  if (!p.loyalty) return '';
+  const [label, cls] = LOYALTY_ST[p.loyalty] || LOYALTY_ST.unknown;
+  const src = p.loyaltySrc || '';
+  const link = /^https?:\/\/\S+$/i.test(src);
+  return html`<div class="small" style="margin-top:4px"><span class="st ${cls}">${label}</span>${p.loyaltyConf ? html` <span class="muted">(${CONF_AR[p.loyaltyConf] || p.loyaltyConf})</span>` : ''}${src ? html` · <span class="muted">🔍 ${link ? html`<a href="${src}" target="_blank" rel="noopener">الدليل</a>` : src}</span>` : ''}</div>`;
+}
+
 function prospectCard(p, st) {
   const [label, cls] = PROSPECT_ST[p.status] || [p.status, ''];
   const queued = p.status === 'new' || p.status === 'failed';
@@ -2157,6 +2168,7 @@ function prospectCard(p, st) {
       <b>${p.name}</b> <span class="st ${cls}">${label}</span>${p.paused ? html` <span class="st">✋ إنت بترد</span>` : ''}${p.offer ? html` <span class="st">🎁 ${p.offer.trialDays} يوم${p.offer.used ? ' ✓' : ''}</span>` : ''}${p.source === 'inbound' ? html` <span class="st">📥 راسلنا</span>` : ''}${p.openedAt ? html` <span class="st">👀 فتح رابطه</span>` : ''}
       <div class="small muted">${[p.ownerName, p.kind, p.area].filter(Boolean).join(' · ')}${p.phone ? html` · <span class="num" dir="ltr">${localPhone(p.phone)}</span>` : ''} · ${ago(p.lastInAt || p.lastOutAt || p.createdAt)}${!p.lastInAt && p.readAt ? ' · 👀 قرأ وما رد' : !p.lastInAt && p.deliveredAt ? ' · ✓✓ وصلته' : ''}</div>
       ${p.why ? html`<div class="small" style="margin-top:4px">${p.why}</div>` : ''}
+      ${loyaltyLine(p)}
       ${p.note ? html`<div class="small" style="margin-top:4px">📝 ${p.note}</div>` : ''}
       ${p.guide ? html`<div class="small" style="margin-top:4px">📌 توجيهك للوكيل: ${p.guide}</div>` : ''}
       ${p.error ? html`<div class="small" style="margin-top:4px;color:var(--bad)">⚠️ ${waHint(p.error) ? html`${waHint(p.error)} <span class="muted" dir="ltr">${p.error}</span>` : p.error}</div>` : ''}
@@ -2214,7 +2226,7 @@ function salesPanel(st) {
       <div class="field"><label for="sc">كم محل</label><select id="sc" name="count"><option>5</option><option selected>10</option><option>20</option></select></div>
     </div>
     <button class="btn" type="submit" ${st.ai ? '' : 'disabled'}>🔎 دوّر</button>
-    <p class="hint">${st.ai ? 'بياخد دقيقة أو اتنتين. اللي إلهم رقم موبايل بيدخلوا الدور، والباقي بتحكي معهم إنت (انستغرام أو اتصال).' : 'بيشتغل بعد ما تضيف مفتاح الذكاء الاصطناعي (Gemini أو Claude).'}</p>
+    <p class="hint">${st.ai ? 'بياخد دقيقة أو اتنتين. الوكيل بيفحص كل محل إذا عنده برنامج نقاط: اللي عندهم تطبيق أو نقاط رقمية بيتجاهلهم، واللي عندهم كرت أختام ورق بيبعتلهم أول. اللي إلهم رقم موبايل بيدخلوا الدور، والباقي بتحكي معهم إنت (انستغرام أو اتصال).' : 'بيشتغل بعد ما تضيف مفتاح الذكاء الاصطناعي (Gemini أو Claude).'}</p>
   </form>
   <form class="panel stack" id="salesSettings">
     <h2>⚙️ الإرسال التلقائي</h2>
@@ -2230,6 +2242,7 @@ function salesPanel(st) {
     <div class="row" style="justify-content:space-between"><h2 style="margin:0">المحلات (<span id="salesCount">${st.prospects.length}</span>)</h2>
       <select id="salesFilter" aria-label="فلتر" style="width:auto;min-height:34px;padding:4px 8px">
         <option value="">الكل</option><option value="talking,hot">عم يحكوا</option><option value="new,failed">بالدور</option><option value="sent">انبعتلهم</option><option value="won">سجّلوا</option><option value="manual">بدون واتساب</option>
+        <option value="l:paper">🃏 كرت ورق</option><option value="l:none">✅ ما عندهم برنامج</option><option value="l:unknown">❔ ما تأكدنا</option>
       </select></div>
     ${st.prospects.length ? html`<div class="sales-list" id="salesList">${st.prospects.map((p) => prospectCard(p, st))}</div>` : html`<p class="muted">لسا ما في محلات. دوّر فوق، أو ضيف محل بتعرفه.</p>`}
     <details><summary>+ ضيف محل بتعرفه</summary>
@@ -2432,7 +2445,8 @@ function bindSales(st) {
     btn.textContent = '🔎 عم بدوّر… (دقيقة أو اتنتين)';
     try {
       const r = await api('/api/admin/sales/search', { method: 'POST', body: { query: search.query.value, count: Number(search.count.value) } });
-      toast(r.added ? `لقى ${r.added} محل جديد ✅` : 'ما لقى محلات جديدة، جرّب منطقة تانية', r.added ? 'ok' : '');
+      const skip = r.skipped ? ` (وتجاهل ${r.skipped} عندهم برنامج نقاط)` : '';
+      toast(r.added ? `لقى ${r.added} محل جديد ✅${skip}` : `ما لقى محلات جديدة${skip}، جرّب منطقة تانية`, r.added ? 'ok' : '');
       redraw(r);
     } catch (err) { toast(err.message, 'bad'); btn.disabled = false; btn.textContent = '🔎 دوّر'; }
   };
@@ -2452,7 +2466,7 @@ function bindSales(st) {
     let shown = 0;
     $$('#salesList .prospect').forEach((el) => {
       const p = st.prospects.find((x) => String(x.id) === el.dataset.pid);
-      el.hidden = !!want && !want.includes(p.status);
+      el.hidden = !!want && !(want[0].startsWith('l:') ? want[0] === `l:${p.loyalty || 'unknown'}` : want.includes(p.status));
       if (!el.hidden) shown++;
     });
     // العدد فوق حسب الفلتر: «2 من 35»
