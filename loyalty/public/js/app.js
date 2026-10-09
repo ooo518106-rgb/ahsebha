@@ -188,6 +188,7 @@ function onboardingCard() {
 function cashier() {
   render(view, html`
     ${onboardingCard()}
+    <div class="cashier-layout">
       <section class="panel cashier-search">
         <div class="cashier-search-top">
         <h2>بطاقة الزبون</h2>
@@ -207,7 +208,7 @@ function cashier() {
               <option value="">بدون</option>${state.shop.locations.map((l) => html`<option value="${l.id}" ${l.id === state.branch ? 'selected' : ''}>${l.name}</option>`)}</select></label>` : ''}
         </div>
       </section>
-      <section id="memberPanel"></section>`);
+      <section id="memberPanel"></section></div>`);
   showMember(state.member);
   if (matchMedia('(pointer: fine)').matches) $('#code').focus();
 
@@ -388,8 +389,8 @@ function showMember(m) {
   const s = state.shop;
   const stamps = s.programType === 'stamps';
   render(panel, html`
-    <div class="panel cashier-member">
-      <div class="cashier-customer stack">
+    <div class="cashier-member">
+      <div class="panel cashier-customer stack">
       <div class="member-head">
         <div class="avatar">${m.name.trim().charAt(0)}</div>
         <div class="grow" style="flex:1;min-width:0"><b>${m.name}</b><div class="small muted"><span class="num">${m.cardNo}</span> · <span class="num">${m.phone}</span></div></div>
@@ -400,17 +401,17 @@ function showMember(m) {
       <div id="memberCoupons"></div>
       <button class="btn ghost block" id="openMember" type="button">ملف الزبون ورابط بطاقته</button>
       </div>
-      <div class="cashier-transaction stack">
+      <div class="panel cashier-transaction stack">
       ${stamps
         ? html`<div class="row"><div class="stepper"><button class="btn ghost" type="button" id="minus">−</button><output id="count">1</output><button class="btn ghost" type="button" id="plus">+</button></div>
             <button class="btn big grow" id="earnBtn" type="button">أضف ختم</button></div>`
         : html`<form class="stack" id="earnForm">
             <label for="amount">مبلغ الفاتورة (${s.currency})</label>
-            <div class="row"><input class="grow num" id="amount" type="number" inputmode="decimal" min="0" step="0.001" placeholder="0.00" style="font-size:1.3rem" required>
-            <button class="btn big" id="earnBtn" type="submit">أضف النقاط</button></div>
+            <input class="num" id="amount" type="number" inputmode="decimal" min="0" step="0.001" placeholder="0.00" required>
             <div class="amount-choices" aria-label="مبالغ سريعة">${[5, 10, 20, 50].map((n) => html`<button class="btn ghost sm" type="button" data-amount="${n}">${n}</button>`)}</div>
             ${invoiceRow()}
             <div class="small muted" id="preview">&nbsp;</div>
+            <button class="btn big block" id="earnBtn" type="submit">أضف النقاط</button>
           </form>`}
       ${stamps && s.perks.invoiceMode === 'required' ? invoiceRow() : ''}
       <button class="btn ${m.progress.available ? 'big' : 'ghost'} block" id="redeemBtn" type="button" ${m.progress.available ? '' : 'disabled'}>🎁 صرف المكافأة: ${s.rewardName}</button>

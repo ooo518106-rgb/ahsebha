@@ -67,9 +67,16 @@ input[type=number], input[type=tel], input[type=email] { font-variant-numeric: t
 .cashier-search-acts { display: flex; gap: 8px 14px; align-items: center; flex-wrap: wrap; margin-top: 12px; }
 .cashier-search-acts .hint { flex: 1; margin: 0; }
 .cashier-search-acts label { margin: 0; }
-.cashier-member { display: grid; grid-template-columns: 1fr 1fr; gap: 26px; align-items: start; }
+.cashier-layout { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 18px; align-items: start; }
+.cashier-layout #memberPanel, .cashier-member { display: contents; }
+.cashier-search { grid-column: 1; margin: 0; }
+.cashier-search-top { flex-wrap: wrap; }
+.cashier-search-top h2 { flex-basis: 100%; }
+.cashier-search-acts .hint { flex-basis: 100%; }
+.cashier-customer { grid-column: 1; }
+.cashier-transaction { grid-column: 2; grid-row: 1 / span 2; }
+.cashier-layout .empty-member { grid-column: 2; grid-row: 1 / span 2; min-height: 320px; }
 .cashier-customer, .cashier-transaction { min-width: 0; }
-.cashier-transaction { padding-inline-start: 26px; border-inline-start: 1px solid var(--border); }
 .customer-summary { padding: 18px; background: var(--card-2); border-radius: 16px; border: 1px solid var(--border); }
 .customer-summary .balance { font-size: 2.8rem; }
 .member-head b { font-size: 1.1rem; }
@@ -77,7 +84,7 @@ input[type=number], input[type=tel], input[type=email] { font-variant-numeric: t
 .cashier-transaction #amount { min-height: 70px; font-size: 2rem !important; background: var(--card); }
 .amount-choices { display: flex; gap: 6px; }
 .amount-choices button { flex: 1; }
-#preview { color: var(--brand-text); font-weight: 650; min-height: 28px; padding: 5px 0; }
+#preview { color: var(--brand-text); font-size: 1.2rem; text-align: center; font-weight: 650; min-height: 78px; display: grid; place-content: center; padding: 16px; border-radius: 14px; background: color-mix(in srgb, var(--gold) 12%, var(--card)); }
 .credit-box { background: linear-gradient(135deg, color-mix(in srgb, var(--gold) 12%, var(--card)), var(--card)); padding: 16px; }
 .empty-member { min-height: 270px; display: grid; place-content: center; justify-items: center; gap: 12px; }
 .empty-card { width: 200px; height: 116px; border-radius: 18px; padding: 18px; background: var(--navy); color: var(--gold-light); text-align: start; position: relative; overflow: hidden; box-shadow: var(--shadow-lg); transform: rotate(-5deg); }
@@ -248,8 +255,8 @@ body.cust { background: radial-gradient(ellipse at 50% 0, rgb(197 161 102 / 9%),
   .cashier-search-top #findForm { flex-basis: calc(100% - 65px); }
   .cashier-search-top #camBtn { min-width: 46px; padding-inline: 12px; }
   .cashier-search-acts .hint { flex-basis: 100%; order: 2; }
-  .cashier-member { grid-template-columns: 1fr; gap: 20px; }
-  .cashier-transaction { padding: 20px 0 0; border-inline-start: 0; border-top: 1px solid var(--border); }
+  .cashier-layout { grid-template-columns: 1fr; }
+  .cashier-search, .cashier-customer, .cashier-transaction, .cashier-layout .empty-member { grid-column: 1; grid-row: auto; }
   .cashier-transaction #amount { min-height: 60px; }
   .member-tier { min-width: auto; }
   .member-columns span:last-child { min-width: 60px; }
