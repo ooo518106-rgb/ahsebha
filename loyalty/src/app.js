@@ -3076,6 +3076,7 @@ async function saveSalesMsg(db, prospectId, role, text, waId = null, at = Date.n
 // أول رسالة (القالب). بيرجّع true إذا انبعتت
 // أول رسالة: الجديدة (صورة + أزرار) إذا Meta وافقت عليها، وإلا القديمة. منفحص حالتها مرة بالساعة
 const PROMO_IMAGE = '/img/promo-card.jpg';
+const PROMO_TAG = '🖼 [صورة البطاقة]';
 async function introTemplate(c, wcfg, now = Date.now()) {
   let st = await jsonSetting(c.db, 'wa_tpl2');
   if (wcfg.wabaId && (!st || now - st.at > HOUR) && !(st && st.status === 'ERROR' && now - st.at < 6 * HOUR)) {
@@ -3303,7 +3304,7 @@ async function waIncoming(c, wcfg, m) {
   if (m.type === 'button' && sales.SHOW_ME_RE.test(text)) {
     try {
       const caption = 'هيك بتطلع بطاقة محلك بجوال الزبون 👆 بلونك وشعارك، والنقاط بتتحدّث لحالها مع كل زيارة';
-      await saveSalesMsg(c.db, p.id, 'agent', `🖼 [صورة البطاقة] ${caption}`, await wa.sendImage(wcfg, from, `${c.origin}${PROMO_IMAGE}`, caption));
+      await saveSalesMsg(c.db, p.id, 'agent', `${PROMO_TAG} ${caption}`, await wa.sendImage(wcfg, from, `${c.origin}${PROMO_IMAGE}`, caption));
     } catch (e) { console.error('wa promo:', e.message); }
   }
   if (p.paused || !aiConfig(c.env)) return;
@@ -3511,9 +3512,13 @@ async function waReply(c, wcfg, prospectId, msgId) {
     // ما منرد أكتر اليوم (بيحمينا من الردود الآلية اللي بترد على بعض)، بس بنبلّغك ترد إنت
     return agentSilent(c, p, 'الوكيل وصل حد الردود اليوم');
   }
-  const rows = await c.db.all('SELECT role, text FROM sales_msgs WHERE prospect_id = ? ORDER BY id DESC LIMIT 16', p.id);
-  const messages = cleanHistory(rows.reverse().map((r) => ({ role: r.role === 'in' ? 'user' : 'assistant', content: r.text })));
+  const rows = (await c.db.all('SELECT role, text FROM sales_msgs WHERE prospect_id = ? ORDER BY id DESC LIMIT 16', p.id)).reverse();
+  // صورة البطاقة بتنبعت لحالها بعد كبسة «وريني» قبل رد الوكيل: منشيلها من آخر المحادثة ومنحكيله إنها وصلت، عشان يكمّل من بعدها
+  const auto = [];
+  while (rows.length && rows[rows.length - 1].role === 'agent' && rows[rows.length - 1].text.startsWith(PROMO_TAG)) auto.unshift(rows.pop().text);
+  const messages = cleanHistory(rows.map((r) => ({ role: r.role === 'in' ? 'user' : 'assistant', content: r.text })));
   if (!messages) return;
+  if (auto.length) messages[messages.length - 1].content += `\n\n[ملاحظة: بعتناله هلأ تلقائياً ${auto.join(' ')}. كمّل من بعدها، وما تعيد وصف البطاقة]`;
   const offer = await c.db.get('SELECT * FROM offers WHERE prospect_id = ? AND used_at IS NULL AND expires_at > ? ORDER BY created_at DESC LIMIT 1', p.id, Date.now());
   const runTool = prospectTools(c, p, 'wa');
   const r = await chat(cfg, { system: await salesSystem(c, 'wa', p, offer), messages, tools: sales.waTools(), runTool, maxTokens: 3000 });

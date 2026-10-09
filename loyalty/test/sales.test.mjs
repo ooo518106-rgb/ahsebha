@@ -615,6 +615,38 @@ test('صفحة حذف البيانات لـ Meta بتفتح على أي عنوا
   assert.match(r.data, /privacy\.html/);
 });
 
+test('كبسة «وريني كيف بتطلع»: صورة البطاقة فوراً، وبعدها الوكيل بيكمّل الحكي (عارف إنه الصورة وصلت)', async () => {
+  const sent = [];
+  const ai = [];
+  const fetch = async (url, init = {}) => {
+    const u = String(url);
+    const body = init.body ? JSON.parse(init.body) : null;
+    const json = (d) => new Response(JSON.stringify(d), { status: 200, headers: { 'content-type': 'application/json' } });
+    if (u.startsWith('https://graph.facebook.com/')) {
+      sent.push(body);
+      return json({ messages: [{ id: `wamid.s${sent.length}` }] });
+    }
+    if (!u.startsWith('https://generativelanguage.googleapis.com/')) return new Response(null, { status: 201 });
+    if (u.includes('/models?')) return json({ models: [{ name: 'models/gemini-3.6-flash', supportedGenerationMethods: ['generateContent'] }] });
+    ai.push(body);
+    return json({ candidates: [{ content: { role: 'model', parts: [{ text: 'هاي مثال 👆 جرّبها بنفسك من هون' }] }, finishReason: 'STOP' }], usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 5 } });
+  };
+  const p = await platform({ GEMINI_API_KEY: 'g', fetch, ...WA_ENV });
+  await p.admin.post('/api/admin/prospects', { name: 'كوفي الورد', phone: '0791000001' });
+  const meta = p.client();
+  await hook(meta, { object: 'whatsapp_business_account', entry: [{ changes: [{ field: 'messages', value: { metadata: { phone_number_id: '1234567890' }, contacts: [{ wa_id: '962791000001', profile: { name: 'x' } }], messages: [{ from: '962791000001', id: 'wamid.btn', timestamp: '1760000000', type: 'button', button: { text: 'وريني كيف بتطلع', payload: 'x' } }] } }] }] });
+  await meta.flush();
+  assert.deepEqual(sent.map((m) => m.type), ['image', 'text'], 'الصورة وبعدها رد الوكيل');
+  assert.equal(sent[1].text.body, 'هاي مثال 👆 جرّبها بنفسك من هون');
+  const last = ai[0].contents.at(-1);
+  assert.equal(last.role, 'user');
+  assert.match(last.parts[0].text, /^وريني كيف بتطلع/);
+  assert.match(last.parts[0].text, /بعتناله هلأ تلقائياً 🖼 \[صورة البطاقة\] هيك بتطلع/);
+  const st = (await p.admin.get('/api/admin/sales')).data;
+  const chat = (await p.admin.get(`/api/admin/prospects/${st.prospects[0].id}`)).data.messages;
+  assert.deepEqual(chat.map((m) => m.role), ['in', 'agent', 'agent']);
+});
+
 // Gemini وهمي: قائمة الموديلات، والردود (نص أو استدعاء أداة)، وبحث Google
 function fakeGemini(reply) {
   const calls = [];
