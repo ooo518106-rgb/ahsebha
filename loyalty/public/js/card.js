@@ -1,11 +1,18 @@
 // صفحة بطاقة الزبون: QR للكاشير + زر الحفظ بمحفظة Google، وبتتحدّث لحالها لما تنضاف نقاط
-import { $, api, cardHTML, html, isIOS, raw, render, setBrand, toast, unitKey } from './common.js';
+import { $, api, cardHTML, cardManagement, html, isIOS, raw, render, saveCardManagement, setBrand, toast, unitKey } from './common.js';
 import { LANG, applyLang, fmtDate, ruleText, setLang, t } from './i18n.js';
 import { confetti } from './confetti.js';
 
 applyLang();
 
 const token = location.pathname.split('/')[2];
+const incomingKey = new URLSearchParams(location.hash.slice(1)).get('manage') || '';
+const managementKey = /^[a-z2-9]{32}$/.test(incomingKey) ? incomingKey : cardManagement(token);
+if (incomingKey) {
+  saveCardManagement(token, managementKey);
+  history.replaceState(null, '', location.pathname + location.search);
+}
+const managementHeaders = () => ({ 'x-card-management-key': managementKey });
 const params = new URLSearchParams(location.search);
 const root = $('#root');
 let lastBalance = null;
@@ -155,6 +162,7 @@ function remember(slug) {
     if (cards[slug] === token) return;
     cards[slug] = token;
     localStorage.setItem('loy_cards', JSON.stringify(cards));
+    localStorage.removeItem(`loy_manage_${token}`);
   } catch { /* اختياري */ }
 }
 
@@ -238,6 +246,7 @@ function draw() {
       <p class="center small muted">${t('visits', { v: member.visits, r: member.redeemed })}</p>
       <p class="center"><a class="btn ghost sm" href="/cards">${t('allCards')}</a></p>
       <p class="center small muted"><a href="/privacy">${t('privacy')}</a> · <button type="button" class="linkish" id="deleteCard">${t('deleteCard')}</button></p>
+      ${!managementKey ? html`<p class="center small muted">${LANG === 'en' ? 'To manage this card, open it on the device used to register, or ask the shop owner for a private management link.' : 'لإدارة البطاقة، افتحها من جهاز التسجيل أو اطلب رابط إدارة خاص من صاحب المحل.'}</p>` : ''}
       <p class="powered">${t('powered')} <a href="/">نقاطك</a></p>
     </div>`);
 }
@@ -332,7 +341,7 @@ async function makeGift() {
   const phone = prompt(t('confirmPhone'), '');
   if (!phone) return;
   try {
-    const r = await api(`/api/cards/${token}/gift`, { method: 'POST', body: { amount, phone } });
+    const r = await api(`/api/cards/${token}/gift`, { method: 'POST', body: { amount, phone }, headers: managementHeaders() });
     gift = { url: r.url, text: t('giftText', { amount: r.amount, cur: shop.currency, shop: shop.name, url: r.url }) };
     confetti({ count: 90, origin: { x: 0.5, y: 0.6 } });
     lastSig = null;
@@ -357,7 +366,7 @@ root.addEventListener('click', async (e) => {
   const phone = prompt(t('confirmPhone'), '');
   if (!phone) return;
   try {
-    await api(`/api/cards/${token}/delete`, { method: 'POST', body: { phone } });
+    await api(`/api/cards/${token}/delete`, { method: 'POST', body: { phone }, headers: managementHeaders() });
     deleted = true;
     forget();
     render(root, html`<div class="panel center" style="margin-top:60px"><h1>👋</h1><p>${t('deleted')}</p></div>`);

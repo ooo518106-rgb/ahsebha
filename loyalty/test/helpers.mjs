@@ -5,6 +5,7 @@ import { openDb } from '../src/server.js';
 import { b64url } from '../src/util.js';
 
 export async function setup(env = {}) {
+  env = { PLATFORM_SETUP_CODE: 'test-only-platform-setup-code-000000000', ...env };
   const db = await openDb(':memory:');
   return { db, env, client: (ip) => client(db, env, ip) };
 }
@@ -12,6 +13,7 @@ export async function setup(env = {}) {
 // عميل HTTP وهمي بيحتفظ بالكوكي، والطلبات بتروح مباشرة لـ handle؛ كل عميل إله IP مختلف
 export function client(db, env, ip = `10.${Math.floor(Math.random() * 250)}.${Math.floor(Math.random() * 250)}.${Math.floor(Math.random() * 250)}`) {
   let cookie = '';
+  const management = new Map();
   const pending = [];
   const ctx = {
     db,
@@ -22,6 +24,8 @@ export function client(db, env, ip = `10.${Math.floor(Math.random() * 250)}.${Ma
   };
   async function req(method, path, body, headers = {}) {
     const init = { method, headers: { ...(cookie ? { cookie } : {}), ...headers } };
+    const card = path.match(/^\/api\/cards\/([a-z2-9]{20})\/(?:gift|delete)$/);
+    if (card && management.has(card[1]) && !Object.hasOwn(headers, 'x-card-management-key')) init.headers['x-card-management-key'] = management.get(card[1]);
     if (body !== undefined) {
       init.body = typeof body === 'string' ? body : JSON.stringify(body);
       if (!init.headers['content-type']) init.headers['content-type'] = 'application/json';
@@ -31,9 +35,13 @@ export function client(db, env, ip = `10.${Math.floor(Math.random() * 250)}.${Ma
     if (sc) cookie = sc.split(';')[0].endsWith('=') ? '' : sc.split(';')[0];
     const ct = res.headers.get('content-type') || '';
     const data = ct.includes('json') ? await res.json() : (ct.startsWith('image/') || ct.includes('pkpass') || ct.startsWith('text/csv') || ct.includes('pdf') || ct.includes('gzip')) ? new Uint8Array(await res.arrayBuffer()) : await res.text();
+    if (data?.managementKey && data?.token) management.set(data.token, data.managementKey);
+    if (data?.cardUrl?.includes('#manage=')) management.set(data.member.token, data.cardUrl.split('#manage=')[1]);
+    if (data?.url?.includes('#manage=')) management.set(data.url.match(/\/c\/([a-z2-9]{20})/)[1], data.url.split('#manage=')[1]);
     return { status: res.status, data, headers: res.headers };
   }
   return {
+    bootstrap: () => req('POST', '/api/platform/bootstrap', { code: env.PLATFORM_SETUP_CODE }),
     req,
     get: (p) => req('GET', p),
     post: (p, b = {}) => req('POST', p, b),
@@ -47,6 +55,8 @@ export async function signup(c, over = {}) {
   const body = { shopName: 'Mocha Coffee House', email: `owner${Math.random().toString(36).slice(2)}@test.com`, password: 'secret-pass-1', ...over };
   const r = await c.post('/api/auth/signup', body);
   if (r.status !== 201) throw new Error(JSON.stringify(r.data));
+  const before = await c.get('/api/me');
+  if (before.data.canBootstrap) assert.equal((await c.bootstrap()).status, 200);
   const me = await c.get('/api/me');
   return { ...body, shop: me.data.shop };
 }

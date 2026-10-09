@@ -78,12 +78,12 @@ async function addGifts(db, { s, now, members, ids }) {
   const sent = now - 3 * DAY;
   const claimed = sent + 3 * 36e5;
   await db.batch([
-    ['INSERT INTO credit_gifts (shop_id, from_member, amount, code, claimed_by, claimed_at, created_at) VALUES (?, ?, 2000, ?, ?, ?, ?)', [s, ids[a], randomToken(), ids[poor], claimed, sent]],
+    ['INSERT INTO credit_gifts (shop_id, from_member, from_token, amount, code, claimed_by, claimed_at, created_at) VALUES (?, ?, (SELECT token FROM members WHERE id = ?), 2000, ?, ?, ?, ?)', [s, ids[a], ids[a], randomToken(), ids[poor], claimed, sent]],
     ["INSERT INTO credit_txns (shop_id, member_id, kind, amount, note, created_at) VALUES (?, ?, 'spend', 2000, '🎁 هدية لصاحب', ?)", [s, ids[a], sent]],
     ["INSERT INTO credit_txns (shop_id, member_id, kind, amount, note, created_at) VALUES (?, ?, 'topup', 2000, '🎁 هدية من صاحب', ?)", [s, ids[poor], claimed]],
     ['UPDATE members SET credit = credit - 2000 WHERE id = ?', [ids[a]]],
     ['UPDATE members SET credit = credit + 2000 WHERE id = ?', [ids[poor]]],
-    ['INSERT INTO credit_gifts (shop_id, from_member, amount, code, created_at) VALUES (?, ?, 1000, ?, ?)', [s, ids[c], randomToken(), now - DAY]],
+    ['INSERT INTO credit_gifts (shop_id, from_member, from_token, amount, code, created_at) VALUES (?, ?, (SELECT token FROM members WHERE id = ?), 1000, ?, ?)', [s, ids[c], ids[c], randomToken(), now - DAY]],
     ["INSERT INTO credit_txns (shop_id, member_id, kind, amount, note, created_at) VALUES (?, ?, 'spend', 1000, '🎁 هدية لصاحب', ?)", [s, ids[c], now - DAY]],
     ['UPDATE members SET credit = credit - 1000 WHERE id = ?', [ids[c]]],
   ]);

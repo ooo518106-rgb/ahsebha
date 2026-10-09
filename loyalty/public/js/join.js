@@ -1,5 +1,5 @@
 // صفحة انضمام الزبون: بيمسح QR الملصق عالكاونتر → اسمه وجواله → بطاقته
-import { $, api, html, raw, render, setBrand, unitKey } from './common.js';
+import { $, api, html, raw, render, saveCardManagement, setBrand, unitKey } from './common.js';
 import { LANG, applyLang, ruleText, setLang, t } from './i18n.js';
 
 applyLang();
@@ -70,11 +70,12 @@ async function main() {
     $('#err').textContent = '';
     try {
       const r = await api(`/api/shops/${encodeURIComponent(slug)}/join`, { method: 'POST', body: { ...Object.fromEntries(new FormData(e.target)), ref: referrer ? ref : undefined, lang: LANG } });
+      saveCardManagement(r.token, r.managementKey);
       try { localStorage.setItem('loy_cards', JSON.stringify({ ...savedCards(), [slug]: r.token })); } catch { /* اختياري */ }
       // جاي من رابط هدية: بنستلمها على البطاقة الجديدة (إذا فشلت، البطاقة انعملت على كل حال)
       let claimed = false;
       if (giftCode) claimed = await api(`/api/gifts/${giftCode}/claim`, { method: 'POST', body: { token: r.token } }).then(() => true, () => false);
-      location.href = `/c/${r.token}?new=1${claimed ? '&gift=1' : ''}`;
+      location.href = `/c/${r.token}?new=1${claimed ? '&gift=1' : ''}#manage=${r.managementKey}`;
     } catch (err) {
       $('#err').textContent = err.message;
       btn.disabled = false;

@@ -604,6 +604,7 @@ async function memberDialog(id) {
       ${state.shop.perks.creditOn || m.credit > 0 ? html`<details id="creditHist"><summary class="btn ghost block">💳 الرصيد: ${fmt(m.credit)} ${state.shop.currency}</summary><div class="small muted" style="margin-top:8px">جاري التحميل…</div></details>` : ''}
       <button class="btn block" id="useMember" type="button">استخدمه بالكاشير</button>
       <details><summary class="btn ghost block">رابط البطاقة (واتساب / QR)</summary><div style="margin-top:10px">${cardLinkHTML(m, d.cardUrl)}</div></details>
+      ${isOwner() && !state.me.demo ? html`<button class="btn ghost block" id="manageMember" type="button">إصدار رابط إدارة خاص للزبون</button><p class="small muted">تحقق من هوية الزبون قبل تسليم الرابط. الرابط الجديد يلغي صلاحية الإدارة السابقة، ورمز الكاشير يبقى للعرض.</p>` : ''}
       ${isOwner() ? html`<details><summary class="btn ghost block">تعديل الرصيد يدوياً</summary>
         <form class="stack" id="adj" style="margin-top:10px">
           <div class="row"><input class="grow num" name="delta" type="number" step="1" placeholder="+10 أو -10" required><input class="grow" name="note" placeholder="السبب" required maxlength="120"></div>
@@ -614,6 +615,14 @@ async function memberDialog(id) {
       ${isOwner() ? html`<button class="btn ghost block" id="delMember" type="button" style="color:var(--bad)">حذف الزبون وكل بياناته</button>` : ''}
     </div>`);
   bindCopy(body);
+  const manage = $('#manageMember', body);
+  if (manage) manage.onclick = async () => {
+    if (!confirm(`تأكدت من هوية ${m.name}؟ إصدار الرابط يلغي رابط الإدارة السابق.`)) return;
+    try {
+      const r = await api(`/api/members/${m.id}/management`, { method: 'POST' });
+      shareCard(m, r.url, 'رابط إدارة خاص — سلّمه للزبون فقط');
+    } catch (err) { toast(err.message, 'bad'); }
+  };
   const ch = $('#creditHist', body);
   if (ch) ch.ontoggle = async () => {
     if (!ch.open || ch.dataset.loaded) return;
@@ -1301,6 +1310,7 @@ async function settings() {
       </form>
     </div>
     <div class="grid2 group" data-group="team">
+      ${state.me.canBootstrap ? html`<form class="panel stack" id="bootstrapForm"><h2>تهيئة مدير المنصة</h2><label for="setupCode">رمز التهيئة الخاص</label><input id="setupCode" name="code" type="password" autocomplete="off" required><button class="btn" type="submit">تحديد هذا الحساب مديرًا للمنصة</button></form>` : ''}
       <section class="panel stack" id="staffPanel"><h2>الموظفين</h2><p class="muted small">جاري التحميل…</p></section>
       <form class="panel stack" id="guardForm">
       <h2>🛡️ الحماية من تلاعب الكاشير</h2>
@@ -1454,6 +1464,15 @@ async function settings() {
   $('#pwForm').onsubmit = async (e) => {
     e.preventDefault();
     try { await api('/api/me/password', { method: 'PUT', body: Object.fromEntries(new FormData(e.target)) }); e.target.reset(); toast('تغيّرت كلمة السر ✅', 'ok'); } catch (err) { toast(err.message, 'bad'); }
+  };
+  const bootstrap = $('#bootstrapForm');
+  if (bootstrap) bootstrap.onsubmit = async (e) => {
+    e.preventDefault();
+    try {
+      state.me = await api('/api/platform/bootstrap', { method: 'POST', body: { code: new FormData(bootstrap).get('code') } });
+      toast('تم تحديد مدير المنصة ✅', 'ok');
+      location.reload();
+    } catch (err) { toast(err.message, 'bad'); }
   };
 
   refresh();
