@@ -15,6 +15,7 @@ import * as wa from './whatsapp.js';
 import { defaultLogoPng } from './png.js';
 import { heroKey, parseKey, peekStrip, renderKey, stripFiles, stripKey, STRIP_VERSION } from './strip.js';
 import * as backup from './backup.js';
+import * as social from './social.js';
 import { earnFor, progress, rewardCost, rewardRule, stampsLine, unitLabel, unitWord } from '../public/js/rules.js';
 import { FEATURES } from '../public/js/plans.js';
 import { b64ToBytes, bytesToB64, clean, fail, HttpError, isUniqueError, json, normPhone, randomDigits, randomToken, sha256Hex } from './util.js';
@@ -719,6 +720,7 @@ export async function runScheduled(ctx, now = Date.now()) {
   Object.assign(out, await expiryJob(c, shopOf, now));
   out.giftsRefunded = await giftRefundJob(c, now);
   out.backup = await backupJob(c, now).catch((e) => { console.error('backup:', e.message); return 'error'; });
+  out.social = await socialJob(c, now).catch((e) => { console.error('social:', e.message); return 'error'; });
   const day = localDayKey('JO', now);
   // حساب العرض بيرجع لحاله كل يوم الساعة 4 الصبح، أو فوراً لما ينضافله إشي جديد (رقم النسخة تغيّر)
   const demoOld = (await getSetting(c.db, 'demo_version')) !== String(DEMO_VERSION);
@@ -1454,6 +1456,154 @@ async function backupJob(c, now) {
     await setSetting(c.db, 'backup_last', JSON.stringify({ ...(last || {}), at: (last && last.at) || null, ok: false, error: clean(e.message, 200), failedAt: now }));
     throw e;
   }
+}
+
+// ─── 📣 وكيل النشر: منشور باليوم على إنستغرام وفيسبوك من الدور، بالأيام والساعة اللي بتختارها (توقيت الأردن) ───
+const SOCIAL_MAX = 60;
+const socialCfg = async (db) => social.readCfg(await jsonSetting(db, 'social_cfg'));
+const socialImage = (c, p) => `${c.origin}${p.src || `/media/social/${p.id}.jpg`}`;
+const nextSocial = (db) => db.get("SELECT * FROM social_posts WHERE status = 'queued' ORDER BY sort, id LIMIT 1");
+
+async function socialJob(c, now) {
+  const cfg = await socialCfg(c.db);
+  const meta = social.metaConfig(c.env);
+  if (!cfg.on || !meta) return 'off';
+  const t = perks.localTime('JO', now);
+  if (!cfg.days.includes(t.weekday) || t.hour < cfg.hour) return 'later';
+  const day = localDayKey('JO', now);
+  if ((await getSetting(c.db, 'social_day')) === day) return 'done';
+  await setSetting(c.db, 'social_day', day); // العلامة أول: مرة وحدة باليوم حتى لو فشل
+  const post = await nextSocial(c.db);
+  if (!post) {
+    await notifyAdmin(c, { title: '📣 خلصت منشورات وكيل النشر', body: 'ما في منشورات بالدور، ضيف منشورات جديدة من 👑 المنصة ← 📣 النشر', url: `${c.origin}/app#admin` });
+    return 'empty';
+  }
+  return (await publishSocial(c, post, cfg, meta)).ok ? 'posted' : 'failed';
+}
+
+// ✍️ الوكيل بيكتب نص المنشور (إذا ما في نص)، وإذا ما في ذكاء اصطناعي أو فشل: نص جاهز
+async function writeSocialCaption(c, post) {
+  const cfg = aiConfig(c.env);
+  if (cfg) {
+    try {
+      const r = await chat(cfg, {
+        system: social.captionSystem({ promoLeft: await promoLeft(c), trialDays: TRIAL_DAYS }),
+        messages: [{ role: 'user', content: post.topic ? `موضوع المنشور (والصورة عنه): ${post.topic}` : 'اكتب منشور عن نقاطك بزاوية جديدة بتشد صاحب المحل.' }],
+        maxTokens: 1500,
+      });
+      await logAi(c, 'social', r.usage);
+      const text = String(r.text || '').trim().slice(0, 2000);
+      if (text) return text;
+    } catch (e) { console.error('social caption:', e.message); }
+  }
+  return social.fallbackCaption(TRIAL_DAYS);
+}
+
+async function publishSocial(c, post, cfg, meta) {
+  let caption = post.caption;
+  if (!caption) {
+    caption = await writeSocialCaption(c, post);
+    await c.db.run('UPDATE social_posts SET caption = ? WHERE id = ?', caption, post.id);
+  }
+  let r;
+  try {
+    const acc = await social.accounts(meta);
+    r = await social.publish(meta, acc, { imageUrl: socialImage(c, post), caption, ig: cfg.ig, fb: cfg.fb });
+  } catch (e) {
+    r = { ig: null, fb: null, errors: [clean(e.message, 200)] };
+  }
+  const ok = !!(r.ig || r.fb);
+  const error = r.errors.length ? clean(r.errors.join(' · '), 400) : null;
+  await c.db.run('UPDATE social_posts SET status = ?, ig_id = ?, fb_id = ?, error = ?, posted_at = ? WHERE id = ?', ok ? 'posted' : 'failed', r.ig, r.fb, error, Date.now(), post.id);
+  await setSetting(c.db, 'social_last', JSON.stringify({ at: Date.now(), id: post.id, ok, error }));
+  const left = (await c.db.get("SELECT COUNT(*) AS n FROM social_posts WHERE status = 'queued'")).n;
+  await notifyAdmin(c, ok
+    ? { title: '📣 نزل منشور جديد', body: `${[r.ig && 'إنستغرام', r.fb && 'فيسبوك'].filter(Boolean).join(' و')} ✅${error ? ` · ⚠️ ${error}` : ''} · ضايل ${left} منشور بالدور${left <= 2 ? '، ضيف كمان' : ''}`, url: `${c.origin}/app#admin` }
+    : { title: '⚠️ وكيل النشر ما قدر ينشر', body: error || 'خطأ غير معروف', url: `${c.origin}/app#admin` });
+  return { ok, error };
+}
+
+function socialView(p) {
+  return {
+    id: p.id, image: p.src || `/media/social/${p.id}.jpg`, caption: p.caption, topic: p.topic, status: p.status, error: p.error,
+    ig: !!p.ig_id, fb: !!p.fb_id, createdAt: p.created_at, postedAt: p.posted_at,
+  };
+}
+
+async function adminSocial(c) {
+  await requireAdmin(c);
+  if (c.req.method === 'PUT') {
+    const cfg = social.readCfg(c.body);
+    if (!cfg.days.length) fail(400, 'اختار يوم واحد على الأقل');
+    if (!cfg.ig && !cfg.fb) fail(400, 'اختار إنستغرام أو فيسبوك');
+    await setSetting(c.db, 'social_cfg', JSON.stringify(cfg));
+  }
+  const meta = social.metaConfig(c.env);
+  let account = null;
+  if (meta) {
+    try {
+      const a = await social.accounts(meta);
+      account = { ok: true, page: a.pageName, ig: a.igUser };
+    } catch (e) { account = { ok: false, error: clean(e.message, 300) }; }
+  }
+  const rows = await c.db.all(`SELECT id, src, caption, topic, status, error, ig_id, fb_id, created_at, posted_at FROM social_posts
+    ORDER BY CASE status WHEN 'queued' THEN 0 WHEN 'failed' THEN 1 ELSE 2 END, CASE status WHEN 'queued' THEN sort ELSE -posted_at END, id LIMIT 80`);
+  const have = new Set(rows.map((r) => r.src).filter(Boolean));
+  return json({
+    ready: !!meta, account, cfg: await socialCfg(c.db), last: await jsonSetting(c.db, 'social_last'),
+    posts: rows.map(socialView), library: social.LIBRARY.filter((l) => !have.has(l.src)).length, ai: !!aiConfig(c.env),
+  });
+}
+
+async function adminSocialAdd(c) {
+  await requireAdmin(c);
+  if ((await c.db.get('SELECT COUNT(*) AS n FROM social_posts')).n >= SOCIAL_MAX) fail(400, 'الدور مليان، احذف منشورات قديمة أول');
+  const sort = ((await c.db.get('SELECT MAX(sort) AS n FROM social_posts')).n || 0) + 1;
+  const now = Date.now();
+  if (c.body.library) {
+    const have = new Set((await c.db.all('SELECT src FROM social_posts WHERE src IS NOT NULL')).map((r) => r.src));
+    let i = 0;
+    for (const l of social.LIBRARY) if (!have.has(l.src)) await c.db.run('INSERT INTO social_posts (src, caption, sort, created_at) VALUES (?, ?, ?, ?)', l.src, l.caption, sort + i++, now);
+  } else {
+    // الصورة بتوصل JPEG من المتصفح (بيحوّلها ويصغّرها قبل الرفع)
+    const m = /^data:image\/jpeg;base64,([A-Za-z0-9+/]+=*)$/.exec(String(c.body.dataUrl || ''));
+    if (!m) fail(400, 'الصورة لازم تكون JPG');
+    const bytes = b64ToBytes(m[1]);
+    if (bytes[0] !== 0xff || bytes[1] !== 0xd8) fail(400, 'ملف الصورة تالف');
+    if (bytes.length > 1024 * 1024) fail(400, 'الصورة كبيرة، صغّرها');
+    await c.db.run('INSERT INTO social_posts (data, caption, topic, sort, created_at) VALUES (?, ?, ?, ?, ?)', m[1], String(c.body.caption || '').replace(/\r/g, '').trim().slice(0, 2200), clean(c.body.topic, 200), sort, now);
+  }
+  return adminSocial(c);
+}
+
+async function adminSocialPost(c, id) {
+  await requireAdmin(c);
+  const post = await c.db.get('SELECT * FROM social_posts WHERE id = ?', Number(id));
+  if (!post) fail(404, 'ما لقينا المنشور');
+  const a = c.body.action;
+  if (a === 'delete') await c.db.run('DELETE FROM social_posts WHERE id = ?', post.id);
+  else if (a === 'caption') await c.db.run('UPDATE social_posts SET caption = ? WHERE id = ?', String(c.body.caption || '').replace(/\r/g, '').trim().slice(0, 2200), post.id);
+  else if (a === 'write') {
+    await rateLimit(c, 'ai:social', 30, DAY, 'كتبت نصوص كتير اليوم، جرّب بكرا');
+    await c.db.run('UPDATE social_posts SET caption = ? WHERE id = ?', await writeSocialCaption(c, post), post.id);
+  } else if (a === 'top') await c.db.run('UPDATE social_posts SET sort = (SELECT MIN(sort) FROM social_posts) - 1 WHERE id = ?', post.id);
+  else if (a === 'retry') await c.db.run("UPDATE social_posts SET status = 'queued', error = NULL WHERE id = ?", post.id);
+  else if (a === 'publish') {
+    const meta = social.metaConfig(c.env);
+    if (!meta) fail(400, 'حط META_TOKEN بإعدادات Cloudflare أول');
+    if (post.status === 'posted') fail(400, 'هالمنشور نزل قبل');
+    await rateLimit(c, 'social:now', 10, DAY, 'نشرت كتير اليوم');
+    const r = await publishSocial(c, post, await socialCfg(c.db), meta);
+    if (!r.ok) fail(502, r.error || 'ما انتشر');
+  } else fail(400, 'إجراء مش معروف');
+  return adminSocial(c);
+}
+
+// صورة منشور مرفوعة (إنستغرام وفيسبوك بياخدوها من هون)
+async function socialImageFile(c, id) {
+  const row = await c.db.get('SELECT data FROM social_posts WHERE id = ? AND data IS NOT NULL', Number(id));
+  if (!row) return notFound(c);
+  return new Response(b64ToBytes(row.data), { headers: { 'content-type': 'image/jpeg', 'cache-control': 'public, max-age=86400', 'x-content-type-options': 'nosniff' } });
 }
 
 async function adminBackup(c) {
@@ -4198,6 +4348,10 @@ const API = [
   ['GET', /^\/api\/admin\/resellers$/, adminResellers, 'staff'],
   ['POST', /^\/api\/admin\/resellers$/, adminAddReseller, 'staff'],
   ['POST', /^\/api\/admin\/resellers\/(\d+)\/payout$/, adminResellerPayout, 'staff'],
+  ['GET', /^\/api\/admin\/social$/, adminSocial, 'staff'],
+  ['PUT', /^\/api\/admin\/social$/, adminSocial, 'staff'],
+  ['POST', /^\/api\/admin\/social\/posts$/, adminSocialAdd, 'staff'],
+  ['POST', /^\/api\/admin\/social\/posts\/(\d+)$/, adminSocialPost, 'staff'],
   ['GET', /^\/api\/admin\/testimonials$/, adminTestimonials, 'staff'],
   ['POST', /^\/api\/admin\/testimonials$/, adminTestimonials, 'staff'],
   ['DELETE', /^\/api\/admin\/testimonials\/(\d+)$/, adminDeleteTestimonial, 'staff'],
@@ -4348,6 +4502,7 @@ export async function handle(req, ctx) {
     let m;
     if ((m = p.match(/^\/media\/logo\/(\d+)\.png$/))) return await logo(c, m[1]);
     if ((m = p.match(/^\/media\/menu\/(\d+)\.jpg$/))) return await menuImage(c, m[1]);
+    if ((m = p.match(/^\/media\/social\/(\d+)\.jpg$/))) return await socialImageFile(c, m[1]);
     if ((m = p.match(/^\/media\/menu-pdf\/(\d+)\/(\d+)\.pdf$/))) return await menuPdf(c, m[1], m[2]);
     if (/^\/m\/[a-z0-9-]{3,40}\/?$/.test(p)) return await page(c, '/menu.html');
     if (/^\/print\/[a-z0-9-]{3,40}\/?$/.test(p)) return await page(c, '/print.html');

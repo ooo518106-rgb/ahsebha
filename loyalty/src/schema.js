@@ -352,6 +352,21 @@ export const SCHEMA = [
     png TEXT NOT NULL,
     created_at INTEGER NOT NULL
   )`,
+  // 📣 منشورات وكيل النشر (إنستغرام وفيسبوك): الصورة من مكتبة الموقع (src) أو مرفوعة (data base64 JPEG)، بالدور حسب sort
+  `CREATE TABLE IF NOT EXISTS social_posts (
+    id INTEGER PRIMARY KEY,
+    src TEXT,
+    data TEXT,
+    caption TEXT NOT NULL DEFAULT '',
+    topic TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'queued',
+    sort INTEGER NOT NULL DEFAULT 0,
+    ig_id TEXT,
+    fb_id TEXT,
+    error TEXT,
+    created_at INTEGER NOT NULL,
+    posted_at INTEGER
+  )`,
   // 💬 آراء أصحاب المحلات بصفحة البيع: مدير المنصة بيضيفها (رأي حقيقي من محل عنا، بإذنه)
   `CREATE TABLE IF NOT EXISTS testimonials (
     id INTEGER PRIMARY KEY,

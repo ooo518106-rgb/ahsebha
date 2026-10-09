@@ -1946,14 +1946,15 @@ async function admin() {
   let salesSt;
   let backupSt;
   let testi;
+  let socialSt;
   const nav = state.nav;
   try {
-    [{ leads }, { shops, signupOpen }, appleSt, pay, { resellers }, stats, salesSt, backupSt, testi] = await Promise.all([api('/api/admin/leads'), api('/api/admin/shops'), api('/api/admin/apple'), api('/api/admin/payments'), api('/api/admin/resellers'), api('/api/admin/stats'), api('/api/admin/sales'), api('/api/admin/backup/status'), api('/api/admin/testimonials')]);
+    [{ leads }, { shops, signupOpen }, appleSt, pay, { resellers }, stats, salesSt, backupSt, testi, socialSt] = await Promise.all([api('/api/admin/leads'), api('/api/admin/shops'), api('/api/admin/apple'), api('/api/admin/payments'), api('/api/admin/resellers'), api('/api/admin/stats'), api('/api/admin/sales'), api('/api/admin/backup/status'), api('/api/admin/testimonials'), api('/api/admin/social')]);
   } catch (e) { if (nav === state.nav) render(view, html`<p class="alert bad">${e.message}</p>`); return; }
   if (nav !== state.nav) return;
   const fresh = leads.filter((l) => l.status === 'new').length;
   render(view, html`
-    ${subnav('admin', [['overview', '📊 الأرقام'], ['pay', `💳 الحوالات${pay.payments.some((p) => p.status === 'pending') ? ' •' : ''}`], ['shops', `🏪 المحلات والطلبات${fresh ? ` (${fresh})` : ''}`], ['sales', `🎯 المبيعات${salesSt.counts.hot ? ` (🔥 ${salesSt.counts.hot})` : ''}`], ['partners', '🤝 المندوبين'], ['reviews', `💬 الآراء${testi.testimonials.length ? ` (${testi.testimonials.length})` : ''}`], ['apple', '🍎 Apple Wallet'], ['backup', `💾 النسخ${backupSt.last && backupSt.last.ok ? '' : ' •'}`], ['updates', `🆕 التحديثات (${stats.version})`]])}
+    ${subnav('admin', [['overview', '📊 الأرقام'], ['pay', `💳 الحوالات${pay.payments.some((p) => p.status === 'pending') ? ' •' : ''}`], ['shops', `🏪 المحلات والطلبات${fresh ? ` (${fresh})` : ''}`], ['sales', `🎯 المبيعات${salesSt.counts.hot ? ` (🔥 ${salesSt.counts.hot})` : ''}`], ['partners', '🤝 المندوبين'], ['social', `📣 النشر${socialSt.cfg.on ? '' : ' •'}`], ['reviews', `💬 الآراء${testi.testimonials.length ? ` (${testi.testimonials.length})` : ''}`], ['apple', '🍎 Apple Wallet'], ['backup', `💾 النسخ${backupSt.last && backupSt.last.ok ? '' : ' •'}`], ['updates', `🆕 التحديثات (${stats.version})`]])}
     <div class="group" data-group="overview">
     <a class="panel version-chip" href="#admin/updates" data-goto-updates>
       <span class="badge ok num">الإصدار ${stats.version}</span>
@@ -2029,6 +2030,7 @@ async function admin() {
     <div class="group" data-group="partners">
     ${resellersPanel(resellers)}
     </div>
+    <div class="group" data-group="social">${socialPanel(socialSt)}</div>
     <div class="group" data-group="reviews">${testimonialsPanel(testi)}</div>
     <div class="group" data-group="apple">
     <section class="panel stack" id="applePanel">${applePanel(appleSt)}</section>
@@ -2042,6 +2044,7 @@ async function admin() {
   bindPayments();
   bindResellers();
   bindTestimonials();
+  bindSocial();
   bindSales(salesSt);
   $$('[data-shop-menu]').forEach((b) => {
     const shop = shops.find((x) => String(x.id) === b.dataset.shopMenu);
@@ -2527,6 +2530,121 @@ function bindResellers() {
   $('#resellerForm', box).onsubmit = async (e) => {
     e.preventDefault();
     try { await api('/api/admin/resellers', { method: 'POST', body: Object.fromEntries(new FormData(e.target)) }); toast('انضاف المندوب ✅', 'ok'); admin(); } catch (err) { toast(err.message, 'bad'); }
+  };
+}
+
+// 📣 وكيل النشر: منشور باليوم على إنستغرام وفيسبوك من الدور
+const WEEK_DAYS = [[6, 'السبت'], [0, 'الأحد'], [1, 'الإثنين'], [2, 'الثلاثاء'], [3, 'الأربعاء'], [4, 'الخميس'], [5, 'الجمعة']];
+const SOCIAL_STATUS = { queued: ['بالدور', ''], posted: ['نزل ✅', 'ok'], failed: ['ما نزل', 'bad'] };
+const postHour = (h) => `${h % 12 || 12}:00 ${h < 12 ? 'الصبح' : h < 17 ? 'الظهر' : 'المسا'}`;
+function socialPanel(d) {
+  const c = d.cfg;
+  const queued = d.posts.filter((p) => p.status === 'queued').length;
+  const conn = !d.ready ? html`<p class="alert warn small">🔌 لسا مش مربوط بـ Meta: لازم <b dir="ltr">META_TOKEN</b> بإعدادات Cloudflare (Claude بيشرحلك الخطوات).</p>`
+    : d.account && d.account.ok ? html`<p class="alert ok small">✅ مربوط: صفحة <b>${d.account.page}</b>${d.account.ig ? html` · إنستغرام <b dir="ltr">@${d.account.ig}</b>` : ' · ⚠️ ما في إنستغرام مربوط بالصفحة'}</p>`
+      : html`<p class="alert bad small">❌ Meta رفضت التوكن: <span dir="auto">${d.account ? d.account.error : ''}</span></p>`;
+  return html`<section class="panel stack" id="socialPanel">
+    <h2>📣 وكيل النشر</h2>
+    <p class="hint">بينشر لحاله منشور باليوم على إنستغرام وفيسبوك من الدور تحت، بالأيام والساعة اللي بتختارها. إذا المنشور ما إله نص، الوكيل بيكتبه${d.ai ? '' : ' (لازم مفتاح الذكاء الاصطناعي، وإلا بيحط نص جاهز)'}.</p>
+    ${conn}
+    ${d.last ? html`<p class="small">آخر نشر: ${d.last.ok ? '✅' : '❌'} ${ago(d.last.at)}${d.last.error ? html` · <span style="color:var(--bad)" dir="auto">${d.last.error}</span>` : ''}</p>` : ''}
+    <form class="stack" id="socialCfg">
+      <label class="row" style="gap:10px"><input type="checkbox" name="on" ${c.on ? 'checked' : ''} style="width:auto"> <b>شغّل النشر التلقائي</b></label>
+      <div class="row" style="flex-wrap:wrap;gap:8px">${WEEK_DAYS.map(([v, n]) => html`<label class="badge" style="padding:6px 10px;cursor:pointer"><input type="checkbox" name="day" value="${v}" ${c.days.includes(v) ? 'checked' : ''} style="width:auto;min-height:0;margin-inline-end:4px">${n}</label>`)}</div>
+      <div class="row" style="gap:12px;flex-wrap:wrap">
+        <label class="field" style="min-width:150px"><span>الساعة (توقيت الأردن)</span><select name="hour">${Array.from({ length: 24 }, (_, h) => html`<option value="${h}" ${h === c.hour ? 'selected' : ''}>${postHour(h)}</option>`)}</select></label>
+        <label class="row" style="gap:6px"><input type="checkbox" name="ig" ${c.ig ? 'checked' : ''} style="width:auto"> إنستغرام</label>
+        <label class="row" style="gap:6px"><input type="checkbox" name="fb" ${c.fb ? 'checked' : ''} style="width:auto"> فيسبوك</label>
+      </div>
+      <button class="btn" type="submit">💾 احفظ</button>
+    </form>
+    <h3 style="margin:6px 0 0">الدور (${queued} منشور${queued && c.on ? ` · بيكفي ${queued} ${queued === 1 ? 'يوم نشر' : 'أيام نشر'}` : ''})</h3>
+    ${d.posts.length ? html`<ul class="list">${d.posts.map((p) => html`<li style="align-items:flex-start;gap:12px" data-sp="${p.id}">
+        <img src="${p.image}" alt="" width="72" height="90" loading="lazy" style="border-radius:10px;object-fit:cover;flex:none">
+        <div class="main" style="min-width:0">
+          <b><span class="badge ${SOCIAL_STATUS[p.status] ? SOCIAL_STATUS[p.status][1] : ''}">${SOCIAL_STATUS[p.status] ? SOCIAL_STATUS[p.status][0] : p.status}</span>${p.postedAt ? html` <span class="small muted">${ago(p.postedAt)}${p.ig ? ' · إنستغرام' : ''}${p.fb ? ' · فيسبوك' : ''}</span>` : ''}</b>
+          ${p.error ? html`<span class="small" style="color:var(--bad)" dir="auto">${p.error}</span>` : ''}
+          <details><summary class="small">${p.caption ? p.caption.split('\n')[0].slice(0, 70) : p.topic ? `✍️ الوكيل بيكتب النص عن: ${p.topic}` : '✍️ الوكيل بيكتب النص وقت النشر'}</summary>
+            <textarea rows="6" maxlength="2200" data-cap style="margin-top:6px">${p.caption}</textarea>
+            <div class="row" style="margin-top:6px;flex-wrap:wrap">
+              <button class="btn sm ghost" type="button" data-act="caption">💾 احفظ النص</button>
+              ${p.status !== 'posted' ? html`<button class="btn sm ghost" type="button" data-act="write">✍️ خلّي الوكيل يكتبه</button>` : ''}
+            </div></details>
+          <div class="row" style="margin-top:6px;flex-wrap:wrap">
+            ${p.status === 'queued' ? html`<button class="btn sm" type="button" data-act="publish">🚀 انشر هلأ</button><button class="btn sm ghost" type="button" data-act="top">⬆️ خلّيه الجاي</button>` : ''}
+            ${p.status === 'failed' ? html`<button class="btn sm" type="button" data-act="retry">🔁 رجّعه للدور</button>` : ''}
+            <button class="btn sm ghost" type="button" data-act="delete">حذف</button>
+          </div>
+        </div></li>`)}</ul>` : html`<p class="muted small">الدور فاضي.</p>`}
+    ${d.library ? html`<button class="btn soft block" type="button" id="socialLib">📚 ضيف منشورات نقاطك الجاهزة (${d.library})</button>` : ''}
+    <details><summary class="btn ghost block">+ ضيف منشور (صورة)</summary>
+      <form class="stack" id="socialAdd" style="margin-top:10px">
+        <input type="file" name="file" accept="image/*" multiple required>
+        <span class="hint">أحسن مقاس 1080×1350 (طولي). إذا اخترت كذا صورة، كل وحدة بتصير منشور.</span>
+        <input name="topic" maxlength="200" placeholder="عن شو المنشور؟ (اختياري، بيساعد الوكيل يكتب النص)">
+        <textarea name="caption" rows="4" maxlength="2200" placeholder="النص (اختياري، إذا فاضي الوكيل بيكتبه)"></textarea>
+        <button class="btn" type="submit">إضافة للدور</button>
+      </form></details>
+  </section>`;
+}
+
+// الصورة بتتحوّل JPEG وبتصغر (إنستغرام بياخد JPEG بس)
+function toJpeg(file, max = 1440) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      const k = Math.min(1, max / Math.max(img.width, img.height));
+      const cv = document.createElement('canvas');
+      cv.width = Math.round(img.width * k);
+      cv.height = Math.round(img.height * k);
+      const ctx = cv.getContext('2d');
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(0, 0, cv.width, cv.height);
+      ctx.drawImage(img, 0, 0, cv.width, cv.height);
+      URL.revokeObjectURL(url);
+      resolve(cv.toDataURL('image/jpeg', 0.88));
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('ما قدرنا نقرأ الصورة')); };
+    img.src = url;
+  });
+}
+
+function bindSocial() {
+  const box = $('#socialPanel');
+  if (!box) return;
+  const redraw = (d) => { box.outerHTML = String(socialPanel(d)); bindSocial(); };
+  const call = async (path, opts, msg) => {
+    try { redraw(await api(path, opts)); if (msg) toast(msg, 'ok'); } catch (e) { toast(e.message, 'bad'); }
+  };
+  $('#socialCfg', box).onsubmit = (e) => {
+    e.preventDefault();
+    const f = e.target;
+    call('/api/admin/social', { method: 'PUT', body: { on: f.on.checked, days: [...f.querySelectorAll('[name=day]:checked')].map((x) => Number(x.value)), hour: Number(f.hour.value), ig: f.ig.checked, fb: f.fb.checked } }, 'انحفظ ✅');
+  };
+  const lib = $('#socialLib', box);
+  if (lib) lib.onclick = () => call('/api/admin/social/posts', { method: 'POST', body: { library: true } }, 'انضافوا للدور ✅');
+  $$('[data-sp] [data-act]', box).forEach((b) => {
+    b.onclick = async () => {
+      const li = b.closest('[data-sp]');
+      const act = b.dataset.act;
+      if (act === 'delete' && !confirm('تحذف هالمنشور؟')) return;
+      if (act === 'publish' && !confirm('ينزل هلأ على إنستغرام وفيسبوك؟')) return;
+      b.disabled = true;
+      const body = { action: act, ...(act === 'caption' ? { caption: li.querySelector('[data-cap]').value } : {}) };
+      await call(`/api/admin/social/posts/${li.dataset.sp}`, { method: 'POST', body }, { publish: 'نزل 🚀', caption: 'انحفظ النص ✅', write: 'الوكيل كتب النص ✍️', delete: 'انحذف', top: 'صار الجاي بالدور', retry: 'رجع للدور' }[act]);
+    };
+  });
+  $('#socialAdd', box).onsubmit = async (e) => {
+    e.preventDefault();
+    const f = e.target;
+    const btn = f.querySelector('button[type=submit]');
+    btn.disabled = true;
+    try {
+      let d = null;
+      for (const file of f.file.files) d = await api('/api/admin/social/posts', { method: 'POST', body: { dataUrl: await toJpeg(file), topic: f.topic.value, caption: f.caption.value } });
+      if (d) { redraw(d); toast('انضاف للدور ✅', 'ok'); }
+    } catch (err) { toast(err.message, 'bad'); btn.disabled = false; }
   };
 }
 
