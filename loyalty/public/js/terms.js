@@ -1,5 +1,5 @@
 // طرق التواصل من إعدادات السيرفر (CONTACT_EMAIL ورقم الواتساب)
-import { $, api, html, render } from './common.js';
+import { $, api, html, render } from './common.js?v=1.82';
 
 api('/api/site').then(({ contactEmail, whatsapp }) => {
   const ways = [];

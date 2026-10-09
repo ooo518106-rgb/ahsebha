@@ -1,5 +1,5 @@
 // صفحة الطباعة: ملصق كاونتر A4، كروت طاولات (4 بالصفحة)، أو ستيكرات شباك (6 بالصفحة) — للانضمام أو للمنيو
-import { $, api, html, qrSVG, raw, render } from './common.js';
+import { $, api, html, qrSVG, raw, render } from './common.js?v=1.82';
 
 const slug = location.pathname.split('/')[2];
 const params = new URLSearchParams(location.search);
