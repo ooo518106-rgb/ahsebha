@@ -2183,6 +2183,7 @@ function salesPanel(st) {
     <h2>📞 رقم الإيجنت عند Meta</h2>
     <p class="hint">إذا زر «تسجيل» بصفحة Meta ما زبط، سجّله من هون: بيطلعلك السبب بالزبط إذا Meta رفضت.</p>
     <div id="waNumberBox"><button class="btn ghost" type="button" data-wa-check>🔍 افحص الرقم</button></div>
+    <div id="waProfileBox"><button class="btn soft block" type="button" data-wa-profile>📇 روابط وبروفايل الرقم على واتساب</button></div>
   </section>` : ''}
   <form class="panel stack" id="salesSearch">
     <h2>🔎 دوّر على محلات</h2>
@@ -2326,6 +2327,44 @@ function bindWaNumber() {
   bind();
 }
 
+// 📇 بروفايل رقم الإيجنت على واتساب (اللي بيشوفه المحل لما يكبس على اسمنا): الروابط والوصف، بينحفظ عند Meta مباشرة
+function waProfileHTML(d) {
+  const p = d.profile;
+  const w = p.websites.length ? p.websites : d.defaults.websites;
+  return html`<form class="stack" data-wa-profile-form style="margin-top:10px">
+    <h3 style="margin:0">📇 بروفايل الرقم على واتساب</h3>
+    <p class="hint">هاد اللي بيشوفه المحل لما يكبس على اسم «نقاطك» بواتساب. واتساب بيسمح برابطين بس، فحطينا إنستغرام وفيسبوك، والموقع بالوصف.${p.websites.length ? '' : ' (الخانات معبّاة باقتراحنا، لسا ما انحفظت)'}</p>
+    <div class="field"><label for="wp-w1">رابط 1</label><input id="wp-w1" name="w1" dir="ltr" value="${w[0] || ''}" placeholder="https://www.instagram.com/nuqatak/"></div>
+    <div class="field"><label for="wp-w2">رابط 2</label><input id="wp-w2" name="w2" dir="ltr" value="${w[1] || ''}" placeholder="https://www.facebook.com/Nuqatak"></div>
+    <div class="field"><label for="wp-about">النبذة القصيرة <span class="hint">(تحت الاسم، 139 حرف)</span></label><input id="wp-about" name="about" maxlength="139" value="${p.about || d.defaults.about}"></div>
+    <div class="field"><label for="wp-desc">الوصف <span class="hint">(512 حرف)</span></label><textarea id="wp-desc" name="description" rows="4" maxlength="512">${p.description || d.defaults.description}</textarea></div>
+    <div class="field"><label for="wp-email">إيميل <span class="hint">(اختياري، بيبيّن للكل)</span></label><input id="wp-email" name="email" type="email" dir="ltr" value="${p.email}"></div>
+    <button class="btn" type="submit">💾 احفظ عند Meta</button>
+  </form>`;
+}
+function bindWaProfile() {
+  const box = $('#waProfileBox');
+  if (!box) return;
+  const draw = (d) => {
+    render(box, waProfileHTML(d));
+    const f = box.querySelector('[data-wa-profile-form]');
+    f.onsubmit = async (e) => {
+      e.preventDefault();
+      const btn = f.querySelector('button[type=submit]');
+      btn.disabled = true;
+      try {
+        draw(await api('/api/admin/wa/profile', { method: 'PUT', body: { websites: [f.w1.value, f.w2.value], about: f.about.value, description: f.description.value, email: f.email.value } }));
+        toast('انحفظ عند Meta ✅ بيبيّن بواتساب خلال دقايق', 'ok');
+      } catch (err) { toast(err.message, 'bad'); btn.disabled = false; }
+    };
+  };
+  const open = box.querySelector('[data-wa-profile]');
+  open.onclick = async () => {
+    open.disabled = true;
+    try { draw(await api('/api/admin/wa/profile')); } catch (e) { toast(e.message, 'bad'); open.disabled = false; }
+  };
+}
+
 async function openProspectChat(card) {
   const box = card.querySelector('.chat-box');
   if (box.dataset.open) { box.innerHTML = ''; delete box.dataset.open; return; }
@@ -2362,6 +2401,7 @@ async function openProspectChat(card) {
 function bindSales(st) {
   const redraw = (next) => { const g = $('[data-group="sales"]'); if (g) { render(g, salesPanel(next)); bindSales(next); } };
   bindWaNumber();
+  bindWaProfile();
   const search = $('#salesSearch');
   search.onsubmit = async (e) => {
     e.preventDefault();

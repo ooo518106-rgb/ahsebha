@@ -71,6 +71,9 @@ export const subscribeApp = (cfg) => call(cfg, `${cfg.wabaId}/subscribed_apps`, 
 export const templates = (cfg, name = cfg.template) => call(cfg, `${cfg.wabaId}/message_templates?name=${encodeURIComponent(name)}&fields=name,status,language,category,rejected_reason`, { method: 'GET' });
 // بيقدر يبعت؟ (Meta بتقول إذا في إشي مانع: الدفع، الحساب، الرقم) { can_send_message, entities: [{ errors }] }
 export const health = (cfg) => call(cfg, `${cfg.phoneId}?fields=health_status`, { method: 'GET' });
+// 📇 بروفايل رقم الإيجنت على واتساب (اللي بيشوفه المحل لما يكبس على اسمنا): نبذة، وصف، إيميل، وموقعين بالكتير
+export const businessProfile = async (cfg) => ((await call(cfg, `${cfg.phoneId}/whatsapp_business_profile?fields=about,description,email,websites,profile_picture_url`, { method: 'GET' })).data || [])[0] || {};
+export const setBusinessProfile = (cfg, fields) => call(cfg, `${cfg.phoneId}/whatsapp_business_profile`, { body: { messaging_product: 'whatsapp', ...fields } });
 
 // أول رسالة: القالب، والمتغير {{1}} = اسم المحل. image: رابط صورة الرأس (للقالب اللي فوقه صورة)
 export const sendTemplate = (cfg, to, shopName, { name = cfg.template, image = null, lang = cfg.lang } = {}) => graph(cfg, {

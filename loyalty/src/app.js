@@ -4059,6 +4059,37 @@ async function adminDeleteTestimonial(c, id) {
   return adminTestimonials(c);
 }
 
+// 📇 بروفايل رقم الإيجنت على واتساب: الروابط (إنستغرام وفيسبوك أو الموقع) والوصف، بينحفظ عند Meta مباشرة
+const SOCIAL = { instagram: 'https://www.instagram.com/nuqatak/', facebook: 'https://www.facebook.com/Nuqatak' };
+const WA_PROFILE_DEFAULT = {
+  about: 'بطاقة ولاء لمحلك بجوال زبونك 🎁 nuqatak.com',
+  description: `نقاطك: بطاقة ولاء لمحلك بمحفظة جوال زبونك، عالآيفون والأندرويد، بدون تطبيق وبدون كروت ورق. أول ${TRIAL_DAYS} يوم ببلاش 🎁\nالموقع: https://nuqatak.com`,
+  websites: [SOCIAL.instagram, SOCIAL.facebook],
+};
+const URL_RE = /^https?:\/\/[^\s<>"']{3,250}$/;
+async function adminWaProfile(c) {
+  await requireAdmin(c);
+  const wcfg = wa.waConfig(c.env);
+  if (!wcfg) fail(400, 'حط WHATSAPP_TOKEN و WHATSAPP_PHONE_ID بإعدادات Cloudflare أول');
+  try {
+    if (c.req.method === 'PUT') {
+      await rateLimit(c, `waprof:${c.user.id}`, 20, 60 * MIN, 'محاولات كتير، استنى شوي');
+      const websites = (Array.isArray(c.body.websites) ? c.body.websites : []).map((w) => String(w || '').trim()).filter(Boolean).slice(0, 2);
+      for (const w of websites) if (!URL_RE.test(w)) fail(400, `الرابط لازم يبلّش بـ https:// : ${clean(w, 60)}`);
+      const about = clean(c.body.about, 139);
+      const description = String(c.body.description || '').replace(/\r/g, '').trim().slice(0, 512);
+      const email = clean(c.body.email, 128);
+      if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) fail(400, 'الإيميل مش مزبوط');
+      await wa.setBusinessProfile(wcfg, { ...(about ? { about } : {}), description, email, websites });
+    }
+    const p = await wa.businessProfile(wcfg);
+    return json({ profile: { about: p.about || '', description: p.description || '', email: p.email || '', websites: p.websites || [], picture: p.profile_picture_url || null }, defaults: WA_PROFILE_DEFAULT });
+  } catch (e) {
+    if (e instanceof HttpError) throw e;
+    fail(502, `Meta: ${clean(e.message, 300)}${e.code ? ` (${e.code})` : ''}`);
+  }
+}
+
 // صفحة المندوب (برابط سري): محلاته وعمولته
 async function partnerStats(c, token) {
   const r = await c.db.get('SELECT * FROM resellers WHERE token = ?', token);
@@ -4133,6 +4164,8 @@ const API = [
   ['POST', /^\/api\/admin\/sales\/search$/, adminSalesSearch, 'staff'],
   ['PUT', /^\/api\/admin\/sales\/settings$/, adminSalesSettings, 'staff'],
   ['GET', /^\/api\/admin\/wa\/number$/, adminWaNumber, 'staff'],
+  ['GET', /^\/api\/admin\/wa\/profile$/, adminWaProfile, 'staff'],
+  ['PUT', /^\/api\/admin\/wa\/profile$/, adminWaProfile, 'staff'],
   ['POST', /^\/api\/admin\/wa\/number$/, adminWaNumber, 'staff'],
   ['POST', /^\/api\/admin\/prospects$/, adminAddProspect, 'staff'],
   ['GET', /^\/api\/admin\/prospects\/(\d+)$/, adminProspect, 'staff'],

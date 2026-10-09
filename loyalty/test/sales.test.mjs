@@ -684,6 +684,33 @@ test('صورة البطاقة: إذا واتساب رفضها منجرّب مر�
   assert.match(box.lastFailure.message, /^صورة البطاقة: Service temporarily unavailable/);
 });
 
+test('بروفايل رقم الإيجنت على واتساب: الروابط والوصف بينحفظوا عند Meta، والوكيل بيعرف حساباتنا', async () => {
+  let saved = null;
+  const fetch = async (url, init = {}) => {
+    const u = String(url);
+    const json = (d) => new Response(JSON.stringify(d), { status: 200, headers: { 'content-type': 'application/json' } });
+    if (u.includes('/whatsapp_business_profile')) {
+      if ((init.method || 'POST') === 'POST') { saved = JSON.parse(init.body); return json({ success: true }); }
+      return json({ data: [saved ? { about: saved.about, description: saved.description, email: saved.email, websites: saved.websites } : { about: '', websites: [] }] });
+    }
+    return new Response(null, { status: 201 });
+  };
+  const p = await platform({ fetch, ...WA_ENV });
+  let r = await p.admin.get('/api/admin/wa/profile');
+  assert.equal(r.status, 200);
+  assert.deepEqual(r.data.profile.websites, []);
+  assert.deepEqual(r.data.defaults.websites, ['https://www.instagram.com/nuqatak/', 'https://www.facebook.com/Nuqatak']);
+  assert.match(r.data.defaults.description, /https:\/\/nuqatak\.com/);
+  assert.equal((await p.admin.put('/api/admin/wa/profile', { websites: ['instagram.com/nuqatak'] })).status, 400, 'لازم https');
+  r = await p.admin.put('/api/admin/wa/profile', { websites: ['https://www.instagram.com/nuqatak/', 'https://www.facebook.com/Nuqatak', 'https://x.com/zz'], about: 'بطاقة ولاء 🎁', description: 'نقاطك\nالموقع: https://nuqatak.com', email: '' });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.deepEqual(saved, { messaging_product: 'whatsapp', about: 'بطاقة ولاء 🎁', description: 'نقاطك\nالموقع: https://nuqatak.com', email: '', websites: ['https://www.instagram.com/nuqatak/', 'https://www.facebook.com/Nuqatak'] }, 'رابطين بالكتير');
+  assert.deepEqual(r.data.profile.websites, ['https://www.instagram.com/nuqatak/', 'https://www.facebook.com/Nuqatak']);
+  const sales = await import('../src/sales.js');
+  const rules = sales.salesRules({ plans: { basic: { month: 12, year: 120 }, pro: { month: 25, year: 250 } }, features: [], apple: true, signupOpen: true, origin: 'https://nuqatak.com' });
+  assert.match(rules, /instagram\.com\/nuqatak وفيسبوك facebook\.com\/Nuqatak/);
+});
+
 // Gemini وهمي: قائمة الموديلات، والردود (نص أو استدعاء أداة)، وبحث Google
 function fakeGemini(reply) {
   const calls = [];
