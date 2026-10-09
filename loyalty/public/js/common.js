@@ -91,10 +91,10 @@ export function inkFor(color) {
 // theme: لون شريط الجوال فوق (بالصفحات اللي فوقها شريط بلون المحل)
 export function setBrand(color, { theme = true } = {}) {
   if (!HEX_RE.test(color || '')) return;
-  document.documentElement.style.setProperty('--shop-color', color);
-  document.documentElement.style.setProperty('--shop-ink', inkFor(color));
+  document.documentElement.style.setProperty('--brand', color);
+  document.documentElement.style.setProperty('--brand-ink', inkFor(color));
   const meta = $('meta[name="theme-color"]');
-  if (meta && theme) meta.content = '#102a36';
+  if (meta && theme) meta.content = color;
 }
 
 export function stampsHTML(cost, filled) {
@@ -105,7 +105,7 @@ export function stampsHTML(cost, filled) {
 // شكل البطاقة نفسه بصفحة الزبون وبمعاينة الإعدادات. tr = دالة الترجمة (صفحة الزبون)، وبدونها عربي
 // مفتاح كلمة الوحدة حسب العدد (بالعربي 3 لـ 10 جمع، وبالإنجليزي 1 مفرد): unitPoint / unitPoints / unitPoint1
 export const unitKey = (stamps, n) => (stamps ? 'unitStamp' : 'unitPoint') + (n >= 3 && n <= 10 ? 's' : n === 1 ? '1' : '');
-const CARD_AR = { name: 'الاسم', points: 'النقاط', stamps: 'الأختام', unitPoint: 'نقطة', unitStamp: 'ختم', unitPoints: 'نقاط', unitStamps: 'أختام', unitPoint1: 'نقطة', unitStamp1: 'ختم', ready1: '🎁 عندك مكافأة جاهزة: {reward}', readyN: '🎁 عندك {n} مكافآت جاهزة: {reward}', remaining: 'باقي {n} {unit} لـ {reward}', showQr: 'اعرض الـ QR للكاشير مع كل طلب.', bronze: 'برونزي', silver: 'فضي', gold: 'ذهبي' };
+const CARD_AR = { name: 'الاسم', points: 'النقاط', stamps: 'الأختام', unitPoint: 'نقطة', unitStamp: 'ختم', unitPoints: 'نقاط', unitStamps: 'أختام', unitPoint1: 'نقطة', unitStamp1: 'ختم', ready1: '🎁 عندك مكافأة جاهزة: {reward}', readyN: '🎁 عندك {n} مكافآت جاهزة: {reward}', remaining: 'باقي {n} {unit} لـ {reward}' };
 const fill = (s, v) => s.replace(/\{(\w+)\}/g, (_, k) => v[k] ?? '');
 export function cardHTML(shop, member, { qr = true, tr = (k, v = {}) => fill(CARD_AR[k], v) } = {}) {
   const p = member.progress;
@@ -122,14 +122,14 @@ export function cardHTML(shop, member, { qr = true, tr = (k, v = {}) => fill(CAR
         <span class="lc-chip" aria-hidden="true"></span>
       </div>
       <div class="lc-row">
-        <div><div class="lc-label">${tr('name')}</div><div class="lc-value">${member.name}</div>${member.tier ? html`<span class="lc-tier">${member.tier.icon} ${tr(member.tier.key)}</span>` : ''}</div>
+        <div><div class="lc-label">${tr('name')}</div><div class="lc-value">${member.name}</div></div>
         <div class="lc-end"><div class="lc-label">${tr(stamps ? 'stamps' : 'points')}</div><div class="lc-value num">${stamps ? `${filled}/${p.cost}` : fmt(member.balance)}</div></div>
       </div>
       <div style="margin-top:12px">
-        ${stamps ? stampsHTML(p.cost, filled) : html`<div class="bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${p.pct}" aria-label="${status}"><i style="width:${p.pct}%"></i></div>`}
+        ${stamps ? stampsHTML(p.cost, filled) : html`<div class="bar"><i style="width:${p.pct}%"></i></div>`}
         <div class="small" style="margin-top:6px;opacity:.9">${status}</div>
       </div>
-      ${qr ? html`<div class="lc-qr">${qrSVG(member.token, 'QR')}</div><div class="lc-cardno num">${member.cardNo}</div><p class="lc-qr-hint">${tr('showQr')}</p>` : ''}
+      ${qr ? html`<div class="lc-qr">${qrSVG(member.token, 'QR')}</div><div class="lc-cardno num">${member.cardNo}</div>` : ''}
     </div>`;
 }
 

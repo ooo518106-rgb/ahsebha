@@ -1,6 +1,6 @@
 // صفحة بطاقة الزبون: QR للكاشير + زر الحفظ بمحفظة Google، وبتتحدّث لحالها لما تنضاف نقاط
-import { $, api, cardHTML, cardManagement, html, isIOS, raw, render, saveCardManagement, setBrand, toast, unitKey } from './common.js?v=1.82';
-import { LANG, applyLang, fmtDate, ruleText, setLang, t } from './i18n.js?v=1.82';
+import { $, api, cardHTML, cardManagement, html, isIOS, raw, render, saveCardManagement, setBrand, toast, unitKey } from './common.js';
+import { LANG, applyLang, fmtDate, ruleText, setLang, t } from './i18n.js';
 import { confetti } from './confetti.js';
 
 applyLang();
@@ -228,17 +228,12 @@ function draw() {
   homeScreen(shop.logo, shop.name);
   const ios = isIOS();
   render(root, html`
-    <div class="customer-brand"><a href="/cards"><img src="/img/brand-mark.svg" alt="">نقاطك</a><p class="lang-switch"><button type="button" class="linkish" id="langBtn">${t('langSwitch')}</button></p></div>
+    <p class="lang-switch"><button type="button" class="linkish" id="langBtn">${t('langSwitch')}</button></p>
     ${params.has('new') ? html`<div class="alert ok" style="margin-bottom:12px">${t('welcomeNew', { name: member.name })} ${(ios && !apple) ? '' : t('saveToWallet')}</div>` : ''}
     ${params.get('gw') === 'off' ? html`<div class="alert warn" style="margin-bottom:12px">${t('gwOff')}</div>` : ''}
     ${params.get('apple') === 'off' ? html`<div class="alert warn" style="margin-bottom:12px">${t('appleOff')}</div>` : ''}
     ${cardHTML(shop, member, { tr: t })}
     <div class="stack" style="margin-top:16px">
-      <section class="reward-goal ${member.progress.available ? 'is-ready' : ''}">
-        <div class="reward-orbit" aria-hidden="true">${member.progress.available ? '✦' : '🎁'}</div>
-        <div><span class="overline">${t('rewardGoal')}</span><h2>${member.progress.available ? t('rewardReady') : shop.rewardName}</h2>
-          <p>${member.progress.available ? t(member.progress.available > 1 ? 'readyN' : 'ready1', { n: member.progress.available, reward: shop.rewardName }) : t('remaining', { n: member.progress.remaining, unit: t(unitKey(shop.programType === 'stamps', member.progress.remaining)), reward: shop.rewardName })}</p></div>
-      </section>
       ${google && !ios ? html`<a class="gw-button" href="/c/${token}/google">${LANG === 'en' ? html`<img src="/img/google-wallet-button-en.svg" alt="${t('gwAlt')}" width="283" height="50">` : html`<img src="/img/google-wallet-button-ar.svg" alt="${t('gwAlt')}" width="309" height="50">`}</a>` : ''}
       ${ios && apple ? html`<a class="gw-button" href="/c/${token}/apple"><img class="apple-badge" src="/img/add-to-apple-wallet.svg" alt="Add to Apple Wallet" width="160" height="50"></a>` : ''}
       ${menuUrl ? html`<a class="btn ghost block" href="${menuUrl}">${t('seeMenu')}</a>` : ''}

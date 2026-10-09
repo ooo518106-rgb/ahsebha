@@ -1,5 +1,5 @@
 // صفحة البيع: بطاقة تجريبية، طلب اشتراك (فورم أو واتساب)، ودخول المحلات
-import { $, $$, api, html, qrSVG, render } from './common.js?v=1.82';
+import { $, $$, api, html, qrSVG, render } from './common.js';
 import { PLAN_DEFAULTS, featuresHTML } from './plans.js';
 import { mountSales } from './sales.js';
 

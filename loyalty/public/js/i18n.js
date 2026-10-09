@@ -26,7 +26,6 @@ export function applyLang() {
 }
 
 const AR = {
-  bronze: 'برونزي', silver: 'فضي', gold: 'ذهبي', rewardGoal: 'كل زيارة بتقرّبك', rewardReady: 'هديتك جاهزة!', joinHeadline: 'هديتك الجاية أقرب', joinSub: 'اجمع نقاط، واستمتع بمكافآت من محلك المفضل.', joinNoApp: 'بدون تنزيل تطبيق', joinWallet: 'بمحفظة جوالك', joinFree: 'بطاقتك مجانية',
   // البطاقة
   name: 'الاسم', points: 'النقاط', stamps: 'الأختام', unitPoint: 'نقطة', unitStamp: 'ختم', unitPoints: 'نقاط', unitStamps: 'أختام', unitPoint1: 'نقطة', unitStamp1: 'ختم',
   ready1: '🎁 عندك مكافأة جاهزة: {reward}', readyN: '🎁 عندك {n} مكافآت جاهزة: {reward}', remaining: 'باقي {n} {unit} لـ {reward}',
@@ -79,7 +78,6 @@ const AR = {
 };
 
 const EN = {
-  bronze: 'Bronze', silver: 'Silver', gold: 'Gold', rewardGoal: 'Every visit brings you closer', rewardReady: 'Your reward is ready!', joinHeadline: 'Your next reward is closer', joinSub: 'Collect points and enjoy rewards from your favorite shop.', joinNoApp: 'No app to download', joinWallet: 'In your phone wallet', joinFree: 'Your card is free',
   name: 'Name', points: 'Points', stamps: 'Stamps', unitPoint: 'points', unitStamp: 'stamps', unitPoints: 'points', unitStamps: 'stamps', unitPoint1: 'point', unitStamp1: 'stamp',
   ready1: '🎁 Your reward is ready: {reward}', readyN: '🎁 {n} rewards ready: {reward}', remaining: '{n} {unit} to go for {reward}',
   cardTitle: '{shop} card', welcomeNew: 'Welcome {name}! This is your card 🎉', saveToWallet: 'Save it to your wallet for quick access.',

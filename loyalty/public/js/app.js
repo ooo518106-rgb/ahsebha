@@ -1,5 +1,5 @@
 // لوحة المحل: الكاشير (مسح وإضافة نقاط)، الزبائن، النشاط، رابط الانضمام، والإعدادات
-import { $, $$, ago, api, cardHTML, fmt, fmtDate, html, newKey, qrSVG, raw, render, setBrand, stampsHTML, toast } from './common.js?v=1.82';
+import { $, $$, ago, api, cardHTML, fmt, fmtDate, html, newKey, qrSVG, raw, render, setBrand, stampsHTML, toast } from './common.js';
 import { generateKeyAndCsr } from './csr.js';
 import { countWord, parseLatLng } from './rules.js';
 import { startCameraScan } from './scan.js';
@@ -76,11 +76,7 @@ function route() {
   if (!VIEWS[tab] || ((tab === 'settings' || tab === 'offers') && !isOwner()) || (tab === 'admin' && !state.me.user.isAdmin)) tab = 'cashier';
   state.sub = sub || null;
   state.nav = (state.nav || 0) + 1;
-  view.dataset.section = tab;
-  const titles = { cashier: ['كل زيارة بتقرّبهم للمكافأة', 'امسح البطاقة، سجّل الفاتورة، وخلّي الزبون يرجع مبسوط.'], members: ['زبائنك', 'كل زبائنك، زياراتهم ونقاطهم بمكان واحد.'], activity: ['نبض محلك', 'أرقام حقيقية بتساعدك تفهم زبائنك وتتابع شغل المحل.'], join: ['QR والمنيو', 'من أول مسحة لبطاقة ولاء ومنيو بهوية محلك.'], offers: ['إشي حلو لزبائنك', 'رتّب عروضك ورسائلك وخلّي كل زيارة إلها قيمة.'], settings: ['إعدادات محلك', 'بطاقتك، برنامج الولاء وفريقك، على ذوقك.'], admin: ['إدارة المنصة', 'المحلات والمبيعات والمالية والتشغيل بمكان واحد.'] };
-  $('#viewTitle').textContent = titles[tab][0];
-  $('#viewLead').textContent = titles[tab][1];
-  $$('#tabs a').forEach((a) => { const on = a.dataset.tab === tab; a.classList.toggle('on', on); if (on) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current'); });
+  $$('#tabs a').forEach((a) => a.classList.toggle('on', a.dataset.tab === tab));
   // انتقال ناعم بين التبويبات بالمتصفحات اللي بتدعمه
   const show = () => { VIEWS[tab](); };
   if (document.startViewTransition && state.tab && state.tab !== tab && !matchMedia('(prefers-reduced-motion: reduce)').matches) document.startViewTransition(show);
@@ -188,27 +184,24 @@ function onboardingCard() {
 function cashier() {
   render(view, html`
     ${onboardingCard()}
-    <div class="cashier-layout">
-      <section class="panel cashier-search">
-        <div class="cashier-search-top">
-        <h2>بطاقة الزبون</h2>
+    <div class="grid2" style="align-items:start">
+      <section class="panel stack">
+        <h2>امسح بطاقة الزبون</h2>
+        <div class="scanner hidden" id="scanner"><video id="video" muted playsinline></video></div>
+        <button class="btn big block" id="camBtn" type="button">📷 افتح الكاميرا</button>
         <form class="row" id="findForm">
-          <input class="grow" id="code" aria-label="رقم البطاقة أو الجوال" placeholder="ابحث برقم الجوال أو امسح QR" autocomplete="off" enterkeyhint="search">
+          <input class="grow" id="code" placeholder="رقم البطاقة أو الجوال" autocomplete="off" enterkeyhint="search">
           <button class="btn ghost" type="submit">بحث</button>
         </form>
-        <button class="btn" id="camBtn" type="button">📷 الكاميرا</button>
-        </div>
-        <div class="scanner hidden" id="scanner"><video id="video" muted playsinline></video></div>
-        <div class="cashier-search-acts">
         <p class="hint">قارئ QR موصول بالكمبيوتر؟ خلّي المؤشر بالخانة وامسح.</p>
-        <button class="btn soft sm" id="newBtn" type="button">+ زبون جديد</button>
-        <button class="btn ghost sm" id="refundBtn" type="button">↩️ استرجاع فاتورة</button>
+        <button class="btn soft block" id="newBtn" type="button">+ زبون جديد</button>
+        <button class="btn ghost block" id="refundBtn" type="button">↩️ استرجاع فاتورة</button>
         ${state.me.user.branchId ? html`<p class="small muted center">📍 فرعك: <b>${branchName(state.me.user.branchId)}</b></p>`
           : isOwner() && state.shop.locations.length > 1 ? html`<label class="small">📍 الفرع: <select id="branchSel" style="width:auto">
               <option value="">بدون</option>${state.shop.locations.map((l) => html`<option value="${l.id}" ${l.id === state.branch ? 'selected' : ''}>${l.name}</option>`)}</select></label>` : ''}
-        </div>
       </section>
-      <section id="memberPanel"></section></div>`);
+      <section id="memberPanel"></section>
+    </div>`);
   showMember(state.member);
   if (matchMedia('(pointer: fine)').matches) $('#code').focus();
 
@@ -383,45 +376,40 @@ function showMember(m) {
   const panel = $('#memberPanel');
   if (!panel) return;
   if (!m) {
-    render(panel, html`<div class="panel center empty-member"><div class="empty-card" aria-hidden="true"><img src="/img/brand-mark.svg" alt=""><b>نقاطك</b></div><h2>جاهزين للزيارة الجاية</h2><p class="muted">امسح QR الزبون أو ابحث برقم الجوال، وبتطلع بطاقته هون.</p></div>`);
+    render(panel, html`<div class="panel center muted" style="padding:40px 16px"><div style="font-size:2.5rem">🎫</div><p>امسح QR الزبون أو دوّر عليه برقم البطاقة أو الجوال</p></div>`);
     return;
   }
   const s = state.shop;
   const stamps = s.programType === 'stamps';
   render(panel, html`
-    <div class="cashier-member">
-      <div class="panel cashier-customer stack">
+    <div class="panel stack">
       <div class="member-head">
         <div class="avatar">${m.name.trim().charAt(0)}</div>
         <div class="grow" style="flex:1;min-width:0"><b>${m.name}</b><div class="small muted"><span class="num">${m.cardNo}</span> · <span class="num">${m.phone}</span></div></div>
         <button class="btn ghost sm" id="closeMember" type="button" aria-label="إلغاء">✕</button>
       </div>
       ${memberBadges(m)}
-      <div class="customer-summary stack">${memberSummary(m)}</div>
-      <div id="memberCoupons"></div>
-      <button class="btn ghost block" id="openMember" type="button">ملف الزبون ورابط بطاقته</button>
-      </div>
-      <div class="panel cashier-transaction stack">
+      ${memberSummary(m)}
       ${stamps
         ? html`<div class="row"><div class="stepper"><button class="btn ghost" type="button" id="minus">−</button><output id="count">1</output><button class="btn ghost" type="button" id="plus">+</button></div>
             <button class="btn big grow" id="earnBtn" type="button">أضف ختم</button></div>`
         : html`<form class="stack" id="earnForm">
             <label for="amount">مبلغ الفاتورة (${s.currency})</label>
-            <input class="num" id="amount" type="number" inputmode="decimal" min="0" step="0.001" placeholder="0.00" required>
-            <div class="amount-choices" aria-label="مبالغ سريعة">${[5, 10, 20, 50].map((n) => html`<button class="btn ghost sm" type="button" data-amount="${n}">${n}</button>`)}</div>
+            <div class="row"><input class="grow num" id="amount" type="number" inputmode="decimal" min="0" step="0.001" placeholder="0.00" style="font-size:1.3rem" required>
+            <button class="btn big" id="earnBtn" type="submit">أضف</button></div>
             ${invoiceRow()}
             <div class="small muted" id="preview">&nbsp;</div>
-            <button class="btn big block" id="earnBtn" type="submit">أضف النقاط</button>
           </form>`}
       ${stamps && s.perks.invoiceMode === 'required' ? invoiceRow() : ''}
       <button class="btn ${m.progress.available ? 'big' : 'ghost'} block" id="redeemBtn" type="button" ${m.progress.available ? '' : 'disabled'}>🎁 صرف المكافأة: ${s.rewardName}</button>
+      <div id="memberCoupons"></div>
       ${s.perks.creditOn || m.credit > 0 ? html`<div class="credit-box stack">
           <div class="row" style="justify-content:space-between"><b>💳 الرصيد</b><b class="num">${fmt(m.credit)} ${s.currency}</b></div>
           <div class="row"><input class="grow num" id="creditAmt" type="number" inputmode="decimal" min="0" step="0.001" placeholder="المبلغ">
             <button class="btn ghost" type="button" id="spendBtn" ${m.credit > 0 ? '' : 'disabled'}>ادفع من الرصيد</button>
             ${s.perks.creditOn ? html`<button class="btn soft" type="button" id="topupBtn">اشحن${s.perks.creditBonus ? ` +${s.perks.creditBonus}%` : ''}</button>` : ''}</div>
         </div>` : ''}
-      </div>
+      <button class="btn ghost block" id="openMember" type="button">ملف الزبون ورابط بطاقته</button>
     </div>`);
   loadMemberCoupons(m);
   bindCredit(m);
@@ -443,7 +431,6 @@ function showMember(m) {
       const pts = Math.floor(Math.floor(Number(amount.value) * s.pointsPerUnit + 1e-9) * mult + 1e-9);
       $('#preview').textContent = pts > 0 ? `+${fmt(pts)} ${countWord(pts, 'نقطة', 'نقاط')}${label}` : ' ';
     };
-    $$('[data-amount]', panel).forEach((b) => { b.onclick = () => { amount.value = b.dataset.amount; amount.oninput(); amount.focus(); }; });
     $('#earnForm').onsubmit = (e) => { e.preventDefault(); earn(m, { amount: amount.value, invoice: invoiceVal() }); };
     bindReceipt(() => amount.oninput());
     if (matchMedia('(pointer: fine)').matches) amount.focus();
@@ -806,8 +793,7 @@ function members() {
     <section class="panel stack">
       <div class="row"><input class="grow" id="q" type="search" placeholder="دوّر بالاسم أو الجوال أو رقم البطاقة"><button class="btn soft" id="addM" type="button">+ زبون</button>${isOwner() ? html`<button class="btn ghost" id="importM" type="button">📥 استيراد</button>` : ''}</div>
       <p class="small muted" id="count"></p>
-      <div class="member-columns" aria-hidden="true"><span>الزبون · آخر زيارة</span><span>النقاط</span><span>المستوى</span></div>
-      <ul class="list members-list" id="mlist"></ul>
+      <ul class="list" id="mlist"></ul>
       <button class="btn ghost block hidden" id="more" type="button">عرض المزيد</button>
     </section>`);
   let offset = 0;
@@ -816,11 +802,11 @@ function members() {
   const load = async (append = false) => {
     try {
       const r = await api(`/api/members?q=${encodeURIComponent(q)}&offset=${offset}`);
-      const items = r.members.map((m) => html`<li class="click" role="button" tabindex="0" aria-label="ملف ${m.name}" data-member="${m.id}">
+      const items = r.members.map((m) => html`<li class="click" data-member="${m.id}">
         <div class="avatar" style="width:38px;height:38px;font-size:1rem">${m.name.trim().charAt(0)}</div>
         <div class="main"><b>${m.name}</b><span class="small muted"><span class="num">${m.phone}</span> · ${ago(m.lastVisit || m.createdAt)}</span></div>
-        <span class="num member-points" style="font-weight:700">${state.shop.programType === 'stamps' ? `${m.progress.toward}/${m.progress.cost}` : fmt(m.balance)}${m.progress.available ? html`<span class="badge ok">🎁</span>` : ''}</span>
-        <span class="badge member-tier ${m.tier ? `tier-${m.tier.key}` : ''}">${m.tier ? m.tier.name : 'عادي'}</span></li>`);
+        <span class="num" style="font-weight:800">${state.shop.programType === 'stamps' ? `${m.progress.toward}/${m.progress.cost}` : fmt(m.balance)}</span>
+        ${m.progress.available ? html`<span class="badge ok">🎁</span>` : ''}</li>`);
       const list = $('#mlist');
       if (!list) return;
       if (append) list.insertAdjacentHTML('beforeend', items.join(''));
@@ -835,7 +821,6 @@ function members() {
   const im = $('#importM');
   if (im) im.onclick = () => (isBasic() ? upsell('استيراد الزبائن القدام') : importDialog(() => { offset = 0; load(); }));
   $('#mlist').onclick = (e) => { const li = e.target.closest('[data-member]'); if (li) memberDialog(li.dataset.member); };
-  $('#mlist').onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { const li = e.target.closest('[data-member]'); if (li) { e.preventDefault(); memberDialog(li.dataset.member); } } };
   $('#dlg').onclose = () => { offset = 0; load(); };
   load();
 }

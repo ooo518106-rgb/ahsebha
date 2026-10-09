@@ -1,6 +1,6 @@
 // صفحة الهدية: صاحبك أهداك رصيد بمحل → بتستلمه على بطاقتك، أو بتاخد بطاقة جديدة وبتستلمه
-import { $, api, html, render, setBrand, toast } from './common.js?v=1.82';
-import { LANG, applyLang, setLang, t } from './i18n.js?v=1.82';
+import { $, api, html, render, setBrand, toast } from './common.js';
+import { LANG, applyLang, setLang, t } from './i18n.js';
 
 applyLang();
 const code = location.pathname.split('/')[2];
@@ -24,7 +24,6 @@ async function main() {
     <p class="lang-switch"><button type="button" class="linkish" id="langBtn">${t('langSwitch')}</button></p>
     <div class="brand-hero"><img src="${shop.logo}" alt=""><h1>${shop.name}</h1></div>
     <div class="panel center stack">
-      <div class="gift-emblem" aria-hidden="true">🎁</div>
       <h2>${t('giftTitle', { name: g.from || '🙂', amount: g.amount, cur: shop.currency })}</h2>
       ${g.open ? html`<p class="muted">${t('giftAt', { shop: shop.name })}</p>
         ${card ? html`<button class="btn big block" type="button" id="claim">${t('giftClaim')}</button>`

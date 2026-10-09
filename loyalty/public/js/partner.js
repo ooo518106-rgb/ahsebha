@@ -1,5 +1,5 @@
 // صفحة المندوب (برابطه السري): رابطه للمشاركة، المحلات اللي سجّلت منه، وعمولته
-import { $, api, fmt, html, render } from './common.js?v=1.82';
+import { $, api, fmt, html, render } from './common.js';
 
 const token = location.pathname.split('/')[2];
 const root = $('#root');

@@ -1,6 +1,6 @@
 // المنيو الإلكتروني للمحل: بيفتح من QR الطاولة، وتحته دعوة لبطاقة الولاء
-import { $, api, html, render, setBrand } from './common.js?v=1.82';
-import { LANG, applyLang, setLang, t } from './i18n.js?v=1.82';
+import { $, api, html, render, setBrand } from './common.js';
+import { LANG, applyLang, setLang, t } from './i18n.js';
 
 applyLang();
 const slug = location.pathname.split('/')[2];
