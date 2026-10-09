@@ -55,6 +55,7 @@ function shopView(shop, origin) {
     currency: shop.currency,
     country: shop.country,
     welcomeText: shop.welcome_text,
+    welcomeDistance: shop.welcome_distance || 0,
     locations: branchesOf(shop),
     links: JSON.parse(shop.links || '{}'),
     logo: logoUrl(shop, origin),
@@ -3108,6 +3109,8 @@ async function updateShop(c) {
   next.reward_name = clean(b.rewardName ?? s.reward_name, 40);
   if (next.reward_name.length < 2) fail(400, 'اكتب شو المكافأة');
   next.welcome_text = clean(b.welcomeText ?? s.welcome_text, 100);
+  next.welcome_distance = b.welcomeDistance === undefined ? s.welcome_distance || 0 : Number(b.welcomeDistance);
+  if (!WELCOME_DISTANCES.includes(next.welcome_distance)) fail(400, 'اختار مسافة الترحيب من القائمة');
   const locs = b.locations ?? JSON.parse(s.locations || '[]');
   if (!Array.isArray(locs) || locs.length > 10) fail(400, 'لحد 10 فروع');
   // الأساسي فرع واحد (واللي نزل من المميز وعنده فروع، بيضلّوا بس ما بيزيد عليهم)
@@ -3125,9 +3128,9 @@ async function updateShop(c) {
   try {
     await c.db.run(
       `UPDATE shops SET name = ?, slug = ?, color = ?, country = ?, currency = ?, program_type = ?, points_per_unit = ?, reward_threshold = ?,
-       stamps_required = ?, reward_name = ?, welcome_text = ?, locations = ? WHERE id = ?`,
+       stamps_required = ?, reward_name = ?, welcome_text = ?, welcome_distance = ?, locations = ? WHERE id = ?`,
       next.name, next.slug, next.color, next.country, next.currency, next.program_type, next.points_per_unit, next.reward_threshold,
-      next.stamps_required, next.reward_name, next.welcome_text, next.locations, s.id,
+      next.stamps_required, next.reward_name, next.welcome_text, next.welcome_distance, next.locations, s.id,
     );
   } catch (e) {
     if (isUniqueError(e)) fail(409, 'هالرابط مستخدم لمحل تاني');
@@ -3143,6 +3146,9 @@ async function updateShop(c) {
   const google = await syncClass(c, shop);
   return json({ shop: shopView(shop, c.origin), google: { ...googleStatus(c, shop), lastSync: google } });
 }
+
+// 📍 مسافة الترحيب بالمتر (0 = اللي بيقرره الآيفون، تقريباً 100؛ -1 = مطفي)
+const WELCOME_DISTANCES = [0, 75, 50, 30, 20, -1];
 
 async function updateLogo(c) {
   const s = c.shop;

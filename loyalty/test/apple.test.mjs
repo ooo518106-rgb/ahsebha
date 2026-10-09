@@ -178,6 +178,24 @@ test('بطاقة Apple: رابط المنيو على ضهر البطاقة إذ�
   assert.deepEqual(full.secondaryFields.map((f) => f.key), ['menuHint', 'reward', 'status'], 'المنيو عالشمال، وشو باقي عاليمين');
 });
 
+test('📍 مسافة الترحيب: المحل بيصغّرها (maxDistance) أو بيطفّيها، والافتراضي اللي بيقرره الآيفون', async () => {
+  const { buildPassJson } = await import('../src/apple.js');
+  const shop = { id: 1, name: 'موكا', color: '#3b2418', program_type: 'stamps', stamps_required: 8, reward_name: 'قهوة', welcome_text: 'موكا ترحب بكم', locations: JSON.stringify([{ lat: 31.717, lng: 35.794 }]) };
+  const member = { token: 'abcdefghijkmnpqrstuv', card_no: '12345678', name: 'سارة', balance: 3 };
+  const opts = { passTypeId: 'pass.x', teamId: 'T', origin: 'https://x.test', authToken: 'a'.repeat(32) };
+  assert.deepEqual(buildPassJson(shop, member, opts).locations, [{ latitude: 31.717, longitude: 35.794, relevantText: 'موكا ترحب بكم' }]);
+  assert.equal(buildPassJson({ ...shop, welcome_distance: 30 }, member, opts).locations[0].maxDistance, 30);
+  assert.equal(buildPassJson({ ...shop, welcome_distance: -1 }, member, opts).locations, undefined, 'مطفي: ما بتطلع على شاشة القفل');
+
+  const { client } = await setup();
+  const owner = client();
+  await signup(owner);
+  assert.equal((await owner.get('/api/me')).data.shop.welcomeDistance, 0);
+  assert.equal((await owner.put('/api/shop', { welcomeDistance: 500 })).status, 400, 'Apple ما بتسمح بأبعد');
+  assert.equal((await owner.put('/api/shop', { welcomeDistance: '30' })).data.shop.welcomeDistance, 30);
+  assert.equal((await owner.put('/api/shop', { welcomeDistance: -1 })).data.shop.welcomeDistance, -1);
+});
+
 test('صورة الدواير على بطاقة الآيفون: كم دايرة وكم مليانة', async () => {
   const { stripState } = await import('../src/strip.js');
   const pts = { program_type: 'points', reward_threshold: 10, points_per_unit: 1 };

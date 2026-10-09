@@ -544,4 +544,6 @@ export const MIGRATIONS = [
   "CREATE UNIQUE INDEX IF NOT EXISTS txns_invoice ON txns(shop_id, invoice) WHERE invoice IS NOT NULL AND kind = 'earn'",
   // رقم الفاتورة عند الكاشير: optional (خانة اختيارية)، required (إجباري للموظفين)، off (مخفي)
   "ALTER TABLE shops ADD COLUMN invoice_mode TEXT NOT NULL DEFAULT 'optional'",
+  // 📍 مسافة الترحيب على شاشة القفل بالآيفون (متر): 0 = اللي بيقرره الآيفون (تقريباً 100)، -1 = مطفي
+  'ALTER TABLE shops ADD COLUMN welcome_distance INTEGER NOT NULL DEFAULT 0',
 ];

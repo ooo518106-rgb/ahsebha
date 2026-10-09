@@ -1409,6 +1409,9 @@ async function settings() {
       <p class="hint">الروابط المختصرة (maps.app.goo.gl) ما فيها إحداثيات: افتح الرابط، اضغط مطوّل على المحل، وانسخ الأرقام اللي بتطلع.</p>
       <div class="field"><label for="f-welcome">رسالة الترحيب</label><input id="f-welcome" name="welcomeText" value="${s.welcomeText}" maxlength="100" placeholder="${s.name} ترحب بكم ☕">
       <div class="hint">بتطلع على شاشة القفل بالآيفون لما يقرّب الزبون (مع بطاقة Apple Wallet). على الأندرويد، Google بتطلّع البطاقة باسم المحل وشعاره وهي اللي بتختار الكلام.</div></div>
+      <div class="field"><label for="f-wdist">📍 لما يقرّب الزبون قدّيش؟</label><select id="f-wdist" name="welcomeDistance">
+        ${[[0, 'تقريباً 100 متر (الأبعد)'], [75, '75 متر'], [50, '50 متر'], [30, '30 متر (على باب المحل)'], [20, '20 متر (جوّا المحل تقريباً)'], [-1, 'مطفي: ما تطلع على شاشة القفل']].map(([v, l]) => html`<option value="${v}" ${(s.welcomeDistance || 0) === v ? 'selected' : ''}>${l}</option>`)}</select>
+        <div class="hint">Apple ما بتسمح بأبعد من 100 متر تقريباً لبطاقات المحلات. المسافة الأصغر بتطلع بس لما يكون الزبون فعلاً عند المحل، وبتختفي أسرع لما يمشي. التغيير بيوصل لبطاقات الزبائن لحاله.</div></div>
       <p class="error" id="shopErr"></p>
       <button class="btn big block" type="submit">حفظ</button>
       </form>

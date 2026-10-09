@@ -253,7 +253,9 @@ export function buildPassJson(shop, member, { passTypeId, teamId, origin, authTo
     },
     barcodes: [{ format: 'PKBarcodeFormatQR', message: member.token, messageEncoding: 'iso-8859-1', altText: member.card_no }],
   };
-  if (locations.length) pass.locations = locations.map((l) => ({ latitude: l.lat, longitude: l.lng, relevantText: welcome }));
+  // مسافة الترحيب: Apple بتسمح نصغّرها بس (maxDistance)، مش نكبّرها عن اللي بتقرره (تقريباً 100 متر لبطاقات المحلات)
+  const dist = Number(shop.welcome_distance) || 0;
+  if (locations.length && dist >= 0) pass.locations = locations.map((l) => ({ latitude: l.lat, longitude: l.lng, relevantText: welcome, ...(dist > 0 ? { maxDistance: dist } : {}) }));
   return pass;
 }
 
