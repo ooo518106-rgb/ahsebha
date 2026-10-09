@@ -121,12 +121,22 @@ async function graph(cfg, path, { method = 'GET', token = cfg.token, body } = {}
   return data;
 }
 
-// الصفحة وحساب إنستغرام المربوط فيها، وتوكن الصفحة (للنشر). إذا في أكتر من صفحة: META_PAGE_ID أو اللي معها إنستغرام
+// الصفحة وحساب إنستغرام المربوط فيها، وتوكن الصفحة (للنشر). إذا في أكتر من صفحة: META_PAGE_ID أو اللي معها إنستغرام.
+// التوكن ممكن يكون توكن مستخدم/نظام (فيه صفحات) أو توكن الصفحة نفسها
 export async function accounts(cfg) {
   const fields = 'id,name,access_token,instagram_business_account{id,username}';
-  const list = cfg.pageId
-    ? [await graph(cfg, `${cfg.pageId}?fields=${fields}`)]
-    : ((await graph(cfg, `me/accounts?fields=${fields}&limit=50`)).data || []);
+  let list;
+  if (cfg.pageId) list = [await graph(cfg, `${cfg.pageId}?fields=${fields}`)];
+  else {
+    let err = null;
+    list = ((await graph(cfg, `me/accounts?fields=${fields}&limit=50`).catch((e) => { err = e; return {}; })).data) || [];
+    if (!list.length) {
+      // توكن صفحة: /me هي الصفحة (category موجودة بس للصفحات، فتوكن مستخدم بدون صفحات بيفشل هون)
+      const me = await graph(cfg, 'me?fields=id,name,category,instagram_business_account{id,username}').catch(() => null);
+      if (me && me.id && me.category) list = [{ ...me, access_token: cfg.token }];
+      else if (err) throw err;
+    }
+  }
   const page = list.find((p) => p.instagram_business_account) || list[0];
   if (!page) throw new Error('التوكن ما إله صلاحية على أي صفحة فيسبوك. ضيف الصفحة للتوكن (Assets) وأعد توليده');
   const ig = page.instagram_business_account || null;

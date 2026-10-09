@@ -125,6 +125,18 @@ test('وكيل النشر: صورة مرفوعة بدون نص، الوكيل ب
   assert.equal((await p.client().get(`/media/social/${b.id}.jpg`)).status, 404);
 });
 
+test('وكيل النشر: بيقبل توكن الصفحة نفسها كمان', async () => {
+  const fetch = async (url) => {
+    const u = String(url);
+    const json = (d, s = 200) => new Response(JSON.stringify(d), { status: s, headers: { 'content-type': 'application/json' } });
+    if (u.includes('/me/accounts')) return json({ error: { message: '(#100) Tried accessing nonexisting field (accounts) on node type (Page)', code: 100 } }, 400);
+    if (u.includes('/me?fields=')) return json({ id: 'P9', name: 'نقاطك', category: 'Software', instagram_business_account: { id: 'IG9', username: 'nuqatak' } });
+    return new Response(null, { status: 201 });
+  };
+  const p = await platform({ fetch, META_TOKEN: 'page-token' });
+  assert.deepEqual((await p.admin.get('/api/admin/social')).data.account, { ok: true, page: 'نقاطك', ig: 'nuqatak' });
+});
+
 test('وكيل النشر: بدون META_TOKEN بيبيّن إنه مش مربوط، والإعدادات بتتصلّح', async () => {
   const p = await platform({});
   const s = (await p.admin.get('/api/admin/social')).data;
