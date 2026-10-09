@@ -101,7 +101,7 @@ export function readCfg(v) {
 export const metaConfig = (env) => {
   const token = String(env.META_TOKEN || '').trim();
   if (!token) return null;
-  return { token, pageId: String(env.META_PAGE_ID || '').trim() || null, version: String(env.META_GRAPH_VERSION || env.WHATSAPP_GRAPH_VERSION || 'v21.0'), fetch: env.fetch || fetch };
+  return { token, pageId: String(env.META_PAGE_ID || '').trim() || null, version: [env.META_GRAPH_VERSION, env.WHATSAPP_API_VERSION].find((v) => /^v\d+\.\d+$/.test(String(v || ''))) || 'v26.0', fetch: env.fetch || fetch };
 };
 
 async function graph(cfg, path, { method = 'GET', token = cfg.token, body } = {}) {
