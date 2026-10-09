@@ -170,6 +170,18 @@ test('وكيل النشر: بتلصق المفتاح من Graph API Explorer ب�
   assert.equal(off.data.ready, false);
 });
 
+test('وكيل النشر: fetch العادي بينطلب لحاله (Cloudflare بترفض لو انطلب كدالة على كائن)', async () => {
+  const { metaConfig } = await import('../src/social.js');
+  const real = globalThis.fetch;
+  let self = 'unset';
+  globalThis.fetch = function strictFetch() { self = this; return Promise.resolve(new Response('{}')); };
+  try {
+    const cfg = metaConfig({ META_TOKEN: 't' });
+    await cfg.fetch('https://graph.facebook.com/x');
+    assert.ok(self === undefined || self === globalThis, 'ما انطلب على cfg');
+  } finally { globalThis.fetch = real; }
+});
+
 test('وكيل النشر: بدون META_TOKEN بيبيّن إنه مش مربوط، والإعدادات بتتصلّح', async () => {
   const p = await platform({});
   const s = (await p.admin.get('/api/admin/social')).data;

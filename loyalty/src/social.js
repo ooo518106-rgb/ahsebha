@@ -104,7 +104,7 @@ export const metaConfig = (env, stored = null) => {
   const token = fromEnv || (stored && stored.token) || '';
   if (!token) return null;
   const pageId = String(env.META_PAGE_ID || '').trim() || (!fromEnv && stored && stored.pageId) || null;
-  return { token, pageId, source: fromEnv ? 'env' : 'saved', version: [env.META_GRAPH_VERSION, env.WHATSAPP_API_VERSION].find((v) => /^v\d+\.\d+$/.test(String(v || ''))) || 'v26.0', fetch: env.fetch || fetch };
+  return { token, pageId, source: fromEnv ? 'env' : 'saved', version: [env.META_GRAPH_VERSION, env.WHATSAPP_API_VERSION].find((v) => /^v\d+\.\d+$/.test(String(v || ''))) || 'v26.0', fetch: env.fetch || ((...a) => fetch(...a)) }; // fetch لحاله (مش كدالة على كائن) وإلا Cloudflare بترفض
 };
 
 async function graph(cfg, path, { method = 'GET', token = cfg.token, body } = {}) {
