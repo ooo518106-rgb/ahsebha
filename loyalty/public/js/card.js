@@ -159,10 +159,12 @@ async function load(first = false, quiet = false) {
 function remember(slug) {
   try {
     const cards = JSON.parse(localStorage.getItem('loy_cards') || '{}');
-    if (cards[slug] === token) return;
+    const prev = cards[slug];
+    if (prev === token) return;
     cards[slug] = token;
     localStorage.setItem('loy_cards', JSON.stringify(cards));
-    localStorage.removeItem(`loy_manage_${token}`);
+    // مفتاح إدارة البطاقة القديمة (لنفس المحل) ما عاد إله لزوم؛ مفتاح هالبطاقة بيضل محفوظ
+    if (prev) localStorage.removeItem(`loy_manage_${prev}`);
   } catch { /* اختياري */ }
 }
 
