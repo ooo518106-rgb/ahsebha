@@ -1,6 +1,6 @@
 // صفحة انضمام الزبون: بيمسح QR الملصق عالكاونتر → اسمه وجواله → بطاقته
-import { $, api, html, raw, render, saveCardManagement, setBrand, unitKey } from './common.js';
-import { LANG, applyLang, ruleText, setLang, t } from './i18n.js';
+import { $, api, html, raw, render, saveCardManagement, setBrand, unitKey } from './common.js?v=1.82';
+import { LANG, applyLang, ruleText, setLang, t } from './i18n.js?v=1.82';
 
 applyLang();
 
@@ -45,6 +45,8 @@ async function main() {
     ${referrer ? html`<div class="alert ok center" style="margin-bottom:12px">${t('referred', { name: referrer, n: shop.refBonus, unit: unitOf(shop, shop.refBonus) })}</div>` : ''}
     ${giftCode ? html`<div class="alert ok center" style="margin-bottom:12px">${t('giftJoin')} 🎁</div>` : ''}
     ${existing ? html`<div class="panel center"><p>${t('haveCard')}</p><a class="btn block" style="margin-top:8px" href="/c/${existing}">${t('openMine')}</a></div>` : ''}
+    <div class="customer-intro"><span class="overline">${t('joinTitle')}</span><h2>${t('joinHeadline')}</h2><p class="muted">${t('joinSub')}</p>
+      <div class="join-benefits"><span>${t('joinNoApp')}</span><span>${t('joinWallet')}</span><span>${t('joinFree')}</span></div></div>
     <form class="panel stack" id="join" novalidate>
       <h2>${t('joinTitle')}</h2>
       <div class="field"><label for="name">${t('name')}</label><input id="name" name="name" autocomplete="name" required maxlength="60"></div>

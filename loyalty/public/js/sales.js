@@ -1,5 +1,5 @@
 // 🤖 مساعد المبيعات بصفحة نقاطك: زر عائم بيفتح محادثة مع وكيل المبيعات (بيشرح، بينصح بالباقة، وبيعطي عرض تجربة أطول)
-import { api } from './common.js';
+import { api } from './common.js?v=1.82';
 
 const KEY = 'nq_sales_chat';
 const load = () => {

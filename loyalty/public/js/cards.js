@@ -1,7 +1,7 @@
 // «كل بطاقاتي»: كل بطاقات الزبون من محلات مختلفة بصفحة وحدة (وأيقونة وحدة على الشاشة الرئيسية)
 // البطاقات محفوظة على الجهاز نفسه (loy_cards)، ما في حساب ولا كلمة سر
-import { $, api, cardHTML, html, render, toast } from './common.js';
-import { LANG, applyLang, setLang, t } from './i18n.js';
+import { $, api, cardHTML, html, render, toast } from './common.js?v=1.82';
+import { LANG, applyLang, setLang, t } from './i18n.js?v=1.82';
 
 applyLang();
 const root = $('#root');
