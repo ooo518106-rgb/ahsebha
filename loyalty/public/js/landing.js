@@ -1,5 +1,5 @@
 // صفحة البيع: بطاقة تجريبية، طلب اشتراك (فورم أو واتساب)، ودخول المحلات
-import { $, $$, api, cardHTML, render } from './common.js';
+import { $, $$, api, qrSVG, render } from './common.js';
 import { PLAN_DEFAULTS, featuresHTML } from './plans.js';
 import { mountSales } from './sales.js';
 
@@ -101,11 +101,8 @@ onScroll();
 // تاريخ اليوم على شاشة الجوال التجريبي
 $('.phone-date').textContent = new Intl.DateTimeFormat('ar-u-nu-latn', { weekday: 'long', day: 'numeric', month: 'long' }).format(new Date());
 
-// بطاقة تجريبية بالواجهة
-render($('#demoCard'), cardHTML(
-  { name: 'موكا كوفي هاوس', color: '#6b3e26', logo: '/img/demo-logo.svg', programType: 'stamps', rewardName: 'قهوة مجانية' },
-  { name: 'سارة', balance: 6, cardNo: '48213907', token: 'nuqatak-demo-card', progress: { cost: 9, available: 0, toward: 6, remaining: 3, pct: 67 } },
-));
+// رمز الـ QR على البطاقة التجريبية بالواجهة (نفس شكل بطاقة Apple Wallet)
+render($('#demoQr'), qrSVG('nuqatak-demo-card', 'QR'));
 
 const waLink = (text) => `https://wa.me/${whatsapp}?text=${encodeURIComponent(text)}`;
 function showWhatsApp(text = 'مرحبا، بدي أعرف أكتر عن نقاطك لمحلي') {
@@ -137,7 +134,7 @@ api('/api/site').then(async (s) => {
   if (s.plans) drawPlans(s.plans);
   whatsapp = s.whatsapp;
   signupOpen = s.signupOpen;
-  if (s.apple) $('#faqIphone').textContent = 'بتنحفظ البطاقة بـ Apple Wallet، وبتفتح بكبستين على الزر الجانبي، ولما يقرّب الزبون من محلك بتطلعله على شاشة القفل برسالة الترحيب تبعتك.';
+  if (s.apple === false) $('#faqIphone').textContent = 'لهلأ بياخدوا بطاقة على المتصفح فيها نفس الـ QR، وبتشتغل عادي مع الكاشير.';
   showWhatsApp();
   setupAuth();
   const pr = await prospectInfo;

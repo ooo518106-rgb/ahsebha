@@ -442,13 +442,22 @@ body.cust { background: radial-gradient(130% 55% at 50% -8%, color-mix(in srgb, 
 .phone-notif span { font-size: .74rem; color: #5d5049; display: block; }
 .phone-notif small { font-size: .66rem; color: #8a7d74; align-self: flex-start; }
 @keyframes notifIn { from { opacity: 0; transform: translateY(-24px) scale(.94); } }
-.phone .loyalty-card { padding: 14px; border-radius: 22px; }
-.phone .loyalty-card .lc-logo { width: 36px; height: 36px; border-radius: 11px; }
-.phone .loyalty-card .lc-chip { display: none; }
-.phone .loyalty-card .lc-row { margin-top: 10px; }
-.phone .loyalty-card .lc-qr { width: 54%; padding: 7px; margin-top: 10px; border-radius: 14px; }
-.phone .loyalty-card .stamps { gap: 4px; }
-.phone .loyalty-card .stamps i { width: 21px; height: 21px; font-size: .62rem; }
+/* بطاقة Apple Wallet بالجوال التجريبي: نفس ترتيب البطاقة الحقيقية */
+.pass-mock { background: #3b2416; color: #fffaf0; border-radius: 16px; overflow: hidden; box-shadow: 0 18px 36px -14px rgba(0, 0, 0, .7), inset 0 0 0 1px rgba(255, 255, 255, .06); animation: notifIn 1s 1.1s var(--spring) both; }
+.pm-head { direction: ltr; display: flex; align-items: center; gap: 8px; padding: 9px 11px; }
+.pm-head img { width: 30px; height: 30px; border-radius: 7px; background: #fff; }
+.pm-head > b { flex: 1; font-size: .8rem; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pm-pts { text-align: right; line-height: 1.1; }
+.pm-pts small { display: block; font-size: .58rem; opacity: .8; }
+.pm-pts b { font-size: 1.05rem; }
+.pm-strip { display: block; width: 100%; height: auto; }
+.pm-fields { display: flex; padding: 8px 10px 4px; font-size: .64rem; line-height: 1.35; }
+.pm-fields div { flex: 1; text-align: center; }
+.pm-fields div:first-child { text-align: right; }
+.pm-fields div:last-child { text-align: left; }
+.pm-fields small { display: block; font-size: .7rem; }
+.pm-qr { width: 46%; margin: 8px auto 12px; padding: 6px; background: #fff; border-radius: 10px; }
+.pm-qr svg { display: block; width: 100%; height: auto; }
 .float-chip {
   position: absolute; z-index: 4; display: inline-flex; align-items: center; gap: 6px; padding: 9px 14px; border-radius: 16px;
   background: rgba(255, 255, 255, .9); color: #1c130d; font-size: .82rem; font-weight: 600; white-space: nowrap;

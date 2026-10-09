@@ -6,7 +6,7 @@ export const PLAN_DEFAULTS = {
 
 // [الميزة، بالأساسي، بالمميز]: true ✅، false ❌، أو نص
 export const FEATURES = [
-  ['بطاقة نقاط أو أختام بمحفظة Google وApple', true, true],
+  ['بطاقة نقاط أو أختام بمحفظة الآيفون والأندرويد', true, true],
   ['انضمام بـ QR وملصقات للطباعة', true, true],
   ['إشعار للزبون مع كل نقاط ومكافأة', true, true],
   ['المنيو الإلكتروني بالصور والأحجام وPDF', true, true],
