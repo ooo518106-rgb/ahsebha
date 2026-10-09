@@ -1661,41 +1661,44 @@ async function loadBilling() {
   const tierName = (t) => b.plans[t === 'basic' ? 'basic' : 'pro'].name;
   const tierThe = (t) => (t === 'basic' ? 'الأساسية' : 'المميزة');
   const status = sub.state === 'trial' ? html`<p class="alert warn small">🎁 تجربة مجانية على الباقة المميزة بكل ميزاتها: باقي <b class="num">${sub.daysLeft}</b> يوم. اختار باقتك قبل ما تخلص.</p>`
+    : sub.free ? html`<p class="alert ok small">🎁 اشتراكك <b>مجاني دائماً</b> بالباقة ${tierThe(mine)}. ما في إشي تدفعه ولا تجدّده.</p>`
     : sub.state === 'active' ? html`<p class="alert ok small">✅ مشترك بالباقة <b>${tierThe(mine)}</b> لحد <b>${fmtDay(sub.until)}</b> (باقي <span class="num">${sub.daysLeft}</span> يوم).</p>`
       : html`<p class="alert bad small">⏳ الاشتراك خالص. الكاشير متوقف لحد ما تجدّد، وزبائنك ونقاطهم محفوظين.</p>`;
   let tier = mine || 'pro';
   let period = 'month';
   // الأسعار لمحلك (بخصم أول المحلات إذا إلك)
   const price = b.prices || b.plans;
+  const hasFree = ['basic', 'pro'].some((t) => price[t].month === 0 || price[t].year === 0);
   // إذا عنده الخصم الخاص وعرض أول المحلات، السيرفر بيحسب الأحسن إله، فبنبيّن نفس اللي انحسب
   const founder = b.promo && b.promo.monthsLeft > 0 ? b.promo : null;
   const deal = b.deal && !(founder && founder.pct >= b.deal.pct) ? b.deal : null;
   const promo = deal ? { ...deal, months: deal.monthsLeft } : founder;
   const promoNote = deal ? html`<p class="alert ok small">🎁 <b>إلك خصم خاص:</b> ${deal.pct}% ${deal.monthsLeft == null ? 'على كل دفعة' : `على الـ ${deal.monthsLeft === 1 ? 'شهر الجاي' : `${deal.monthsLeft} شهور الجاية`}`}، وبينحسب لحاله تحت.</p>` : promo ? html`<p class="alert ok small">🎁 <b>عرض أول ${promo.total} محل:</b> خصم ${promo.pct}% على ${promo.monthsLeft === promo.months ? `أول ${promo.months} شهور` : `الـ ${promo.monthsLeft} ${promo.monthsLeft === 1 ? 'شهر' : 'شهور'} الجاية`}، أو على سنة كاملة إذا دفعت سنوي. بينحسب لحاله تحت.${promo.founder ? '' : ` ضايل ${promo.left} مكان بس.`}</p>` : '';
   const wa = b.whatsapp ? `https://wa.me/${b.whatsapp}?text=${encodeURIComponent(`مرحبا، بدي أشترك بنقاطك لمحل ${state.shop.name}`)}` : null;
+  if (sub.free) { render(box, html`<h2>💳 الاشتراك</h2>${status}`); return; }
   render(box, html`<h2>💳 الاشتراك</h2>${status}${promoNote}
     <div class="tier-pick" id="tierPick" role="radiogroup" aria-label="الباقة">${['basic', 'pro'].map((t) => html`<div class="tier-card ${t === tier ? 'on' : ''}" role="radio" tabindex="0" aria-checked="${t === tier}" data-tier="${t}">
         <b>${t === 'pro' ? '💎' : '⭐'} ${b.plans[t].name} ${mine === t ? html`<span class="badge ok">باقتك</span>` : ''}</b>
-        <span class="price">${promo ? html`<s class="small muted num">${b.plans[t].month}</s> ` : ''}<span class="num">${price[t].month}</span> <span class="small muted">دينار بالشهر${!promo ? '' : promo.monthsLeft == null ? ' · دايماً' : ` · أول ${promo.monthsLeft === 1 ? 'شهر' : `${promo.monthsLeft} شهور`}`}</span></span>
+        <span class="price">${promo ? html`<s class="small muted num">${b.plans[t].month}</s> ` : ''}<span class="num">${price[t].month || 'ببلاش'}</span> <span class="small muted">${price[t].month ? 'دينار بالشهر' : ''}${!promo ? '' : promo.monthsLeft == null ? ' · دايماً' : ` · أول ${promo.monthsLeft === 1 ? 'شهر' : `${promo.monthsLeft} شهور`}`}</span></span>
         <span class="small muted">أو ${promo ? html`<s class="num">${b.plans[t].year}</s> ` : ''}<span class="num">${price[t].year}</span> بالسنة${promo ? (deal ? ' (بخصمك)' : ' (أول سنة)') : html` (وفّر <span class="num">${b.plans[t].month * 12 - b.plans[t].year}</span>)`}</span>
         <span class="small">${PLAN_BLURB[t]}</span>
       </div>`)}</div>
     <details><summary class="small">قارن الباقتين ميزة ميزة</summary>${raw(compareHTML())}</details>
-    ${b.cliq ? html`<form class="stack" id="payForm">
+    ${b.cliq || hasFree ? html`<form class="stack" id="payForm">
         <div class="seg" id="planSeg">
-          <button type="button" data-period="month" class="on">شهر · <span class="num" data-amt="month"></span> دينار</button>
-          <button type="button" data-period="year">سنة · <span class="num" data-amt="year"></span> دينار <span class="small">(وفّر شهرين)</span></button>
+          <button type="button" data-period="month" class="on">شهر · <span class="num" data-amt="month"></span></button>
+          <button type="button" data-period="year">سنة · <span class="num" data-amt="year"></span> <span class="small">(وفّر شهرين)</span></button>
         </div>
-        <ol class="small" style="padding-inline-start:20px;display:grid;gap:6px">
+        <div class="stack" data-paid>${b.cliq ? html`<ol class="small" style="padding-inline-start:20px;display:grid;gap:6px">
           <li>افتح تطبيق البنك ← <b>CliQ</b> ← حوّل <b class="num" id="payAmount"></b> دينار على الاسم المستعار:
             <div class="row" style="margin-top:4px"><code class="alias" dir="ltr">${b.cliq.alias}</code><button class="btn ghost sm" type="button" data-copy="${b.cliq.alias}">نسخ</button></div>
             ${b.cliq.name ? html`<span class="muted">باسم: ${b.cliq.name}${b.cliq.bank ? ` · ${b.cliq.bank}` : ''}</span>` : ''}</li>
           <li>بعد ما تحوّل، اكتب اسمك متل ما بيطلع بالحوالة واكبس «حوّلت».</li>
         </ol>
-        <input name="payer" placeholder="اسم اللي حوّل" maxlength="60" required>
-        <input name="ref" placeholder="رقم الحوالة (اختياري)" maxlength="60" dir="ltr">
+        <input name="payer" placeholder="اسم اللي حوّل" maxlength="60">
+        <input name="ref" placeholder="رقم الحوالة (اختياري)" maxlength="60" dir="ltr">` : html`<p class="hint">الدفع بـ CliQ مش مفعّل لسا، احكي معنا عالواتساب.</p>`}</div>
         <button class="btn" type="submit" id="paySubmit">حوّلت ✅</button>
-        <p class="hint">منتأكد من الحوالة ومنفعّل اشتراكك عادةً بنفس اليوم. إذا رقّيت من الأساسي للمميز، الباقة بتتحوّل أول ما نأكد.</p>
+        <p class="hint" data-paid>منتأكد من الحوالة ومنفعّل اشتراكك عادةً بنفس اليوم. إذا رقّيت من الأساسي للمميز، الباقة بتتحوّل أول ما نأكد.</p>
       </form>` : ''}
     ${wa ? html`<a class="btn ${b.cliq ? 'ghost' : ''} block wa" href="${wa}" target="_blank" rel="noopener">${b.cliq ? 'سؤال؟ احكي معنا عالواتساب' : 'اشترك عالواتساب'}</a>` : ''}
     ${b.payments.length ? html`<h3 style="margin-top:6px">حوالاتك</h3><ul class="list">${b.payments.map((p) => html`<li><div class="main"><b>${tierName(p.tier)} · ${p.plan === 'year' ? 'سنة' : 'شهر'} · <span class="num">${p.amount}</span> دينار${p.discount ? ' 🎁' : ''}</b>
@@ -1705,10 +1708,16 @@ async function loadBilling() {
   const draw = () => {
     $$('.tier-card', box).forEach((c) => { const on = c.dataset.tier === tier; c.classList.toggle('on', on); c.setAttribute('aria-checked', String(on)); });
     if (!form) return;
-    $$('[data-amt]', form).forEach((el) => { el.textContent = price[tier][el.dataset.amt]; });
+    $$('[data-amt]', form).forEach((el) => { const v = price[tier][el.dataset.amt]; el.textContent = v ? `${v} دينار` : 'ببلاش 🎁'; });
     $$('#planSeg button', form).forEach((x) => x.classList.toggle('on', x.dataset.period === period));
-    $('#payAmount', form).textContent = price[tier][period];
-    $('#paySubmit', form).textContent = `حوّلت ${price[tier][period]} دينار للباقة ${tierThe(tier)} ✅`;
+    // 🎁 خصم 100%: ما في تحويل، الاشتراك بيتفعّل بكبسة
+    const free = price[tier][period] === 0;
+    $$('[data-paid]', form).forEach((el) => el.classList.toggle('hidden', free));
+    const payer = form.elements.payer;
+    if (payer) payer.required = !free;
+    if ($('#payAmount', form)) $('#payAmount', form).textContent = price[tier][period];
+    $('#paySubmit', form).disabled = !free && !b.cliq;
+    $('#paySubmit', form).textContent = free ? `فعّل ${period === 'year' ? 'سنة' : 'شهر'} ببلاش على الباقة ${tierThe(tier)} 🎁` : `حوّلت ${price[tier][period]} دينار للباقة ${tierThe(tier)} ✅`;
   };
   $$('.tier-card', box).forEach((c) => {
     const pick = () => { tier = c.dataset.tier; draw(); };
@@ -1723,7 +1732,7 @@ async function loadBilling() {
     const f = new FormData(form);
     try {
       await api('/api/billing/claim', { method: 'POST', body: { plan: period, tier, payer: f.get('payer'), ref: f.get('ref') } });
-      toast('وصلنا تبليغك ✅ منتأكد ومنفعّل', 'ok');
+      toast(price[tier][period] === 0 ? 'انفعّل اشتراكك 🎉' : 'وصلنا تبليغك ✅ منتأكد ومنفعّل', 'ok');
       loadBilling();
     } catch (err) { toast(err.message, 'bad'); }
   };
@@ -1879,7 +1888,7 @@ const LEAD_STATUS = { new: ['جديد', 'warn'], contacted: ['تم التواص�
 const SUB_BADGE = {
   owner: () => ['محل المنصة', 'ok'],
   trial: (s) => [`تجربة: باقي ${s.daysLeft} يوم`, 'warn'],
-  active: (s) => [`مشترك لحد ${fmtDay(s.until)}`, 'ok'],
+  active: (s) => [s.free ? '🎁 مجاني دائماً' : `مشترك لحد ${fmtDay(s.until)}`, 'ok'],
   expired: (s) => [s.paid ? 'خلص الاشتراك' : 'خلصت التجربة', 'bad'],
 };
 const fmtDay = (ms) => new Intl.DateTimeFormat('ar-u-nu-latn', { dateStyle: 'medium' }).format(new Date(ms));
@@ -1999,7 +2008,7 @@ async function admin() {
         const [label, cls] = SUB_BADGE[s.subscription.state](s.subscription);
         const tierBadge = s.subscription.state === 'active' ? html` <span class="badge">${s.plan.tier === 'basic' ? '⭐ أساسي' : '💎 مميز'}</span>` : '';
         const askedReset = s.resetAskedAt && Date.now() - s.resetAskedAt < 7 * 864e5 ? html` <span class="badge warn">🔑 نسي كلمة السر</span>` : '';
-        const dealBadge = s.deal ? html` <span class="badge ok">🎁 خصم ${s.deal.pct}% · ${s.deal.months ? `${s.deal.months} ${s.deal.months === 1 ? 'شهر' : 'شهور'}` : 'دايماً'}</span>` : s.founder ? html` <span class="badge">🎁 من أول المحلات</span>` : '';
+        const dealBadge = s.deal && !s.subscription.free ? html` <span class="badge ok">🎁 خصم ${s.deal.pct}% · ${s.deal.months ? `${s.deal.months} ${s.deal.months === 1 ? 'شهر' : 'شهور'}` : 'دايماً'}</span>` : s.founder ? html` <span class="badge">🎁 من أول المحلات</span>` : '';
         return html`<li style="align-items:flex-start"><div class="main"><b>${s.name} <span class="badge ${cls}">${label}</span>${tierBadge}${dealBadge}${askedReset}</b>
           <span class="small muted"><span dir="ltr">${s.ownerEmail || ''}</span> · ${fmt(s.members)} زبون · من ${fmtDate(s.createdAt)} · آخر حركة ${ago(s.lastActivity)}${s.reseller ? ` · 🤝 ${s.reseller}` : ''}</span>
           <div class="row" style="margin-top:6px">
@@ -2067,7 +2076,7 @@ async function admin() {
       render(box, html`<form class="alert ok small stack" style="margin-top:8px" data-deal-form>
         <b>🎁 خصم خاص لـ ${shop.name}</b>
         <div class="row">
-          <label class="grow">الخصم %<input name="pct" type="number" min="1" max="90" value="${d.pct}" class="num" required></label>
+          <label class="grow">الخصم % <span class="hint">(100 = ببلاش)</span><input name="pct" type="number" min="1" max="100" value="${d.pct}" class="num" required></label>
           <label class="grow">لمدة<select name="months">${[[1, 'شهر'], [3, '3 شهور'], [6, '6 شهور'], [12, 'سنة'], [0, 'دايماً']].map(([v, t]) => html`<option value="${v}" ${v === d.months ? 'selected' : ''}>${t}</option>`)}</select></label>
         </div>
         <span class="muted">بيبلّش من الدفعة الجاية. إذا دفع سنوي بينخصم من السنة بقدر الشهور. وإذا عنده عرض أول المحلات، بياخد الأحسن إله.</span>

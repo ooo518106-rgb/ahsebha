@@ -1109,10 +1109,13 @@ async function platformShopId(db) {
   return row ? row.shop_id : null;
 }
 
+// 🎁 مجاني دائماً (خصم 100% دايماً من مدير المنصة): الاشتراك ممدود لهالتاريخ
+const FOREVER = Date.UTC(2100, 0, 1);
 function subscriptionOf(shop, platformShop) {
   if (shop.id === platformShop || shop.demo) return { state: 'owner', until: null, daysLeft: null };
   const until = shop.active_until ?? shop.created_at + TRIAL_DAYS * DAY;
   const left = until - Date.now();
+  if (until >= FOREVER) return { state: 'active', until, daysLeft: Math.ceil(left / DAY), free: true };
   if (left <= 0) return { state: 'expired', until, daysLeft: 0, paid: !!shop.paid };
   return { state: shop.paid ? 'active' : 'trial', until, daysLeft: Math.ceil(left / DAY) };
 }
@@ -1556,7 +1559,7 @@ async function adminStats(c) {
     if (sub.state === 'active') {
       const tier = readTier(s.plan);
       counts[tier]++;
-      mrr += s.lastPlan === 'year' ? planPrice(tier, 'year') / 12 : planPrice(tier, 'month');
+      if (!sub.free) mrr += s.lastPlan === 'year' ? planPrice(tier, 'year') / 12 : planPrice(tier, 'month');
     }
     if ((sub.state === 'trial' || sub.state === 'active') && sub.daysLeft <= 7) ending.push({ id: s.id, name: s.name, state: sub.state, daysLeft: sub.daysLeft, ownerEmail: s.ownerEmail });
   }
@@ -1596,10 +1599,16 @@ async function adminShopDeal(c, id) {
   await requireAdmin(c);
   const shop = await shopRow(c.db, Number(id));
   if (!shop || shop.demo) fail(404, 'ما لقينا المحل');
-  const pct = int(c.body.pct ?? 0, 0, 90, 'الخصم لازم يكون بين 1 و 90%');
+  const pct = int(c.body.pct ?? 0, 0, 100, 'الخصم لازم يكون بين 1 و 100%');
   const months = int(c.body.months ?? 0, 0, 36, 'المدة لازم تكون بين شهر و 36 شهر، أو دايماً');
   await c.db.run('UPDATE shops SET deal_pct = ?, deal_months = ?, deal_at = ? WHERE id = ?', pct, pct ? months : 0, pct ? Date.now() : null, shop.id);
-  if (pct) await notifyOwners(c, shop.id, { title: '🎁 إلك خصم خاص على اشتراكك', body: `خصم ${pct}% ${months ? `على ${months === 1 ? 'شهر' : `${months} شهور`}` : 'على كل دفعة'}، وبينحسب لحاله وقت الدفع.`, url: `${c.origin}/app#settings/billing` });
+  // 100% دايماً: مشترك على المميز على طول، بدون تفعيل ولا تذكير. ولما ينشال: بيضل شغّال 14 يوم لحد ما يدفع
+  if (pct === 100 && !months) await c.db.run("UPDATE shops SET active_until = ?, paid = 1, plan = 'pro' WHERE id = ?", FOREVER, shop.id);
+  else if ((shop.active_until || 0) >= FOREVER) await c.db.run('UPDATE shops SET active_until = ? WHERE id = ?', Date.now() + TRIAL_DAYS * DAY, shop.id);
+  const span = months ? `${months === 1 ? 'شهر' : `${months} شهور`}` : '';
+  if (pct === 100 && !months) await notifyOwners(c, shop.id, { title: '🎁 اشتراكك صار مجاني دائماً', body: 'محلك مشترك بالباقة المميزة ببلاش وعلى طول، بدون ما تدفع ولا تجدّد إشي.', url: `${c.origin}/app#settings/billing` });
+  else if (pct === 100) await notifyOwners(c, shop.id, { title: '🎁 إلك اشتراك مجاني', body: `${span} ببلاش. فعّله من الإعدادات ← الاشتراك بكبسة.`, url: `${c.origin}/app#settings/billing` });
+  else if (pct) await notifyOwners(c, shop.id, { title: '🎁 إلك خصم خاص على اشتراكك', body: `خصم ${pct}% ${months ? `على ${span}` : 'على كل دفعة'}، وبينحسب لحاله وقت الدفع.`, url: `${c.origin}/app#settings/billing` });
   return adminShops(c);
 }
 
@@ -1702,11 +1711,21 @@ async function billing(c) {
 
 async function billingClaim(c) {
   noDemo(c, 'الدفع');
-  if (!(await cliqInfo(c.db))) fail(400, 'الدفع بـ CliQ مش مفعّل لسا، تواصل معنا عالواتساب');
   const plan = c.body.plan;
   if (plan !== 'month' && plan !== 'year') fail(400, 'اختار شهر أو سنة');
   const tier = readTier(c.body.tier);
   const q = quote(tier, plan, await discountsFor(c, c.shop));
+  // 🎁 خصم 100% من مدير المنصة: ما في إشي يتحوّل، فالاشتراك بيتفعّل فوراً
+  if (q.amount === 0) {
+    await rateLimit(c, `claim:${c.shop.id}`, 5, 24 * 60 * MIN, 'فعّلت كتير اليوم، جرّب بكرا');
+    const now = Date.now();
+    await c.db.run("INSERT INTO payments (shop_id, plan, tier, amount, discount, promo_months, deal_months, payer, status, created_at, decided_at) VALUES (?, ?, ?, 0, ?, ?, ?, 'خصم 100%', 'approved', ?, ?)", c.shop.id, plan, tier, q.discount, q.promoMonths, q.dealMonths, now, now);
+    await extendPlan(c.db, c.shop, plan, tier);
+    await notifyAdmin(c, { title: '🎁 محل فعّل اشتراكه بخصم 100%', body: `${c.shop.name} · ${PLANS[tier].name} · ${plan === 'year' ? 'سنة' : 'شهر'}`, url: `${c.origin}/app#admin` });
+    c.shop = await shopRow(c.db, c.shop.id);
+    return billing(c);
+  }
+  if (!(await cliqInfo(c.db))) fail(400, 'الدفع بـ CliQ مش مفعّل لسا، تواصل معنا عالواتساب');
   const amount = q.amount;
   const payer = clean(c.body.payer, 60);
   if (payer.length < 2) fail(400, 'اكتب اسم اللي حوّل (متل ما بيطلع بالحوالة)');

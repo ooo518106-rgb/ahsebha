@@ -568,7 +568,7 @@ test('عرض أول المحلات: خصم 30% على أول 3 شهور لأول
   // 🎁 خصم خاص من مدير المنصة: 50% على شهر واحد (السنوي بينخصم منه بقدر الشهر)، وبعدها السعر العادي
   const late = (await admin.get('/api/admin/shops')).data.shops.find((x) => x.name === 'Late');
   assert.equal((await owner3.post(`/api/admin/shops/${late.id}/deal`, { pct: 50, months: 1 })).status, 403, 'بس مدير المنصة');
-  assert.equal((await admin.post(`/api/admin/shops/${late.id}/deal`, { pct: 95, months: 1 })).status, 400);
+  assert.equal((await admin.post(`/api/admin/shops/${late.id}/deal`, { pct: 101, months: 1 })).status, 400);
   let shopsList = (await admin.post(`/api/admin/shops/${late.id}/deal`, { pct: 50, months: 1 })).data.shops;
   assert.deepEqual(shopsList.find((x) => x.id === late.id).deal, { pct: 50, months: 1 });
   b = (await owner3.get('/api/billing')).data;
@@ -585,6 +585,30 @@ test('عرض أول المحلات: خصم 30% على أول 3 شهور لأول
   assert.deepEqual(b.deal, { pct: 20, monthsLeft: null });
   await admin.post(`/api/admin/shops/${late.id}/deal`, { pct: 0 });
   assert.equal((await owner3.get('/api/billing')).data.deal, null);
+  // 100% على شهر: ما في تحويل، بيتفعّل فوراً بكبسة (حتى بدون CliQ)
+  await admin.post(`/api/admin/shops/${late.id}/deal`, { pct: 100, months: 1 });
+  b = (await owner3.get('/api/billing')).data;
+  assert.deepEqual(b.prices.pro, { month: 0, year: 225 }, 'السنوي: شهر ببلاش من السنة');
+  const untilBefore = (await db.get('SELECT active_until, created_at FROM shops WHERE id = ?', late.id));
+  b = (await owner3.post('/api/billing/claim', { plan: 'month', tier: 'pro' })).data;
+  assert.equal(b.payments[0].status, 'approved');
+  assert.equal(b.payments[0].amount, 0);
+  assert.equal(b.subscription.state, 'active');
+  assert.ok((await db.get('SELECT active_until FROM shops WHERE id = ?', late.id)).active_until > (untilBefore.active_until ?? untilBefore.created_at));
+  assert.equal(b.deal, null, 'خلص الشهر المجاني');
+  // 100% دايماً: مشترك على طول بدون تفعيل، وما بينحسب بالدخل
+  await admin.post(`/api/admin/shops/${late.id}/deal`, { pct: 100, months: 0 });
+  b = (await owner3.get('/api/billing')).data;
+  assert.equal(b.subscription.state, 'active');
+  assert.equal(b.subscription.free, true);
+  assert.equal(b.plan.tier, 'pro');
+  const listed = (await admin.get('/api/admin/shops')).data.shops.find((x) => x.id === late.id);
+  assert.equal(listed.subscription.free, true);
+  // لما ينشال: بيضل شغّال 14 يوم لحد ما يدفع
+  await admin.post(`/api/admin/shops/${late.id}/deal`, { pct: 0 });
+  b = (await owner3.get('/api/billing')).data;
+  assert.equal(b.subscription.free, undefined);
+  assert.equal(b.subscription.daysLeft, 14);
   // محل من أول المحلات بخصم خاص أقل: بياخد الأحسن إله
   await admin.post(`/api/admin/shops/${shop2.id}/deal`, { pct: 10, months: 12 });
   b = (await owner2.get('/api/billing')).data;
