@@ -594,6 +594,8 @@ form.locked button[type=submit] { display: none; }
 .site-foot a { color: var(--muted); text-decoration: none; font-size: .9rem; }
 .site-foot a:hover { color: var(--text); }
 .site-foot .brand { color: var(--text); }
+.site-foot .social { display: inline-flex; align-items: center; gap: 6px; }
+.site-foot .social svg { width: 18px; height: 18px; }
 .wa-fab { position: fixed; z-index: 45; bottom: calc(18px + env(safe-area-inset-bottom)); inset-inline-end: 18px; width: 56px; height: 56px; border-radius: 50%; display: grid; place-items: center; background: #25d366; color: #fff; box-shadow: 0 14px 30px -10px rgba(37, 211, 102, .8); transition: transform .25s var(--spring); }
 .wa-fab:hover { transform: scale(1.08); }
 .wa-fab svg { width: 28px; height: 28px; }
