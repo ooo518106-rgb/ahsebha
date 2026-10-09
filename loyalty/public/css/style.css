@@ -835,7 +835,7 @@ html[dir=ltr] .ai-msg.bot { align-self: flex-start; }
   @page { size: A4; margin: 0; }
   body { background: #fff !important; }
   .no-print { display: none !important; }
-  .sheet { box-shadow: none; margin: 0; page-break-after: always; }
+  .sheet { box-shadow: none; margin: 0; page-break-after: always; zoom: 1 !important; }
 }
 
 /* «كل بطاقاتي» */

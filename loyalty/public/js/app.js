@@ -826,7 +826,7 @@ function joinView() {
         <ol style="padding-inline-start:20px" class="small">
           <li>اطبع الملصق وحطه عالكاونتر أو عالطاولات.</li>
           <li>الزبون بيمسحه بكاميرا جواله، وبيكتب اسمه ورقمه.</li>
-          <li>بتطلعله بطاقته مع زر «أضف إلى محفظة Google».</li>
+          <li>بتطلعله بطاقته مع زر «أضف إلى Apple Wallet» عالآيفون أو «محفظة Google» عالأندرويد.</li>
           <li>مع كل طلب: بيعرض البطاقة، وإنت بتمسحها من تبويب الكاشير.</li>
         </ol>
         <div class="field"><label>رابط الانضمام</label><input readonly dir="ltr" value="${s.joinUrl}"></div>

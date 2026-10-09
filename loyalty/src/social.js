@@ -112,6 +112,7 @@ async function graph(cfg, path, { method = 'GET', token = cfg.token, body } = {}
     method,
     headers: { authorization: `Bearer ${token}`, ...(body ? { 'content-type': 'application/json' } : {}) },
     ...(body ? { body: JSON.stringify(body) } : {}),
+    signal: AbortSignal.timeout(15000),
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok || data.error) {

@@ -35,6 +35,7 @@ const SECURITY_HEADERS = {
   'x-content-type-options': 'nosniff',
   'referrer-policy': 'same-origin',
   'permissions-policy': 'camera=(self), geolocation=(self)',
+  'strict-transport-security': 'max-age=31536000',
 };
 
 // ─── عرض البيانات ───

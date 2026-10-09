@@ -45,6 +45,10 @@ async function main() {
     <div class="sheet sheet-${layout}">${Array.from({ length: per }, () => tile(shop, url, layout))}</div>`);
   document.title = `${shop.name} — اطبع`;
   $('#doPrint').onclick = () => window.print();
+  // على الجوال: الورقة A4 (794px) بتصغر لتبيّن كاملة بدون تمرير لليمين، والطباعة بتضل A4
+  const fit = () => { const k = Math.min(1, (window.innerWidth - 16) / 794); document.querySelectorAll('.sheet').forEach((s) => { s.style.zoom = k < 1 ? String(k) : ''; }); };
+  fit();
+  window.addEventListener('resize', fit);
 }
 
 main();

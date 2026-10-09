@@ -1,12 +1,19 @@
-// لغة صفحات الزبون (البطاقة والانضمام): حسب لغة الجوال، والزبون بيقدر يغيّرها بكبسة
+// لغة صفحات الزبون (البطاقة والانضمام): عربي إذا الجوال فيه عربي، أو موجود بالمنطقة العربية
+// (كتير جوالات بالأردن لغتها إنجليزي)، وإلا إنجليزي. والزبون بيقدر يغيّرها بكبسة
 const KEY = 'nq_lang';
+const ARAB_TZ = /^(Asia\/(Amman|Riyadh|Dubai|Kuwait|Qatar|Bahrain|Muscat|Baghdad|Beirut|Damascus|Gaza|Hebron|Aden)|Africa\/(Cairo|Tripoli|Tunis|Algiers|Casablanca|Khartoum))$/;
+function deviceArabic() {
+  const langs = [...(navigator.languages || []), navigator.language || ''];
+  if (langs.some((l) => /^ar\b/i.test(l))) return true;
+  try { return ARAB_TZ.test(Intl.DateTimeFormat().resolvedOptions().timeZone || ''); } catch { return true; }
+}
 
 export const LANG = (() => {
   try {
     const saved = localStorage.getItem(KEY);
     if (saved === 'ar' || saved === 'en') return saved;
   } catch { /* اختياري */ }
-  return /^ar\b/i.test(navigator.language || 'ar') ? 'ar' : 'en';
+  return deviceArabic() ? 'ar' : 'en';
 })();
 
 export function setLang(lang) {
