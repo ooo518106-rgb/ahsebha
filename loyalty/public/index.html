@@ -211,6 +211,12 @@
             <div class="alert ok small hidden" id="forgotMsg" role="status"></div>
             <p class="center small muted signup-only hidden">بالتسجيل إنت موافق على <a href="/terms">الشروط والأحكام</a> و<a href="/privacy">سياسة الخصوصية</a>.</p>
           </form>
+          <form id="mfaForm" class="stack hidden" style="margin-top:14px" novalidate>
+            <p class="small muted">🔐 حسابك عليه تحقق بخطوتين. اكتب الرمز اللي بتطلّعه «كلمات السر» أو تطبيق التحقق على جوالك (6 أرقام)، أو رمز احتياطي.</p>
+            <div class="field"><label for="mfaCode">الرمز</label><input id="mfaCode" name="code" inputmode="numeric" autocomplete="one-time-code" dir="ltr" maxlength="20" required></div>
+            <p class="error" id="mfaError" role="alert"></p>
+            <button class="btn big block" type="submit">تأكيد ودخول</button>
+          </form>
           <form id="resetForm" class="stack hidden" style="margin-top:14px" novalidate>
             <p class="small muted">كلمة سر جديدة لحساب <b dir="ltr" id="resetEmail"></b></p>
             <div class="field"><label for="newPw">كلمة السر الجديدة</label><input id="newPw" name="password" type="password" autocomplete="new-password" dir="ltr" minlength="8" required><div class="hint">8 حروف على الأقل.</div></div>

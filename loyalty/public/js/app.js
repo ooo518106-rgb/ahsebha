@@ -1328,6 +1328,7 @@ async function settings() {
       <input name="next" type="password" placeholder="كلمة السر الجديدة (8 حروف أو أكتر)" autocomplete="new-password" dir="ltr" minlength="8" required>
       <button class="btn ghost" type="submit">غيّر كلمة السر</button>
       </form>
+      ${state.shop.demo ? '' : html`<section class="panel stack" id="mfaPanel"><h2>🔐 التحقق بخطوتين</h2><p class="muted small">…</p></section>`}
     </div>
     <div class="grid2 group" data-group="alerts">
       <section class="panel stack" id="alertsPanel"></section>
@@ -1465,6 +1466,7 @@ async function settings() {
     e.preventDefault();
     try { await api('/api/me/password', { method: 'PUT', body: Object.fromEntries(new FormData(e.target)) }); e.target.reset(); toast('تغيّرت كلمة السر ✅', 'ok'); } catch (err) { toast(err.message, 'bad'); }
   };
+  if ($('#mfaPanel')) api('/api/me/2fa').then(drawMfa).catch(() => {});
   const bootstrap = $('#bootstrapForm');
   if (bootstrap) bootstrap.onsubmit = async (e) => {
     e.preventDefault();
@@ -1925,7 +1927,16 @@ function backupPanel(b) {
       ${b.mail ? html`<button class="btn ghost" type="button" id="backupSend">📧 ابعت نسخة على إيميلي هلأ</button>` : ''}
     </div>
     ${b.downloadedAt ? html`<p class="hint">آخر تنزيل ${ago(b.downloadedAt)}</p>` : ''}
+    ${resetMailLine(b)}
     <p class="hint">🔒 الملف فيه كل بيانات المحلات والزبائن: خليه عندك (مثلاً iCloud Drive) وما تبعته لحدا.</p>`;
+}
+
+// 🔑 «نسيت كلمة السر» بيبعت الرابط لحاله على إيميل صاحب المحل: بيزبط مع Cloudflare Email Sending (خطة Workers المدفوعة)
+function resetMailLine(b) {
+  const r = b.resetMail;
+  if (!b.mail) return '';
+  if (r && r.ok) return html`<p class="alert ok small">🔑 «نسيت كلمة السر» بيبعت الرابط لحاله على إيميل صاحب المحل ✅ (آخر مرة ${ago(r.at)})</p>`;
+  return html`<p class="alert warn small">🔑 «نسيت كلمة السر»: ${r ? html`آخر محاولة إيميل ما زبطت (${ago(r.at)}): <span dir="ltr">${r.error}</span><br>` : ''}لهلأ الطلب بيوصلك إشعار وإنت بتبعتله الرابط. ليصير الرابط يوصل لحاله على إيميله: Cloudflare ← Workers Paid ($5 بالشهر) وبعدين Email Sending لـ nuqatak.com.</p>`;
 }
 
 function bindBackup() {
@@ -1979,6 +1990,7 @@ async function admin() {
       <span class="badge ok num">الإصدار ${stats.version}</span>
       <span class="grow small"><b>شو الجديد:</b> ${stats.changelog[0].items[0]}</span>
       <span aria-hidden="true">←</span></a>
+    ${state.me.user.mfa ? '' : html`<a class="alert warn small" style="display:block" href="#settings/team">🔐 حساب مدير المنصة محمي بكلمة السر بس. شغّل «التحقق بخطوتين» من ⚙️ الإعدادات ← 👥 الموظفين والحماية (دقيقة وحدة) ←</a>`}
     ${stats.ai && stats.ai.ready
       ? html`<p class="alert ok small">🎯 وكيل المبيعات (${stats.ai.provider === 'gemini' ? 'Gemini' : 'Claude'}${stats.ai.model ? html` <span dir="ltr">${stats.ai.model}</span>` : ''}) هالشهر: <b class="num">${fmt(stats.ai.requests)}</b> رسالة (الموقع ${fmt(stats.ai.byKind.web || 0)} · واتساب ${fmt(stats.ai.byKind.wa || 0)} · بحث ${fmt(stats.ai.byKind.search || 0)})${stats.ai.costUsd != null ? html` · تكلفة تقريبية <b class="num">$${stats.ai.costUsd}</b>` : ''}</p>`
       : html`<p class="alert warn small">🎯 وكيل المبيعات مش شغّال. بيشتغل لما تضيف مفتاح GEMINI_API_KEY أو ANTHROPIC_API_KEY بإعدادات Cloudflare.</p>`}
@@ -2040,6 +2052,7 @@ async function admin() {
             ${s.subscription.state === 'expired' ? '' : html`<button class="btn sm ghost" type="button" data-plan="stop" data-shop="${s.id}">إيقاف</button>`}`}
             <button class="btn sm ghost" type="button" data-shop-menu="${s.id}">📋 المنيو</button>
             ${s.subscription.state === 'owner' ? '' : html`<button class="btn sm ghost" type="button" data-reset-link="${s.id}">🔑 رابط كلمة سر</button>
+            ${s.mfa ? html`<button class="btn sm ghost" type="button" data-mfa-off="${s.id}">🔐 طفّي التحقق بخطوتين</button>` : ''}
             <button class="btn sm ghost" type="button" data-deal="${s.id}">🎁 خصم</button>`}
           </div><div class="reset-box"></div></div></li>`;
       })}</ul>` : html`<p class="muted">ما في محلات لسا.</p>`}
@@ -2068,6 +2081,14 @@ async function admin() {
   $$('[data-shop-menu]').forEach((b) => {
     const shop = shops.find((x) => String(x.id) === b.dataset.shopMenu);
     b.onclick = () => adminShopMenu(shop);
+  });
+  // 🔐 صاحب محل ضيّع جواله والرموز الاحتياطية: بعد ما تتأكد إنه هو (اتصال)، بتطفّيله التحقق
+  $$('[data-mfa-off]').forEach((b) => {
+    b.onclick = async () => {
+      const shop = shops.find((x) => String(x.id) === b.dataset.mfaOff);
+      if (!confirm(`تطفّي التحقق بخطوتين لـ ${shop.name}؟ اعمل هيك بس بعد ما تتأكد إنه صاحب المحل نفسه (اتصل فيه). رح يطلع من كل الأجهزة ويدخل بكلمة السر بس.`)) return;
+      try { await api(`/api/admin/shops/${shop.id}/mfa-off`, { method: 'POST' }); toast('انطفى ✅ خلّيه يرجع يشغّله من الإعدادات', 'ok'); b.remove(); } catch (e) { toast(e.message, 'bad'); }
+    };
   });
   // 🔑 رابط كلمة سر جديدة لصاحب المحل (لمرة وحدة، 24 ساعة): بتنسخه أو بتبعته واتساب
   $$('[data-reset-link]').forEach((b) => {
@@ -2137,6 +2158,86 @@ async function admin() {
 }
 
 
+
+// ─── 🔐 التحقق بخطوتين: بعد كلمة السر، رمز من تطبيق على الجوال (كلمات السر بالآيفون، Google Authenticator…) ───
+function drawMfa(st) {
+  const box = $('#mfaPanel');
+  if (!box) return;
+  if (st.on) {
+    render(box, html`<h2>🔐 التحقق بخطوتين</h2>
+      <p class="alert ok small">✅ شغّال. أي دخول جديد بيطلب رمز من التطبيق بعد كلمة السر. باقيلك <b class="num">${st.recoveryLeft}</b> رمز احتياطي${st.recoveryLeft <= 2 ? ' ⚠️ اعمل رموز جديدة' : ''}.</p>
+      <form class="stack" id="mfaOff">
+        <input name="password" type="password" placeholder="كلمة السر" autocomplete="current-password" dir="ltr" required>
+        <input name="code" inputmode="numeric" autocomplete="one-time-code" placeholder="الرمز من التطبيق" dir="ltr" maxlength="20" required>
+        <div class="row"><button class="btn ghost" type="submit" name="act" value="codes">🧾 رموز احتياطية جديدة</button><button class="btn ghost" type="submit" name="act" value="off">طفّيه</button></div>
+      </form>`);
+    const f = $('#mfaOff');
+    f.onsubmit = async (e) => {
+      e.preventDefault();
+      const act = e.submitter && e.submitter.value;
+      const body = { password: f.password.value, code: f.code.value };
+      try {
+        if (act === 'off') {
+          if (!confirm('أكيد بدك تطفّي التحقق بخطوتين؟ حسابك بيصير محمي بكلمة السر بس.')) return;
+          await api('/api/me/2fa/disable', { method: 'POST', body });
+          state.me.user.mfa = false;
+          toast('انطفى', 'ok');
+          drawMfa({ on: false });
+        } else {
+          const r = await api('/api/me/2fa/codes', { method: 'POST', body });
+          showRecovery(r.codes, () => api('/api/me/2fa').then(drawMfa));
+        }
+      } catch (err) { toast(err.message, 'bad'); }
+    };
+    return;
+  }
+  render(box, html`<h2>🔐 التحقق بخطوتين</h2>
+    <p class="small">حماية زيادة لحسابك: حتى لو حدا عرف كلمة السر، ما بيقدر يدخل بدون رمز بيطلع على جوالك. ${state.me.user.isAdmin ? html`<b>مهم كتير لحساب مدير المنصة.</b>` : ''}</p>
+    <form class="stack" id="mfaStart">
+      <input name="password" type="password" placeholder="كلمة السر الحالية" autocomplete="current-password" dir="ltr" required>
+      <button class="btn" type="submit">شغّل التحقق بخطوتين</button>
+    </form>`);
+  $('#mfaStart').onsubmit = async (e) => {
+    e.preventDefault();
+    try { mfaScan(await api('/api/me/2fa/setup', { method: 'POST', body: { password: e.target.password.value } })); } catch (err) { toast(err.message, 'bad'); }
+  };
+}
+
+function mfaScan(r) {
+  const box = $('#mfaPanel');
+  render(box, html`<h2>🔐 التحقق بخطوتين</h2>
+    <ol class="small stack" style="padding-inline-start:18px;margin:0">
+      <li>على الآيفون: اكبس الزر تحت، بيفتح «كلمات السر» (أو الإعدادات) وبيضيف رمز «Nuqatak». على أندرويد نزّل Google Authenticator.</li>
+      <li>من جهاز تاني؟ امسح الكود بكاميرا الجوال أو بالتطبيق.</li>
+      <li>اكتب الرمز اللي طلع (6 أرقام) تحت.</li>
+    </ol>
+    <a class="btn soft block" href="${r.uri}">📲 ضيف الرمز على هالجوال</a>
+    <div class="center"><div style="width:180px;margin:0 auto">${qrSVG(r.uri, 'كود التحقق بخطوتين')}</div></div>
+    <p class="hint">أو اكتب هالمفتاح بالتطبيق بإيدك:<b dir="ltr" class="num" style="display:block;text-align:center;user-select:all;margin-top:4px">${r.secret.replace(/(.{4})/g, '$1 ').trim()}</b></p>
+    <form class="row" id="mfaConfirm">
+      <input class="grow" name="code" inputmode="numeric" autocomplete="one-time-code" placeholder="123456" dir="ltr" maxlength="6" required>
+      <button class="btn" type="submit">تأكيد</button>
+    </form>`);
+  $('#mfaConfirm').onsubmit = async (e) => {
+    e.preventDefault();
+    try {
+      const out = await api('/api/me/2fa/enable', { method: 'POST', body: { code: e.target.code.value } });
+      state.me.user.mfa = true;
+      showRecovery(out.codes, () => api('/api/me/2fa').then(drawMfa));
+    } catch (err) { toast(err.message, 'bad'); }
+  };
+}
+
+// الرموز الاحتياطية بتطلع مرة وحدة: إذا ضاع الجوال، كل رمز بيدخّلك مرة
+function showRecovery(codes, done) {
+  const text = `رموز نقاطك الاحتياطية (كل رمز لمرة وحدة):\n${codes.join('\n')}`;
+  render($('#mfaPanel'), html`<h2>🔐 احفظ الرموز الاحتياطية</h2>
+    <p class="alert warn small">هدول بيطلعوا هلأ بس. إذا ضاع جوالك، كل رمز بيدخّلك مرة وحدة. صوّرهم أو احفظهم بمكان آمن (مش بنفس الجوال لحاله).</p>
+    <div class="num" dir="ltr" style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:1.05rem;text-align:center">${codes.map((c) => html`<code>${c}</code>`)}</div>
+    <div class="row"><button class="btn ghost" type="button" id="mfaCopy">📋 انسخهم</button><button class="btn" type="button" id="mfaDone">حفظتهم ✅</button></div>`);
+  $('#mfaCopy').onclick = async () => { try { await navigator.clipboard.writeText(text); toast('انسخوا ✅', 'ok'); } catch { prompt('انسخ الرموز:', text); } };
+  $('#mfaDone').onclick = done;
+}
 
 // ─── 🎯 وكيل المبيعات (لوحة مدير المنصة) ───
 const PROSPECT_ST = {

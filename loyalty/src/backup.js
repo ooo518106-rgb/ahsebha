@@ -3,7 +3,9 @@
 // الاسترجاع: node scripts/restore-backup.mjs ملف.json.gz > restore.sql ← npx wrangler d1 execute loyalty --remote --file=restore.sql
 
 // صور الشريط بترجع تنرسم، والطلبات المؤقتة والجلسات وروابط كلمة السر ما إلها داعي (والجلسات حساسة)
-const SKIP = new Set(['strip_cache', 'rate_hits', 'sessions', 'password_resets']);
+const SKIP = new Set(['strip_cache', 'rate_hits', 'sessions', 'password_resets', 'mfa_tickets']);
+// سر التحقق بخطوتين ما بيطلع بالنسخة (بتوصل عالإيميل): بعد الاسترجاع بترجع تشغّله
+const SCRUB = { users: new Set(['totp_secret', 'totp_pending']) };
 const PAGE = 500;
 
 export async function exportDb(db, now = Date.now()) {
@@ -16,7 +18,7 @@ export async function exportDb(db, now = Date.now()) {
     for (let offset = 0; ; offset += PAGE) {
       const batch = await db.all(`SELECT * FROM "${t}" ORDER BY rowid LIMIT ${PAGE} OFFSET ${offset}`);
       if (batch.length && !columns) columns = Object.keys(batch[0]);
-      for (const r of batch) rows.push(columns.map((k) => r[k]));
+      for (const r of batch) rows.push(columns.map((k) => (SCRUB[t] && SCRUB[t].has(k) ? null : r[k])));
       if (batch.length < PAGE) break;
     }
     out.tables[t] = { columns: columns || [], rows };
@@ -41,6 +43,23 @@ function b64(bytes) {
 }
 const wrap = (s) => s.replace(/.{1,76}/g, '$&\r\n');
 const utf8b64 = (text) => b64(new TextEncoder().encode(text));
+
+// إيميل نص عادي (رابط كلمة السر)
+export function mimeText({ from, fromName, to, subject, text, now = Date.now() }) {
+  const id = `nq${now.toString(36)}${Math.random().toString(36).slice(2)}`;
+  return [
+    `From: =?UTF-8?B?${utf8b64(fromName)}?= <${from}>`,
+    `To: <${to}>`,
+    `Subject: =?UTF-8?B?${utf8b64(subject)}?=`,
+    `Date: ${new Date(now).toUTCString()}`,
+    `Message-ID: <${id}@${from.split('@')[1]}>`,
+    'MIME-Version: 1.0',
+    'Content-Type: text/plain; charset=UTF-8',
+    'Content-Transfer-Encoding: base64',
+    '',
+    wrap(utf8b64(text)),
+  ].join('\r\n');
+}
 
 // إيميل MIME فيه الملف مرفق (Cloudflare send_email بياخد الإيميل خام)
 export function mimeMessage({ from, fromName, to, subject, text, filename, data, now = Date.now() }) {

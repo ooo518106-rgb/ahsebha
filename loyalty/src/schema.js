@@ -54,6 +54,19 @@ export const SCHEMA = [
     used_at INTEGER,
     created_at INTEGER NOT NULL
   )`,
+  // 🔐 التحقق بخطوتين: بعد كلمة السر الصحيحة بنعطي تذكرة لـ 10 دقايق (5 محاولات للرمز)، والرموز الاحتياطية لمرة وحدة
+  `CREATE TABLE IF NOT EXISTS mfa_tickets (
+    token_hash TEXT PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    tries INTEGER NOT NULL DEFAULT 0,
+    expires_at INTEGER NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS mfa_recovery (
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    code_hash TEXT NOT NULL,
+    used_at INTEGER,
+    PRIMARY KEY (user_id, code_hash)
+  )`,
   `CREATE TABLE IF NOT EXISTS members (
     id INTEGER PRIMARY KEY,
     shop_id INTEGER NOT NULL REFERENCES shops(id),
@@ -495,4 +508,8 @@ export const MIGRATIONS = [
   'ALTER TABLE prospects ADD COLUMN loyalty TEXT',
   'ALTER TABLE prospects ADD COLUMN loyalty_src TEXT',
   'ALTER TABLE prospects ADD COLUMN loyalty_conf TEXT',
+  // 🔐 التحقق بخطوتين: السر (فاضي = مطفي)، السر اللي لسا ما تأكد، وآخر خطوة انستعملت (ما ينعاد نفس الرمز)
+  'ALTER TABLE users ADD COLUMN totp_secret TEXT',
+  'ALTER TABLE users ADD COLUMN totp_pending TEXT',
+  'ALTER TABLE users ADD COLUMN totp_step INTEGER NOT NULL DEFAULT 0',
 ];

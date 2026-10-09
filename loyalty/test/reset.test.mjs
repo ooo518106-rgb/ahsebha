@@ -16,6 +16,7 @@ test('نسيت كلمة السر: الطلب بيوصل للمنصة، والم�
   assert.equal(r.status, 200);
   assert.equal(r.data.whatsapp, '962798900911', 'رقمك، مش رقم الوكيل');
   assert.equal((await anon.post('/api/auth/forgot', { email: 'x' })).status, 400);
+  await anon.flush(); // الإشعار بعد الرد
   let row = (await admin.get('/api/admin/shops')).data.shops.find((s) => s.id === shop.id);
   assert.ok(row.resetAskedAt, 'بيبيّن بقائمة المحلات');
 

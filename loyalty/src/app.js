@@ -16,6 +16,7 @@ import { defaultLogoPng } from './png.js';
 import { heroKey, parseKey, peekStrip, renderKey, stripFiles, stripKey, STRIP_VERSION } from './strip.js';
 import * as backup from './backup.js';
 import * as social from './social.js';
+import * as totp from './totp.js';
 import { extendUntilSql } from './subscription.js';
 import { earnFor, progress, rewardCost, rewardRule, stampsLine, unitLabel, unitWord } from '../public/js/rules.js';
 import { FEATURES } from '../public/js/plans.js';
@@ -1695,6 +1696,7 @@ async function adminBackupStatus(c) {
     to: (await getSetting(c.db, 'backup_email')) || (await adminEmail(c.db)),
     last: await jsonSetting(c.db, 'backup_last'),
     downloadedAt: Number(await getSetting(c.db, 'backup_download')) || null,
+    resetMail: await jsonSetting(c.db, 'reset_mail_last'),
   });
 }
 
@@ -1746,6 +1748,7 @@ async function adminShops(c) {
        (SELECT MAX(t.created_at) FROM txns t WHERE t.shop_id = s.id) AS lastActivity,
        (SELECT u.email FROM users u WHERE u.shop_id = s.id AND u.role = 'owner' ORDER BY u.id LIMIT 1) AS ownerEmail,
        (SELECT MAX(u.reset_asked_at) FROM users u WHERE u.shop_id = s.id AND u.role = 'owner') AS resetAskedAt,
+       (SELECT COUNT(*) FROM users u WHERE u.shop_id = s.id AND u.role = 'owner' AND u.totp_secret IS NOT NULL) AS mfa,
        (SELECT r.name FROM resellers r WHERE r.id = s.reseller_id) AS reseller
      FROM shops s WHERE s.demo = 0 ORDER BY s.created_at DESC LIMIT 500`,
   );
@@ -2095,8 +2098,152 @@ const localDayKey = (country, now = Date.now()) => { const t = perks.localTime(c
 async function loginRoute(c) {
   await rateLimit(c, `login:${c.ip}`, 30, 10 * MIN, 'محاولات دخول كتير، جرّب بعد كم دقيقة');
   const user = await auth.login(c.db, c.body.email, c.body.password);
+  if (user.totp_secret) return json({ mfa: true, ticket: await mfaTicket(c, user.id) });
   const token = await auth.createSession(c.db, user.id);
   return json({ ok: true }, 200, { 'set-cookie': auth.sessionCookie(token, c.req) });
+}
+
+// ─── 🔐 التحقق بخطوتين ───
+const MFA_TRIES = 5;
+const MFA_GONE = 'خلص وقت الدخول، اكتب كلمة السر من جديد';
+async function mfaTicket(c, userId) {
+  const ticket = randomToken(32);
+  const now = Date.now();
+  await c.db.run('DELETE FROM mfa_tickets WHERE expires_at < ? OR user_id = ?', now, userId);
+  await c.db.run('INSERT INTO mfa_tickets (token_hash, user_id, expires_at) VALUES (?, ?, ?)', await sha256Hex(ticket), userId, now + 10 * MIN);
+  return ticket;
+}
+
+// الرمز من التطبيق (6 أرقام، ما بينعاد) أو رمز احتياطي (لمرة وحدة). بيرجّع 'totp' أو 'recovery' أو null
+async function secondFactor(c, user, code) {
+  const now = Date.now();
+  const step = await totp.verify(user.totp_secret, code, now, user.totp_step || 0);
+  if (step) {
+    const r = await c.db.run('UPDATE users SET totp_step = ? WHERE id = ? AND totp_step < ?', step, user.id, step);
+    return r.changes ? 'totp' : null;
+  }
+  const norm = totp.normRecovery(code);
+  if (norm.length !== 10) return null;
+  const r = await c.db.run('UPDATE mfa_recovery SET used_at = ? WHERE user_id = ? AND code_hash = ? AND used_at IS NULL', now, user.id, await totp.recoveryHash(norm));
+  return r.changes ? 'recovery' : null;
+}
+const recoveryLeft = async (db, userId) => (await db.get('SELECT COUNT(*) AS n FROM mfa_recovery WHERE user_id = ? AND used_at IS NULL', userId)).n;
+
+async function mfaLogin(c) {
+  await rateLimit(c, `mfa:${c.ip}`, 30, 10 * MIN, 'محاولات كتير، جرّب بعد كم دقيقة');
+  const t = String(c.body.ticket || '');
+  if (!/^[a-z2-9]{32}$/.test(t)) fail(401, MFA_GONE);
+  const hash = await sha256Hex(t);
+  const tries = await c.db.run('UPDATE mfa_tickets SET tries = tries + 1 WHERE token_hash = ? AND expires_at > ? AND tries < ?', hash, Date.now(), MFA_TRIES);
+  if (!tries.changes) {
+    await c.db.run('DELETE FROM mfa_tickets WHERE token_hash = ?', hash);
+    fail(401, MFA_GONE);
+  }
+  const row = await c.db.get('SELECT user_id FROM mfa_tickets WHERE token_hash = ?', hash);
+  const user = row && await c.db.get('SELECT id, totp_secret, totp_step FROM users WHERE id = ?', row.user_id);
+  if (!user || !user.totp_secret) fail(401, MFA_GONE);
+  const how = await secondFactor(c, user, c.body.code);
+  if (!how) fail(400, 'الرمز غلط. اكتب الرمز اللي هلأ بالتطبيق (6 أرقام)، أو رمز احتياطي');
+  // التذكرة لمرة وحدة: إذا طلبين وصلوا سوا، واحد بس بيدخل
+  const used = await c.db.run('DELETE FROM mfa_tickets WHERE token_hash = ?', hash);
+  if (!used.changes) fail(401, MFA_GONE);
+  if (how === 'recovery') {
+    const u = await c.db.get('SELECT u.email, s.name FROM users u JOIN shops s ON s.id = u.shop_id WHERE u.id = ?', user.id);
+    if (await isAdminUser(c, user.id)) await notifyAdmin(c, { title: '🔐 حدا دخل حساب المدير برمز احتياطي', body: `${u.email} · إذا مش إنت، غيّر كلمة السر هلأ`, url: `${c.origin}/app#settings/team` });
+  }
+  const token = await auth.createSession(c.db, user.id);
+  return json({ ok: true, recovery: how === 'recovery' ? await recoveryLeft(c.db, user.id) : undefined }, 200, { 'set-cookie': auth.sessionCookie(token, c.req) });
+}
+
+async function isAdminUser(c, userId) {
+  const pinned = await getSetting(c.db, 'platform_admin_user_id');
+  const u = pinned && await c.db.get('SELECT identity FROM users WHERE id = ?', userId);
+  return !!(u && u.identity === pinned);
+}
+
+async function mfaStatus(c) {
+  const u = await c.db.get('SELECT totp_secret FROM users WHERE id = ?', c.user.id);
+  return json({ on: !!u.totp_secret, recoveryLeft: u.totp_secret ? await recoveryLeft(c.db, c.user.id) : 0 });
+}
+
+async function checkPassword(c) {
+  await rateLimit(c, `pwcheck:${c.user.id}`, 10, 10 * MIN, 'محاولات كتير، جرّب بعد كم دقيقة');
+  const row = await c.db.get('SELECT pw_hash FROM users WHERE id = ?', c.user.id);
+  if (!(await auth.verifyPassword(String(c.body.password || ''), row.pw_hash))) fail(400, 'كلمة السر غلط');
+}
+
+// 1) كلمة السر ← سر جديد (لسا مش مفعّل) ورابط otpauth للتطبيق
+async function mfaSetup(c) {
+  noDemo(c, 'التحقق بخطوتين');
+  await checkPassword(c);
+  const u = await c.db.get('SELECT totp_secret FROM users WHERE id = ?', c.user.id);
+  if (u.totp_secret) fail(409, 'التحقق بخطوتين شغّال من قبل');
+  const secret = totp.newSecret();
+  await c.db.run('UPDATE users SET totp_pending = ? WHERE id = ?', secret, c.user.id);
+  return json({ secret, uri: totp.otpauthUri(secret, c.user.email) });
+}
+
+// 2) أول رمز من التطبيق ← بيتفعّل، ورموز احتياطية بتطلع مرة وحدة، وكل الأجهزة التانية بتطلع
+async function mfaEnable(c) {
+  noDemo(c, 'التحقق بخطوتين');
+  await rateLimit(c, `mfaset:${c.user.id}`, 10, 10 * MIN, 'محاولات كتير، جرّب بعد كم دقيقة');
+  const u = await c.db.get('SELECT totp_secret, totp_pending FROM users WHERE id = ?', c.user.id);
+  if (u.totp_secret) fail(409, 'التحقق بخطوتين شغّال من قبل');
+  if (!u.totp_pending) fail(400, 'ابدأ من جديد: اكبس «شغّل»');
+  const step = await totp.verify(u.totp_pending, c.body.code);
+  if (!step) fail(400, 'الرمز غلط. تأكد إنك ضفت الحساب بالتطبيق، واكتب الرمز اللي هلأ (وساعة الجوال أوتوماتيك)');
+  const { codes, hashes } = await totp.newRecoveryCodes();
+  const on = await c.db.run('UPDATE users SET totp_secret = totp_pending, totp_pending = NULL, totp_step = ? WHERE id = ? AND totp_secret IS NULL AND totp_pending = ?', step, c.user.id, u.totp_pending);
+  if (!on.changes) fail(409, 'صار تغيير بنفس اللحظة، حدّث الصفحة');
+  await c.db.batch([
+    ['DELETE FROM mfa_recovery WHERE user_id = ?', [c.user.id]],
+    ...hashes.map((h) => ['INSERT INTO mfa_recovery (user_id, code_hash) VALUES (?, ?)', [c.user.id, h]]),
+    ['DELETE FROM sessions WHERE user_id = ?', [c.user.id]],
+  ]);
+  const session = await auth.createSession(c.db, c.user.id);
+  return json({ ok: true, codes }, 200, { 'set-cookie': auth.sessionCookie(session, c.req) });
+}
+
+async function mfaVerifyCurrent(c) {
+  await checkPassword(c);
+  const u = await c.db.get('SELECT id, totp_secret, totp_step FROM users WHERE id = ?', c.user.id);
+  if (!u.totp_secret) fail(400, 'التحقق بخطوتين مش شغّال');
+  if (!(await secondFactor(c, u, c.body.code))) fail(400, 'الرمز غلط');
+}
+
+async function mfaDisable(c) {
+  noDemo(c, 'التحقق بخطوتين');
+  await mfaVerifyCurrent(c);
+  await c.db.batch([
+    ['UPDATE users SET totp_secret = NULL, totp_pending = NULL, totp_step = 0 WHERE id = ?', [c.user.id]],
+    ['DELETE FROM mfa_recovery WHERE user_id = ?', [c.user.id]],
+  ]);
+  return json({ ok: true });
+}
+
+async function mfaNewCodes(c) {
+  noDemo(c, 'التحقق بخطوتين');
+  await mfaVerifyCurrent(c);
+  const { codes, hashes } = await totp.newRecoveryCodes();
+  await c.db.batch([
+    ['DELETE FROM mfa_recovery WHERE user_id = ?', [c.user.id]],
+    ...hashes.map((h) => ['INSERT INTO mfa_recovery (user_id, code_hash) VALUES (?, ?)', [c.user.id, h]]),
+  ]);
+  return json({ ok: true, codes });
+}
+
+// صاحب محل ضيّع جواله والرموز الاحتياطية: مدير المنصة بيطفّي التحقق (بعد ما يتأكد منه)، وبيطلع من كل الأجهزة
+async function adminMfaOff(c, shopId) {
+  await requireAdmin(c);
+  const user = await c.db.get("SELECT u.id FROM users u JOIN shops s ON s.id = u.shop_id WHERE s.id = ? AND u.role = 'owner' AND s.demo = 0 ORDER BY u.id LIMIT 1", Number(shopId));
+  if (!user) fail(404, 'ما لقينا صاحب المحل');
+  if (user.id === c.user.id) fail(400, 'حسابك إنت: طفّيه من ⚙️ الإعدادات');
+  await c.db.batch([
+    ['UPDATE users SET totp_secret = NULL, totp_pending = NULL, totp_step = 0 WHERE id = ?', [user.id]],
+    ['DELETE FROM mfa_recovery WHERE user_id = ?', [user.id]],
+    ['DELETE FROM sessions WHERE user_id = ?', [user.id]],
+  ]);
+  return json({ ok: true });
 }
 
 async function logout(c) {
@@ -2105,31 +2252,72 @@ async function logout(c) {
 }
 
 // ─── 🔑 نسيت كلمة السر ───
-// ما في إيميل بالمنصة: صاحب المحل بيطلب من صفحة الدخول، بيوصلك إشعار، وإنت بتعمل رابط لمرة وحدة وبتبعتله ياه (واتساب)
+// صاحب المحل بيطلب من صفحة الدخول: إذا الإيميل بيبعت (Cloudflare Email Sending)، الرابط بيوصله لحاله على إيميله.
+// وإذا ما زبط الإرسال، بيوصلك إشعار، وإنت بتعمل رابط لمرة وحدة وبتبعتله ياه (واتساب)
 const RESET_HOURS = 24;
+const RESET_MAIL_HOURS = 1; // الرابط اللي بيروح عالإيميل لحاله: ساعة بس
 async function forgotPassword(c) {
   await rateLimit(c, `forgot:${c.ip}`, 5, 60 * MIN, 'طلبات كتير، جرّب بعد ساعة');
   const email = String(c.body.email || '').trim().toLowerCase();
   if (!EMAIL_RE.test(email)) fail(400, 'اكتب إيميلك اللي سجّلت فيه');
   const user = await c.db.get("SELECT u.id, u.reset_asked_at, s.name AS shop FROM users u JOIN shops s ON s.id = u.shop_id WHERE u.email = ? AND u.role = 'owner' AND s.demo = 0", email);
-  // نفس الرد سواء الإيميل موجود أو لأ (ما بنكشف مين مسجّل)، والإشعار مرة باليوم لكل حساب
-  if (user && !(user.reset_asked_at > Date.now() - DAY)) {
-    await c.db.run('UPDATE users SET reset_asked_at = ? WHERE id = ?', Date.now(), user.id);
-    await notifyAdmin(c, { title: `🔑 ${user.shop} نسي كلمة السر`, body: `${email} · اعمله رابط من 👑 المنصة ← المحلات`, url: `${c.origin}/app#admin` });
+  // نفس الرد وبنفس السرعة سواء الإيميل موجود أو لأ (ما بنكشف مين مسجّل): الإرسال بعد الرد
+  if (user) c.waitUntil((async () => {
+    const mailed = await mailResetLink(c, user, email);
+    // ما وصله إيميل: إشعار إلك، مرة باليوم لكل حساب
+    if (!mailed && !(user.reset_asked_at > Date.now() - DAY)) {
+      await c.db.run('UPDATE users SET reset_asked_at = ? WHERE id = ?', Date.now(), user.id);
+      await notifyAdmin(c, { title: `🔑 ${user.shop} نسي كلمة السر`, body: `${email} · اعمله رابط من 👑 المنصة ← المحلات`, url: `${c.origin}/app#admin` });
+    }
+  })().catch((e) => console.error('forgot:', e.message)));
+  return json({ ok: true, whatsapp: ownerWhatsapp(c.env), mail: !!c.env.MAIL });
+}
+
+async function newResetLink(c, userId, hours) {
+  const token = randomToken(32);
+  const now = Date.now();
+  await c.db.run('DELETE FROM password_resets WHERE user_id = ? OR expires_at < ?', userId, now); // الرابط الجديد بيلغي القديم
+  await c.db.run('INSERT INTO password_resets (token_hash, user_id, expires_at, created_at) VALUES (?, ?, ?, ?)', await sha256Hex(token), userId, now + hours * HOUR, now);
+  return `${c.origin}/?reset=${token}#login`;
+}
+
+// 3 إيميلات بالساعة لكل حساب بالكتير. النتيجة بتنحفظ عشان تشوف بـ 👑 المنصة إذا الإرسال شغّال
+async function mailResetLink(c, user, email) {
+  if (!c.env.MAIL) return false;
+  try { await rateLimit(c, `forgot-mail:${user.id}`, 3, HOUR); } catch { return false; }
+  const now = Date.now();
+  try {
+    const url = await newResetLink(c, user.id, RESET_MAIL_HOURS);
+    const host = new URL(c.origin).hostname;
+    const from = `no-reply@${host}`;
+    const text = [
+      `مرحبا 👋`,
+      '',
+      `طلبت كلمة سر جديدة لحساب «${user.shop}» بنقاطك. افتح الرابط واختار كلمة سر جديدة (بيشتغل ساعة ولمرة وحدة):`,
+      url,
+      '',
+      'إذا مش إنت اللي طلب، تجاهل هالإيميل: كلمة السر ما بتتغيّر.',
+      '— فريق نقاطك',
+    ].join('\n');
+    const raw = backup.mimeText({ from, fromName: 'نقاطك', to: email, subject: '🔑 كلمة سر جديدة لنقاطك', text, now });
+    const EmailMessage = c.env.EmailMessage || (await import('cloudflare:email')).EmailMessage;
+    await c.env.MAIL.send(new EmailMessage(from, email, raw));
+    await setSetting(c.db, 'reset_mail_last', JSON.stringify({ at: now, ok: true }));
+    return true;
+  } catch (e) {
+    console.error('reset mail:', e.message);
+    await setSetting(c.db, 'reset_mail_last', JSON.stringify({ at: now, ok: false, error: clean(e.message, 200) }));
+    return false;
   }
-  return json({ ok: true, whatsapp: ownerWhatsapp(c.env) });
 }
 
 async function adminResetLink(c, shopId) {
   await requireAdmin(c);
   const user = await c.db.get("SELECT u.id, u.email FROM users u JOIN shops s ON s.id = u.shop_id WHERE s.id = ? AND u.role = 'owner' AND s.demo = 0 ORDER BY u.id LIMIT 1", Number(shopId));
   if (!user) fail(404, 'ما لقينا صاحب المحل');
-  const token = randomToken(32);
-  const now = Date.now();
-  await c.db.run('DELETE FROM password_resets WHERE user_id = ? OR expires_at < ?', user.id, now); // الرابط الجديد بيلغي القديم
-  await c.db.run('INSERT INTO password_resets (token_hash, user_id, expires_at, created_at) VALUES (?, ?, ?, ?)', await sha256Hex(token), user.id, now + RESET_HOURS * HOUR, now);
+  const url = await newResetLink(c, user.id, RESET_HOURS);
   await c.db.run('UPDATE users SET reset_asked_at = NULL WHERE id = ?', user.id);
-  return json({ url: `${c.origin}/?reset=${token}#login`, email: user.email, hours: RESET_HOURS });
+  return json({ url, email: user.email, hours: RESET_HOURS });
 }
 
 async function resetRow(c, token) {
@@ -2155,9 +2343,12 @@ async function resetPassword(c) {
   if (!used.changes) fail(404, RESET_GONE);
   // كلمة السر الجديدة بتطلّع أي حدا كان داخل بالقديمة
   await c.db.batch([
-    ['UPDATE users SET pw_hash = ?, failed = 0, locked_until = 0 WHERE id = ?', [await auth.hashPassword(c.body.password), r.user_id]],
+    ['UPDATE users SET pw_hash = ?, failed = 0, locked_until = 0, reset_asked_at = NULL WHERE id = ?', [await auth.hashPassword(c.body.password), r.user_id]],
     ['DELETE FROM sessions WHERE user_id = ?', [r.user_id]],
   ]);
+  // التحقق بخطوتين شغّال: الرابط بيغيّر كلمة السر بس، والدخول لازم برمز التطبيق
+  const u = await c.db.get('SELECT totp_secret FROM users WHERE id = ?', r.user_id);
+  if (u && u.totp_secret) return json({ ok: true, mfa: true, ticket: await mfaTicket(c, r.user_id) });
   const session = await auth.createSession(c.db, r.user_id);
   return json({ ok: true }, 200, { 'set-cookie': auth.sessionCookie(session, c.req) });
 }
@@ -2167,7 +2358,7 @@ async function me(c) {
   // المهام الدورية ما إلها طلب، فبنحفظ رابط الموقع من زيارات صاحب المنصة بس (عشان ما حدا يغيّر روابط الإشعارات)
   if (isAdmin && !c.env.PUBLIC_URL && (await getSetting(c.db, 'origin')) !== c.origin) await setSetting(c.db, 'origin', c.origin);
   return json({
-    user: { id: c.user.id, name: c.user.name, email: c.user.email, role: c.user.role, branchId: c.user.branch_id || null, isAdmin },
+    user: { id: c.user.id, name: c.user.name, email: c.user.email, role: c.user.role, branchId: c.user.branch_id || null, isAdmin, mfa: !!(await c.db.get('SELECT totp_secret FROM users WHERE id = ?', c.user.id)).totp_secret },
     canBootstrap: c.user.role === 'owner' && !c.shop.demo && String(c.env.PLATFORM_SETUP_CODE || '').length >= 32 && !(await getSetting(c.db, 'platform_admin_user_id')),
     shop: shopView(c.shop, c.origin),
     google: googleStatus(c, c.shop),
@@ -4477,6 +4668,13 @@ const API = [
   ['POST', /^\/api\/demo\/login$/, demoLogin],
   ['POST', /^\/api\/auth\/logout$/, logout],
   ['POST', /^\/api\/auth\/forgot$/, forgotPassword],
+  ['POST', /^\/api\/auth\/2fa$/, mfaLogin],
+  ['GET', /^\/api\/me\/2fa$/, mfaStatus, 'staff'],
+  ['POST', /^\/api\/me\/2fa\/setup$/, mfaSetup, 'staff'],
+  ['POST', /^\/api\/me\/2fa\/enable$/, mfaEnable, 'staff'],
+  ['POST', /^\/api\/me\/2fa\/disable$/, mfaDisable, 'staff'],
+  ['POST', /^\/api\/me\/2fa\/codes$/, mfaNewCodes, 'staff'],
+  ['POST', /^\/api\/admin\/shops\/(\d+)\/mfa-off$/, adminMfaOff, 'staff'],
   ['GET', /^\/api\/auth\/reset$/, resetInfo],
   ['POST', /^\/api\/auth\/reset$/, resetPassword],
   ['POST', /^\/api\/admin\/shops\/(\d+)\/reset-link$/, adminResetLink, 'staff'],

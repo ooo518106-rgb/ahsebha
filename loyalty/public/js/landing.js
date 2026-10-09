@@ -251,7 +251,9 @@ $('#forgotBtn').addEventListener('click', async () => {
     const r = await api('/api/auth/forgot', { method: 'POST', body: { email } });
     const wa = r.whatsapp ? `https://wa.me/${r.whatsapp}?text=${encodeURIComponent(`مرحبا، نسيت كلمة السر لحسابي بنقاطك: ${email}`)}` : null;
     msg.innerHTML = '<span></span>';
-    msg.querySelector('span').textContent = 'وصلنا طلبك ✅ رح نبعتلك رابط لكلمة سر جديدة بأقرب وقت.';
+    msg.querySelector('span').textContent = r.mail
+      ? 'وصلنا طلبك ✅ إذا الإيميل مسجّل عنا، رح يوصلك رابط لكلمة سر جديدة خلال دقايق (شيّك على Spam كمان). إذا ما وصل، منبعتلك ياه إحنا بأقرب وقت.'
+      : 'وصلنا طلبك ✅ رح نبعتلك رابط لكلمة سر جديدة بأقرب وقت.';
     if (wa) {
       const a = document.createElement('a');
       a.className = 'btn sm wa';
@@ -288,10 +290,36 @@ if (resetToken) {
     const btn = e.target.querySelector('button');
     btn.disabled = true;
     try {
-      await api('/api/auth/reset', { method: 'POST', body: { token: resetToken, password: pw } });
+      const r = await api('/api/auth/reset', { method: 'POST', body: { token: resetToken, password: pw } });
+      if (r.mfa) { $('#resetForm').classList.add('hidden'); askMfa(r.ticket); return; }
       location.href = '/app';
     } catch (err) { $('#resetError').textContent = err.message; btn.disabled = false; }
   });
+}
+
+// 🔐 التحقق بخطوتين: بعد كلمة السر الصحيحة، رمز من الجوال (التذكرة صالحة 10 دقايق)
+function askMfa(ticket) {
+  $('#auth').classList.add('hidden');
+  $('#authTabs').classList.add('hidden');
+  const form = $('#mfaForm');
+  form.classList.remove('hidden');
+  $('#authTitle').textContent = 'رمز التحقق';
+  $('#mfaCode').focus();
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    const btn = form.querySelector('button');
+    btn.disabled = true;
+    $('#mfaError').textContent = '';
+    try {
+      const r = await api('/api/auth/2fa', { method: 'POST', body: { ticket, code: $('#mfaCode').value } });
+      if (r.recovery != null) alert(`دخلت برمز احتياطي. باقيلك ${r.recovery} رمز: اعمل رموز جديدة من الإعدادات.`);
+      location.href = '/app';
+    } catch (err) {
+      $('#mfaError').textContent = err.message;
+      btn.disabled = false;
+      if (err.status === 401) setTimeout(() => location.reload(), 1800); // خلصت التذكرة: من الأول
+    }
+  };
 }
 
 $('#auth').addEventListener('submit', async (e) => {
@@ -305,7 +333,8 @@ $('#auth').addEventListener('submit', async (e) => {
       await api('/api/auth/signup', { method: 'POST', body: { ...Object.fromEntries(f), partner: partner(), offer: offerCode(), prospect: prospectCode() } });
       location.href = '/app#settings';
     } else {
-      await api('/api/auth/login', { method: 'POST', body: { email: f.get('email'), password: f.get('password') } });
+      const r = await api('/api/auth/login', { method: 'POST', body: { email: f.get('email'), password: f.get('password') } });
+      if (r.mfa) { askMfa(r.ticket); return; }
       location.href = '/app';
     }
   } catch (err) {
