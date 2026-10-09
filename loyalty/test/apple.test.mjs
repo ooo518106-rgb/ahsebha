@@ -93,7 +93,7 @@ test('Apple Wallet من الإعداد للبطاقة الموقّعة وخدم�
   assert.deepEqual([...files['strip@3x.png'].subarray(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10], 'صورة الدواير PNG');
   assert.equal(files['strip@3x.png'].readUInt32BE(16), 1125, 'عرضها 3x');
   assert.equal(files['strip@3x.png'].readUInt32BE(20), 432, 'طولها 144 نقطة (مكان الشريط بالبطاقة اللي عليها QR)');
-  assert.ok((await db.get('SELECT k FROM strip_cache')).k.startsWith('s2|'), 'الصورة انحفظت عشان ما تنرسم كل مرة');
+  assert.ok((await db.get('SELECT k FROM strip_cache')).k.startsWith('s3|'), 'الصورة انحفظت عشان ما تنرسم كل مرة');
   const pass = JSON.parse(files['pass.json']);
   assert.equal(pass.passTypeIdentifier, 'pass.com.nuqatak.test');
   assert.equal(pass.teamIdentifier, 'ABCDE12345');
@@ -223,7 +223,7 @@ test('🔔 تحديث بطاقات الآيفون لحالها: مفتاح APNs�
   const b64 = (u8) => Buffer.from(u8).toString('base64');
   const keys = await generateKeyAndCsr();
   await admin.post('/api/admin/apple/key', { privateKey: b64(keys.pkcs8), publicKey: b64(keys.spki) });
-  assert.equal((await admin.put('/api/admin/apple/cert', { cert: issue(keys.csrPem, 'pass2') })).status, 200);
+  assert.equal((await admin.put('/api/admin/apple/cert', { cert: issue(keys.csrPem, 'pass3') })).status, 200);
   const guest = client();
   const token = (await guest.post(`/api/shops/${shop.slug}/join`, { name: 'أحمد', phone: '0791234567' })).data.token;
   const secret = (await db.get('SELECT auth_secret FROM apple_config WHERE id = 1')).auth_secret;

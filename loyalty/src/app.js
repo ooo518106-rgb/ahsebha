@@ -294,9 +294,16 @@ async function appleConfig(c, { withKey = true } = {}) {
 }
 
 // وقت آخر تغيير بشكل البطاقة: البطاقات القديمة على الآيفونات بتعتبر حالها قديمة وبتنزّل الشكل الجديد لما تتحدّث
-const PASS_DESIGN_AT = Date.UTC(2026, 9, 8, 18, 40);
+const PASS_DESIGN_AT = Date.UTC(2026, 9, 9, 21, 43, 41);
+async function passDesignAt(c) {
+  let state;
+  try { state = JSON.parse(await getSetting(c.db, 'wallet_design_rollout')); } catch { /* first deployment */ }
+  // Activation time catches passes downloaded while a release was being prepared/uploaded.
+  return state?.revision === `${STRIP_VERSION}:${PASS_DESIGN_AT}` ? Math.max(PASS_DESIGN_AT, state.at || 0) : PASS_DESIGN_AT;
+}
 
-// صورة العملات: من الذاكرة، أو من قاعدة البيانات، أو بترسمها (تقيلة) مرة وبتحفظها
+
+// صورة التقدّم: من الذاكرة أو قاعدة البيانات؛ بتترسم مرة لكل لون وحالة
 async function stripByKey(c, k) {
   const hot = peekStrip(k);
   if (hot) return hot;
@@ -330,7 +337,7 @@ async function pkpassFor(c, cfg, member) {
   const passJson = apple.buildPassJson(shop, member, { ...cfg, origin: c.origin, authToken: await apple.authTokenFor(cfg.authSecret, member.token), menuUrl: await menuUrlOf(c, shop), hasLogo });
   const all = { ...images, ...stripFiles(await stripFor(c, shop, member.balance)) };
   const bytes = await apple.buildPkpass({ passJson, images: all, ...cfg });
-  const updated = Math.max(member.updated_at || member.created_at, shop.updated_at || shop.created_at, PASS_DESIGN_AT);
+  const updated = Math.max(member.updated_at || member.created_at, shop.updated_at || shop.created_at, await passDesignAt(c));
   return { bytes, updated };
 }
 
@@ -421,7 +428,8 @@ async function appleService(c) {
       `SELECT m.token AS serial, MAX(COALESCE(m.updated_at, m.created_at), COALESCE(s.updated_at, s.created_at)) AS upd
        FROM apple_regs r JOIN members m ON m.token = r.serial JOIN shops s ON s.id = m.shop_id WHERE r.device_id = ?`, device,
     );
-    const changed = rows.map((r) => ({ ...r, upd: Math.max(r.upd, PASS_DESIGN_AT) })).filter((r) => r.upd > since);
+    const designAt = await passDesignAt(c);
+    const changed = rows.map((r) => ({ ...r, upd: Math.max(r.upd, designAt) })).filter((r) => r.upd > since);
     if (!changed.length) return new Response(null, { status: 204 });
     return json({ serialNumbers: changed.map((r) => r.serial), lastUpdated: String(Math.max(...changed.map((r) => r.upd))) });
   }
@@ -733,6 +741,7 @@ export async function runScheduled(ctx, now = Date.now()) {
   };
   await setSetting(c.db, 'cron_last', now); // 💓 المهام شغّالة (المراقبة بتنبّهك إذا وقفت)
   const out = { birthdays: 0, reviews: 0, winback: 0 };
+  out.walletDesign = await walletDesignJob(c, now).catch((e) => { console.error('wallet design:', e.message); return 'retry'; });
   out.birthdays = await birthdayJob(c, shopOf, now);
   if (c.budget > 0) out.campaigns = await campaignJob(c, shopOf, now);
   if (c.budget > 0) out.reviews = await reviewAskJob(c, shopOf, now);
@@ -756,8 +765,45 @@ export async function runScheduled(ctx, now = Date.now()) {
     out.demoReset = true;
   }
   await c.db.run('DELETE FROM rate_hits WHERE expires_at < ?', now);
-  await c.db.run('DELETE FROM strip_cache WHERE k NOT GLOB ?', `[sg]${STRIP_VERSION}|*`); // صور رسمة قديمة
+  await c.db.run('DELETE FROM strip_cache WHERE k NOT GLOB ?', '[sg][23]|*'); // Keep immutable URLs used by saved Google cards
   return out;
+}
+
+// A bounded, resumable rollout changes existing Wallet artwork without touching balances or activity.
+// Apple gets a silent refresh; Google objects get a new immutable hero URL. Failed Google PATCH retries.
+async function walletDesignJob(c, now) {
+  const revision = `${STRIP_VERSION}:${PASS_DESIGN_AT}`;
+  let state;
+  try { state = JSON.parse(await getSetting(c.db, 'wallet_design_rollout')); } catch { /* old or absent state */ }
+  if (!state || state.revision !== revision) {
+    const max = await c.db.get('SELECT COALESCE(MAX(id), 0) AS id FROM members WHERE gw_object = 1');
+    state = { revision, at: now, cursor: 0, target: max.id };
+    await c.db.batch([
+      ['INSERT OR IGNORE INTO apple_queue (push_token, queued_at) SELECT DISTINCT push_token, ? FROM apple_regs', [now]],
+      ["INSERT INTO platform_settings (k, v) VALUES ('wallet_design_rollout', ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v", [JSON.stringify(state)]],
+    ]);
+  }
+  if (state.done) return 'done';
+  const cfg = gw.googleConfig(c.env);
+  if (!cfg) return 'google-off';
+  if (c.budget < 2) return 'wait';
+  const rows = await c.db.all('SELECT * FROM members WHERE gw_object = 1 AND id > ? AND id <= ? ORDER BY id LIMIT ?', state.cursor, state.target, Math.min(3, Math.floor(c.budget / 2)));
+  for (const m of rows) {
+    const shop = await shopRow(c.db, m.shop_id);
+    if (shop) {
+      c.budget -= 2;
+      const obj = gw.buildObject(cfg, shop, m, c.origin);
+      // Update artwork alone: a concurrent cashier transaction must retain its current points/QR fields.
+      await gw.patchObject(cfg, { id: obj.id, heroImage: obj.heroImage });
+    }
+    state.cursor = m.id;
+    await setSetting(c.db, 'wallet_design_rollout', JSON.stringify(state));
+  }
+  if (!rows.length || state.cursor >= state.target) {
+    state.done = true;
+    await setSetting(c.db, 'wallet_design_rollout', JSON.stringify(state));
+  }
+  return rows.length;
 }
 
 // أجهزة الزبون للإشعارات الدورية (لحد 5، الأحدث). كل مهمة بتتأكد إنه الميزانية بتكفي قبل ما تسجّل إنها بعتت،

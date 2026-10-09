@@ -220,13 +220,13 @@ export function buildPassJson(shop, member, { passTypeId, teamId, origin, authTo
         label: stamps ? 'الأختام' : 'النقاط',
         value: stamps ? `${p.available && !p.toward ? p.cost : p.toward}/${p.cost}` : member.balance,
       }],
-      // الوجه: صورة العملات (strip.png) مكان الحقل الكبير، وتحتها سطر واحد.
+      // الوجه: حلقة التقدّم ورسمة المكافأة (strip.png) مكان الحقل الكبير، وتحتها سطر واحد.
       // Wallet بترتّب من الشمال، فبنحطهم بالعكس عشان ينقروا من اليمين: شو باقي ← المكافأة ← المنيو.
       // العناوين إيموجي لأنه Wallet بتباعد حروف العناوين الصغيرة فبينمطّ الكلام العربي («الـبـطـاقـة»)
       secondaryFields: [
         // Apple ما بتسمح بروابط على وجه البطاقة، فبنقول للزبون وين يلاقي المنيو (أول إشي على الضهر)
         // (الكلام هون ما بينكبس؛ زر ⋯ فوق ← «تفاصيل البطاقة» ← «افتح المنيو»)
-        ...(menuUrl ? [{ key: 'menuHint', label: '📋', value: '⋯ فوق للمنيو', textAlignment: 'PKTextAlignmentLeft' }] : []),
+        ...(menuUrl ? [{ key: 'menuHint', label: '📋', value: '⋯ للمنيو', textAlignment: 'PKTextAlignmentLeft' }] : []),
         { key: 'reward', label: '🎁', value: shop.reward_name, textAlignment: menuUrl ? 'PKTextAlignmentCenter' : 'PKTextAlignmentLeft' },
         {
           key: 'status',

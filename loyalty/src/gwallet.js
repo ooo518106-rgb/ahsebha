@@ -92,7 +92,7 @@ export function buildObject(cfg, shop, member, origin) {
     secondaryLoyaltyPoints: p.available
       ? { label: 'مكافآت جاهزة', balance: { int: p.available } }
       : { label: 'باقي للمكافأة', balance: { int: p.remaining } },
-    // نفس عملات بطاقة الآيفون (☕ على زخرفة بلون المحل، والهدية ذهبية لما تجهز)
+    // حلقة تقدّم ورسمة مكافأة، بنفس لون المحل وبنفس حالة بطاقة الآيفون
     heroImage: { sourceUri: { uri: `${origin}${heroPath(shop, member.balance)}` }, contentDescription: { defaultValue: { language: 'ar', value: p.available ? `${shop.reward_name}: جاهزة` : `باقي ${p.remaining} ${unitWord(shop, p.remaining)} لـ ${shop.reward_name}` } } },
     textModulesData: [{ id: 'progress', header: shop.reward_name, body: stamps ? stampsLine(shop, member.balance) : `${p.toward} / ${p.cost} ${unitWord(shop, p.cost)}` }],
     linksModuleData: { uris: [
