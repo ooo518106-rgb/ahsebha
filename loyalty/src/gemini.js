@@ -19,6 +19,55 @@ async function call(cfg, path, body) {
   return data;
 }
 
+// ⏳ الطلبات الطويلة (البحث بـ Google) بالبث (SSE): Cloudflare بتقطع أي طلب ما وصله رد خلال 100 ثانية (خطأ 524)،
+// والبث بيبعت أول قطعة بسرعة (حتى ملخص التفكير) فما بينقطع. بنجمّع القطع برد واحد بنفس شكل generateContent
+async function callStream(cfg, path, body) {
+  const doFetch = cfg.fetch || ((...a) => fetch(...a));
+  const res = await doFetch(`${BASE}/${path.replace(':generateContent', ':streamGenerateContent')}?alt=sse`, {
+    method: 'POST',
+    headers: { 'x-goog-api-key': cfg.apiKey, 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    const e = new Error((data.error && data.error.message) || `Gemini ${res.status}`);
+    e.status = res.status;
+    throw e;
+  }
+  let text = '';
+  let finishReason = null;
+  let usageMetadata = null;
+  let promptFeedback = null;
+  const queries = new Set();
+  let grounding = null;
+  for (const line of (await res.text()).split(/\r?\n/)) {
+    if (!line.startsWith('data:')) continue;
+    let chunk;
+    try { chunk = JSON.parse(line.slice(5).trim()); } catch { continue; }
+    if (chunk.error) {
+      const e = new Error(chunk.error.message || 'Gemini stream error');
+      e.status = chunk.error.code || 500;
+      throw e;
+    }
+    if (chunk.usageMetadata) usageMetadata = chunk.usageMetadata; // آخر قطعة فيها المجموع
+    if (chunk.promptFeedback) promptFeedback = chunk.promptFeedback;
+    const cand = chunk.candidates && chunk.candidates[0];
+    if (!cand) continue;
+    for (const part of (cand.content && cand.content.parts) || []) if (part.text && !part.thought) text += part.text;
+    if (cand.finishReason) finishReason = cand.finishReason;
+    if (cand.groundingMetadata) {
+      grounding = { ...(grounding || {}), ...cand.groundingMetadata };
+      for (const q of cand.groundingMetadata.webSearchQueries || []) queries.add(q);
+    }
+  }
+  if (grounding) grounding.webSearchQueries = [...queries];
+  return {
+    candidates: [{ content: { role: 'model', parts: text ? [{ text }] : [] }, finishReason, ...(grounding ? { groundingMetadata: grounding } : {}) }],
+    usageMetadata: usageMetadata || {},
+    ...(promptFeedback ? { promptFeedback } : {}),
+  };
+}
+
 // إذا ما حددت GEMINI_MODEL، بنختار أحدث «Flash» ثابت متوفر لمفتاحك
 export async function geminiModel(cfg) {
   if (cfg.model) return cfg.model;
@@ -99,16 +148,25 @@ export async function geminiChat(cfg, { system, messages, tools = [], runTool, s
 export async function geminiFindShops(cfg, { system, ask, shopsSchema }) {
   const model = await geminiModel(cfg);
   const usage = emptyUsage();
-  const found = await call(cfg, `models/${model}:generateContent`, {
+  const ask1 = {
     systemInstruction: { parts: [{ text: system }] },
     contents: [{ role: 'user', parts: [{ text: `${ask}\n\nاكتب كل المحلات اللي لقيتها بالتفصيل (الاسم، المنطقة، النوع، الرقم، الانستغرام، الصفحة، جملة عنه، أول رسالة إله، وبرنامج الولاء: ما في أو كرت ورق أو رقمي أو ما تأكدت، مع وين فحصت بالزبط وكم إنت متأكد).` }] }],
     tools: [{ google_search: {} }],
-    generationConfig: { maxOutputTokens: 8192 },
-  });
+    // includeThoughts: ملخص التفكير بيوصل بالبث أول بأول، فالطلب ما بيضل ساكت لحد ما Cloudflare تقطعه
+    generationConfig: { maxOutputTokens: 8192, thinkingConfig: { includeThoughts: true } },
+  };
+  let found;
+  try {
+    found = await callStream(cfg, `models/${model}:generateContent`, ask1);
+  } catch (e) {
+    // ضغط مؤقت عند Google (500/503/504) أو انقطاع: مرة كمان
+    if (!(e.status >= 500)) throw e;
+    found = await callStream(cfg, `models/${model}:generateContent`, ask1);
+  }
   addUsage(usage, found);
   const notes = textOf(found.candidates && found.candidates[0]);
   if (!notes) return { shops: [], usage };
-  const shaped = await call(cfg, `models/${model}:generateContent`, {
+  const shaped = await callStream(cfg, `models/${model}:generateContent`, {
     contents: [{ role: 'user', parts: [{ text: `حوّل هالقائمة لـ JSON حسب المخطط. ما تضيف ولا تخترع إشي مش موجود فيها، والحقول الناقصة فاضية.\n\n${notes}` }] }],
     generationConfig: { maxOutputTokens: 8192, responseMimeType: 'application/json', responseSchema: toGeminiSchema(shopsSchema) },
   });

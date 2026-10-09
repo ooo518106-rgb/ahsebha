@@ -9,7 +9,7 @@ import * as perks from './perks.js';
 import { DEMO_EMAIL, DEMO_VERSION, seedDemo } from './demo.js';
 import { APP_VERSION, CHANGELOG } from './changelog.js';
 import { aiConfig, aiCost, chat, cleanHistory } from './ai.js';
-import { geminiFindShops } from './gemini.js';
+import { geminiFindShops, geminiModel } from './gemini.js';
 import * as sales from './sales.js';
 import * as wa from './whatsapp.js';
 import { defaultLogoPng } from './png.js';
@@ -4648,9 +4648,10 @@ async function adminSalesSearch(c) {
   } catch (e) {
     console.error('sales search:', e.status || '', e.message);
     await noteAi(c, false, e);
-    fail(503, e.status === 429 ? 'خلصت حصة البحث المجانية لليوم، جرّب بكرا' : 'البحث ما زبط هلأ، جرّب كمان شوي');
+    fail(503, e.status === 429 ? 'خلصت حصة البحث المجانية لليوم، جرّب بكرا' : e.status === 524 || e.status === 504 ? 'البحث طوّل كتير. جرّب عدد محلات أقل (5) أو منطقة أصغر' : 'البحث ما زبط هلأ، جرّب كمان شوي');
   }
   await logAi(c, 'search', r.usage);
+  await noteAi(c, true, null, cfg.provider === 'gemini' ? await geminiModel(cfg) : cfg.model); // البحث زبط: الخطأ القديم بيختفي من اللوحة
   const now = Date.now();
   let added = 0;
   const skipped = [];

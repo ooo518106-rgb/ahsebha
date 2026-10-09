@@ -765,6 +765,17 @@ function fakeGemini(reply) {
     if (u.includes('/models?')) return json({ models: [{ name: 'models/gemini-2.5-flash', supportedGenerationMethods: ['generateContent'] }, { name: 'models/gemini-3.6-flash', supportedGenerationMethods: ['generateContent'] }, { name: 'models/gemini-3.6-flash-lite', supportedGenerationMethods: ['generateContent'] }] });
     const r = reply(body, calls.length);
     if (r.status) return json({ error: { message: 'quota' } }, r.status);
+    // البث (SSE): ملخص تفكير، وبعدين النص على قطعتين، والمجموع والبحث بآخر قطعة
+    if (u.includes(':streamGenerateContent?alt=sse')) {
+      const t = r.text || '';
+      const half = Math.ceil(t.length / 2);
+      const chunks = [
+        { candidates: [{ content: { role: 'model', parts: [{ text: 'بفكر…', thought: true }] } }] },
+        { candidates: [{ content: { role: 'model', parts: [{ text: t.slice(0, half) }] } }] },
+        { candidates: [{ content: { role: 'model', parts: [{ text: t.slice(half) }] }, finishReason: 'STOP', ...(r.grounded ? { groundingMetadata: { webSearchQueries: ['a', 'b'] } } : {}) }], usageMetadata: { promptTokenCount: 500, candidatesTokenCount: 40, thoughtsTokenCount: 10 } },
+      ];
+      return new Response(chunks.map((c) => `data: ${JSON.stringify(c)}\r\n\r\n`).join(''), { status: 200, headers: { 'content-type': 'text/event-stream' } });
+    }
     const parts = [];
     if (r.text) parts.push({ text: r.text });
     if (r.call) parts.push({ functionCall: { name: r.call, args: r.args }, thoughtSignature: 'sig' });
@@ -837,6 +848,26 @@ test('Gemini: البحث عن محلات بـ Google Search وبعدين ترت�
   assert.equal(shop.instagram, 'https://instagram.com/nada.cafe');
   assert.match(shop.message, /^مرحبا كوفي الندى 👋/);
   assert.equal((await p.admin.get('/api/admin/stats')).data.ai.searches, 2);
+  const searchCalls = g.calls.filter((c) => c.body && c.body.contents);
+  assert.ok(searchCalls.every((c) => c.url.includes(':streamGenerateContent?alt=sse')), 'بالبث: Cloudflare ما بتقطعه بعد 100 ثانية');
+  assert.deepEqual(searchCalls[0].body.generationConfig.thinkingConfig, { includeThoughts: true });
+  assert.ok(!shop.why.includes('بفكر'), 'ملخص التفكير ما بيدخل بالنتيجة');
+});
+
+test('Gemini: البحث بيعيد مرة إذا Google رجّعت خطأ مؤقت (524/503)', async () => {
+  let first = true;
+  const g = fakeGemini((body) => {
+    if (body.tools) {
+      if (first) { first = false; return { status: 524 }; }
+      return { text: '1) كوفي السنديان، عبدون، 0795550001', grounded: true };
+    }
+    return { text: JSON.stringify({ shops: [{ name: 'كوفي السنديان', area: 'عبدون', kind: 'كوفي شوب', phone: '0795550001', instagram: '', website: '', why: '', opener: '', loyalty: 'none', loyalty_source: 'انستغرامه', loyalty_confidence: 'medium' }] }) };
+  });
+  const p = await platform({ GEMINI_API_KEY: 'g-key', fetch: g.fetch });
+  const r = await p.admin.post('/api/admin/sales/search', { query: 'كوفي بعبدون' });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.equal(r.data.added, 1);
+  assert.equal(r.data.prospects[0].loyalty, 'none');
 });
 
 test('Claude أولى إذا الاتنين موجودين، إلا مع AI_PROVIDER=gemini', async () => {
