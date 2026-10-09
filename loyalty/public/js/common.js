@@ -105,7 +105,7 @@ export function stampsHTML(cost, filled) {
 // شكل البطاقة نفسه بصفحة الزبون وبمعاينة الإعدادات. tr = دالة الترجمة (صفحة الزبون)، وبدونها عربي
 // مفتاح كلمة الوحدة حسب العدد (بالعربي 3 لـ 10 جمع، وبالإنجليزي 1 مفرد): unitPoint / unitPoints / unitPoint1
 export const unitKey = (stamps, n) => (stamps ? 'unitStamp' : 'unitPoint') + (n >= 3 && n <= 10 ? 's' : n === 1 ? '1' : '');
-const CARD_AR = { name: 'الاسم', points: 'النقاط', stamps: 'الأختام', unitPoint: 'نقطة', unitStamp: 'ختم', unitPoints: 'نقاط', unitStamps: 'أختام', unitPoint1: 'نقطة', unitStamp1: 'ختم', ready1: '🎁 عندك مكافأة جاهزة: {reward}', readyN: '🎁 عندك {n} مكافآت جاهزة: {reward}', remaining: 'باقي {n} {unit} لـ {reward}' };
+const CARD_AR = { activeMember: 'عضو نشط', name: 'الاسم', points: 'النقاط', stamps: 'الأختام', unitPoint: 'نقطة', unitStamp: 'ختم', unitPoints: 'نقاط', unitStamps: 'أختام', unitPoint1: 'نقطة', unitStamp1: 'ختم', ready1: '🎁 عندك مكافأة جاهزة: {reward}', readyN: '🎁 عندك {n} مكافآت جاهزة: {reward}', remaining: 'باقي {n} {unit} لـ {reward}' };
 const fill = (s, v) => s.replace(/\{(\w+)\}/g, (_, k) => v[k] ?? '');
 export function cardHTML(shop, member, { qr = true, tr = (k, v = {}) => fill(CARD_AR[k], v) } = {}) {
   const p = member.progress;
@@ -119,14 +119,15 @@ export function cardHTML(shop, member, { qr = true, tr = (k, v = {}) => fill(CAR
       <div class="lc-head">
         <img class="lc-logo" src="${shop.logo}" alt="">
         <div class="lc-name">${shop.name}</div>
-        <span class="lc-chip" aria-hidden="true"></span>
+        ${member.visits > 0 ? html`<span class="lc-member" style="margin-inline-start:auto">👑 ${tr('activeMember')}</span>` : html`<span class="lc-chip" aria-hidden="true"></span>`}
       </div>
-      <div class="lc-row">
-        <div><div class="lc-label">${tr('name')}</div><div class="lc-value">${member.name}</div></div>
-        <div class="lc-end"><div class="lc-label">${tr(stamps ? 'stamps' : 'points')}</div><div class="lc-value num">${stamps ? `${filled}/${p.cost}` : fmt(member.balance)}</div></div>
+      <div class="lc-label" style="margin-top:14px">${tr('name')}</div><div class="lc-value">${member.name}</div>
+      <div class="lc-big">
+        <div><div class="lc-points num">${stamps ? `${filled}/${p.cost}` : fmt(member.balance)}</div><div class="lc-unit">${tr(stamps ? 'stamps' : 'points')}</div></div>
+        <div class="lc-ring" style="--p:${p.available ? 100 : p.pct}"><span>${p.available ? '🎁' : '⭐'}</span></div>
       </div>
-      <div style="margin-top:12px">
-        ${stamps ? stampsHTML(p.cost, filled) : html`<div class="bar"><i style="width:${p.pct}%"></i></div>`}
+      <div style="margin-top:10px">
+        ${stamps ? stampsHTML(p.cost, filled) : ''}
         <div class="small" style="margin-top:6px;opacity:.9">${status}</div>
       </div>
       ${qr ? html`<div class="lc-qr">${qrSVG(member.token, 'QR')}</div><div class="lc-cardno num">${member.cardNo}</div>` : ''}

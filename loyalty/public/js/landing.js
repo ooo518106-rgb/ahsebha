@@ -212,7 +212,7 @@ function setMode(m) {
   $('#forgotMsg').classList.add('hidden');
   $('#password').autocomplete = m === 'signup' ? 'new-password' : 'current-password';
   $('#authBtn').textContent = m === 'signup' ? 'ابدأ تجربتي المجانية' : 'دخول';
-  $('#authTitle').textContent = m === 'signup' ? `ابدأ تجربتك المجانية${offerDays ? ` (${offerDays} يوم 🎁)` : ''}` : 'دخول المحلات';
+  $('#authTitle').textContent = m === 'signup' ? `ابدأ تجربتك المجانية${offerDays ? ` (${offerDays} يوم 🎁)` : ''}` : 'أهلاً برجعتك';
   $('#authError').textContent = '';
 }
 
@@ -240,6 +240,8 @@ function setupAuth() {
 }
 
 $$('#authTabs button').forEach((b) => b.addEventListener('click', () => setMode(b.dataset.mode)));
+// 👁 إظهار كلمة السر
+$('#pwEye').addEventListener('click', () => { const i = $('#password'); i.type = i.type === 'password' ? 'text' : 'password'; });
 
 // 🔑 نسيت كلمة السر: الطلب بيوصل لفريق نقاطك، وبنبعتله رابط كلمة سر جديدة
 $('#forgotBtn').addEventListener('click', async () => {

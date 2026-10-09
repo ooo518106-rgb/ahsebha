@@ -45,8 +45,9 @@ async function main() {
     ${referrer ? html`<div class="alert ok center" style="margin-bottom:12px">${t('referred', { name: referrer, n: shop.refBonus, unit: unitOf(shop, shop.refBonus) })}</div>` : ''}
     ${giftCode ? html`<div class="alert ok center" style="margin-bottom:12px">${t('giftJoin')} 🎁</div>` : ''}
     ${existing ? html`<div class="panel center"><p>${t('haveCard')}</p><a class="btn block" style="margin-top:8px" href="/c/${existing}">${t('openMine')}</a></div>` : ''}
+    <div class="join-head"><h2>${t('joinHead')}</h2><p>${t('joinHeadSub', { shop: shop.name })}</p></div>
+    <div class="join-perks"><div><i>🎁</i><b>${t('perkGifts')}</b>${t('perkGiftsSub')}</div><div><i>⭐</i><b>${t('perkCollect')}</b>${t('perkCollectSub')}</div><div><i>📲</i><b>${t('perkWallet')}</b>${t('perkWalletSub')}</div></div>
     <form class="panel stack" id="join" novalidate>
-      <h2>${t('joinTitle')}</h2>
       <div class="field"><label for="name">${t('name')}</label><input id="name" name="name" autocomplete="name" required maxlength="60"></div>
       <div class="field"><label for="phone">${t('phone')}</label><input id="phone" name="phone" type="tel" inputmode="tel" autocomplete="tel" dir="ltr" required placeholder="07xxxxxxxx">
         <div class="hint">${t('phoneHint')}</div></div>

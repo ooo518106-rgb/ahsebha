@@ -61,6 +61,7 @@ const AR = {
   months: ['كانون الثاني', 'شباط', 'آذار', 'نيسان', 'أيار', 'حزيران', 'تموز', 'آب', 'أيلول', 'تشرين الأول', 'تشرين الثاني', 'كانون الأول'],
   langSwitch: 'English',
   // الانضمام
+  activeMember: 'عضو نشط', joinHead: 'مكافأتك الجاية أقرب', joinHeadSub: 'انضم لبرنامج نقاط {shop} واجمع مع كل زيارة', perkGifts: 'مكافآت', perkGiftsSub: 'حصرية إلك', perkCollect: 'اجمع', perkCollectSub: 'مع كل زيارة', perkWallet: 'بجوالك', perkWalletSub: 'بدون تطبيق',
   joinTitle: 'انضم لبطاقة الولاء', joinPageTitle: 'انضم لبطاقة ولاء {shop}', paused: 'برنامج الولاء بهالمحل متوقف مؤقتاً.', openMine: 'افتح بطاقتي',
   haveCard: 'عندك بطاقة عنا من قبل 👋', referred: '🎁 {name} دعاك! بأول زيارة إلك بتاخدوا انتو التنين {n} {unit} هدية.',
   phone: 'رقم الجوال', phoneHint: 'عشان لو ضاعت بطاقتك، الكاشير بيلاقيها برقمك.', bday: '🎂 تاريخ ميلادك', optional: '(اختياري)',
@@ -109,6 +110,7 @@ const EN = {
   links: 'Follow us', instagram: 'Instagram', snapchat: 'Snapchat', tiktok: 'TikTok', facebook: 'Facebook', whatsapp: 'WhatsApp', website: 'Website',
   months: ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'],
   langSwitch: 'العربية',
+  activeMember: 'Member', joinHead: 'Your next reward is closer', joinHeadSub: 'Join {shop} rewards and earn with every visit', perkGifts: 'Rewards', perkGiftsSub: 'just for you', perkCollect: 'Collect', perkCollectSub: 'every visit', perkWallet: 'In your phone', perkWalletSub: 'no app',
   joinTitle: 'Join the loyalty card', joinPageTitle: 'Join the {shop} loyalty card', paused: 'This shop’s loyalty program is paused for now.', openMine: 'Open my card',
   haveCard: 'You already have a card here 👋', referred: '🎁 {name} invited you! You both get {n} {unit} on your first visit.',
   phone: 'Mobile number', phoneHint: 'So the cashier can find your card if you lose it.', bday: '🎂 Your birthday', optional: '(optional)',

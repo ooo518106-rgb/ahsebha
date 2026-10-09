@@ -266,6 +266,16 @@ function memberSummary(m) {
       : html`<div class="small muted">باقي <b class="num">${p.remaining}</b> ${s.unit} لـ ${s.rewardName}</div>`}`;
 }
 
+// آخر حركات الزبون (بالكاشير): 4 مربعات صغيرة
+async function loadRecent(m) {
+  let d;
+  try { d = await api(`/api/members/${m.id}`); } catch { return; }
+  const box = $('#recentTiles');
+  if (!box || (state.member && state.member.id !== m.id)) return;
+  const txns = d.txns.slice(0, 4);
+  render(box, txns.length ? html`${txns.map((t) => html`<div><span class="muted">${KIND[t.kind]}${t.kind === 'redeem' ? ' 🎁' : ''} · ${ago(t.at)}</span><b class="num ${t.delta > 0 ? 'plus' : 'minus'}">${t.delta > 0 ? '+' : ''}${fmt(t.delta)}</b></div>`)}` : '');
+}
+
 // 🧾 رقم الفاتورة: بتنكتب أو بتنقرا من QR الفاتورة (المبلغ كمان إذا موجود فيه)
 function invoiceRow() {
   const mode = state.shop.perks.invoiceMode || 'optional';
@@ -376,42 +386,61 @@ function showMember(m) {
   const panel = $('#memberPanel');
   if (!panel) return;
   if (!m) {
+    panel.classList.remove('two');
     render(panel, html`<div class="panel center muted" style="padding:40px 16px"><div style="font-size:2.5rem">🎫</div><p>امسح QR الزبون أو دوّر عليه برقم البطاقة أو الجوال</p></div>`);
     return;
   }
   const s = state.shop;
   const stamps = s.programType === 'stamps';
+  const p = m.progress;
+  const filled = p.available && !p.toward ? p.cost : p.toward;
+  const credit = s.perks.creditOn || m.credit > 0;
+  panel.classList.add('two');
   render(panel, html`
-    <div class="panel stack">
+    <section class="panel stack cust-card">
       <div class="member-head">
         <div class="avatar">${m.name.trim().charAt(0)}</div>
-        <div class="grow" style="flex:1;min-width:0"><b>${m.name}</b><div class="small muted"><span class="num">${m.cardNo}</span> · <span class="num">${m.phone}</span></div></div>
+        <div class="grow" style="flex:1;min-width:0"><b>${m.name}</b> ${m.tier ? html`<span class="tier-badge">${m.tier.icon} ${m.tier.name}</span>` : ''}<div class="small muted"><span class="num">${m.cardNo}</span> · <span class="num">${m.phone}</span></div></div>
         <button class="btn ghost sm" id="closeMember" type="button" aria-label="إلغاء">✕</button>
       </div>
-      ${memberBadges(m)}
-      ${memberSummary(m)}
-      ${stamps
-        ? html`<div class="row"><div class="stepper"><button class="btn ghost" type="button" id="minus">−</button><output id="count">1</output><button class="btn ghost" type="button" id="plus">+</button></div>
-            <button class="btn big grow" id="earnBtn" type="button">أضف ختم</button></div>`
-        : html`<form class="stack" id="earnForm">
-            <label for="amount">مبلغ الفاتورة (${s.currency})</label>
-            <div class="row"><input class="grow num" id="amount" type="number" inputmode="decimal" min="0" step="0.001" placeholder="0.00" style="font-size:1.3rem" required>
-            <button class="btn big" id="earnBtn" type="submit">أضف</button></div>
-            <div class="quick-amounts">${[1, 5, 10, 20].map((v) => html`<button type="button" data-plus="${v}">+${v}</button>`)}</div>
-            ${invoiceRow()}
-            <div class="small muted" id="preview"></div>
-          </form>`}
-      ${stamps && s.perks.invoiceMode === 'required' ? invoiceRow() : ''}
-      <button class="btn ${m.progress.available ? 'big' : 'ghost'} block" id="redeemBtn" type="button" ${m.progress.available ? '' : 'disabled'}>🎁 صرف المكافأة: ${s.rewardName}</button>
+      ${memberBadges({ ...m, tier: null })}
+      <div class="cust-stats">
+        <div><b class="num">${stamps ? `${filled}/${p.cost}` : fmt(m.balance)}</b><span>${stamps ? 'أختام' : 'نقطة حالياً'}</span></div>
+        <div><b class="num">${fmt(m.visits)}</b><span>زيارة</span></div>
+        ${credit ? html`<div><b class="num">${fmt(m.credit)}</b><span>رصيد (${s.currency})</span></div>` : html`<div><b style="font-size:1rem">${ago(m.lastVisit)}</b><span>آخر زيارة</span></div>`}
+      </div>
+      ${stamps ? stampsHTML(p.cost, filled) : html`<div class="bar"><i style="width:${p.pct}%"></i></div>`}
+      ${p.available
+        ? html`<div class="reward-ready">🎁 ${p.available > 1 ? `${p.available} مكافآت جاهزة` : 'مكافأة جاهزة'}: ${s.rewardName}</div>`
+        : html`<div class="small muted">باقي <b class="num">${p.remaining}</b> ${s.unit} لـ ${s.rewardName}</div>`}
       <div id="memberCoupons"></div>
-      ${s.perks.creditOn || m.credit > 0 ? html`<div class="credit-box stack">
+      ${credit ? html`<div class="credit-box stack">
           <div class="row" style="justify-content:space-between"><b>💳 الرصيد</b><b class="num">${fmt(m.credit)} ${s.currency}</b></div>
           <div class="row"><input class="grow num" id="creditAmt" type="number" inputmode="decimal" min="0" step="0.001" placeholder="المبلغ">
             <button class="btn ghost" type="button" id="spendBtn" ${m.credit > 0 ? '' : 'disabled'}>ادفع من الرصيد</button>
             ${s.perks.creditOn ? html`<button class="btn soft" type="button" id="topupBtn">اشحن${s.perks.creditBonus ? ` +${s.perks.creditBonus}%` : ''}</button>` : ''}</div>
         </div>` : ''}
-      <button class="btn ghost block" id="openMember" type="button">ملف الزبون ورابط بطاقته</button>
-    </div>`);
+      <div class="cust-actions"><button class="btn ghost" id="openMember" type="button">📋 سجل الزبون ورابط بطاقته</button></div>
+      <div class="recent-tiles" id="recentTiles"></div>
+    </section>
+    <section class="panel stack earn-card">
+      ${stamps
+        ? html`<label>كم ختم؟</label>
+          <div class="row"><div class="stepper"><button class="btn ghost" type="button" id="minus">−</button><output id="count">1</output><button class="btn ghost" type="button" id="plus">+</button></div></div>
+          ${s.perks.invoiceMode === 'required' ? invoiceRow() : ''}
+          <div class="earn-actions"><button class="btn big" id="earnBtn" type="button">أضف ختم</button>
+            <button class="btn ghost big" id="redeemBtn" type="button" ${p.available ? '' : 'disabled'}>🎁 صرف مكافأة</button></div>`
+        : html`<form class="stack" id="earnForm">
+            <label for="amount">قيمة الفاتورة</label>
+            <div class="amount-box"><input class="num" id="amount" type="number" inputmode="decimal" min="0" step="0.001" placeholder="0.00" required><span class="cur">${s.currency}</span></div>
+            <div class="quick-amounts">${[5, 10, 20, 50].map((v) => html`<button type="button" data-plus="${v}">+${v}</button>`)}</div>
+            ${invoiceRow()}
+            <div class="earn-preview hidden" id="preview"></div>
+            <div class="earn-actions"><button class="btn big" id="earnBtn" type="submit">✨ أضف النقاط</button>
+              <button class="btn ghost big" id="redeemBtn" type="button" ${p.available ? '' : 'disabled'}>🎁 صرف مكافأة</button></div>
+          </form>`}
+    </section>`);
+  loadRecent(m);
   loadMemberCoupons(m);
   bindCredit(m);
 
@@ -430,7 +459,9 @@ function showMember(m) {
     const { mult, label } = perkMult(m);
     amount.oninput = () => {
       const pts = Math.floor(Math.floor(Number(amount.value) * s.pointsPerUnit + 1e-9) * mult + 1e-9);
-      $('#preview').textContent = pts > 0 ? `الزبون رح ياخد +${fmt(pts)} ${countWord(pts, 'نقطة', 'نقاط')}${label}` : '';
+      const box = $('#preview');
+      box.classList.toggle('hidden', !(pts > 0));
+      if (pts > 0) render(box, html`<div class="ep-text"><small>الزبون رح ياخد</small><b class="num">+${fmt(pts)} ${countWord(pts, 'نقطة', 'نقاط')}</b>${label ? html` <small style="display:inline">${label}</small>` : ''}</div><small>(${fmt(s.pointsPerUnit)} ${countWord(s.pointsPerUnit, 'نقطة', 'نقاط')} لكل 1 ${s.currency})</small>`);
     };
     // مبالغ سريعة: كل كبسة بتزيد على المبلغ
     $$('[data-plus]').forEach((b) => { b.onclick = () => { amount.value = Math.round(((Number(amount.value) || 0) + Number(b.dataset.plus)) * 1000) / 1000; amount.oninput(); }; });
@@ -848,7 +879,7 @@ async function activity() {
       <div class="stat"><b class="num">${fmt(s.earnedMonth)}</b><span class="small muted">${state.shop.programType === 'stamps' ? 'أختام' : 'نقاط'} هالشهر</span></div>
       <div class="stat"><b class="num">${fmt(s.redeemedMonth)}</b><span class="small muted">مكافآت هالشهر</span></div>
     </div>
-    ${isOwner() ? html`<section class="panel" id="healthBox" style="margin-top:14px"><h2>🩺 صحة المحل</h2><p class="muted small">جاري الحساب…</p></section>` : ''}
+    ${isOwner() ? html`<section class="panel" id="healthBox" style="margin-top:14px"><h2>💓 نبض محلك</h2><p class="muted small">جاري الحساب…</p></section>` : ''}
     <section class="panel" style="margin-top:14px">
       <h2>آخر الحركات</h2>
       ${r.recent.length ? html`<ul class="list" id="alist">${r.recent.map((t) => txnRow(t, true))}</ul>` : html`<p class="muted">لسا ما في حركات. ابدأ من الكاشير 👆</p>`}
@@ -2065,7 +2096,7 @@ async function loadHealth() {
   const color = r.score >= 75 ? 'var(--ok, #12b76a)' : r.score >= 50 ? '#f79009' : 'var(--bad, #f04438)';
   const trend = r.visits.prev ? Math.round(((r.visits.now - r.visits.prev) / r.visits.prev) * 100) : null;
   render(box, html`<div class="row" style="justify-content:space-between;align-items:center">
-      <h2 style="margin:0">🩺 صحة المحل</h2>
+      <h2 style="margin:0">💓 نبض محلك</h2>
       <div class="health-score" style="--c:${color};--p:${r.score}"><b class="num">${r.score}</b><span class="small">${r.label}</span></div>
     </div>
     <p class="small muted">زيارات آخر 30 يوم: <b class="num">${fmt(r.visits.now)}</b>${trend == null ? '' : html` (${trend >= 0 ? `⬆️ ${trend}%` : `⬇️ ${-trend}%`} عن الشهر اللي قبله)`}</p>
