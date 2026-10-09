@@ -352,6 +352,15 @@ export const SCHEMA = [
     png TEXT NOT NULL,
     created_at INTEGER NOT NULL
   )`,
+  // 💬 آراء أصحاب المحلات بصفحة البيع: مدير المنصة بيضيفها (رأي حقيقي من محل عنا، بإذنه)
+  `CREATE TABLE IF NOT EXISTS testimonials (
+    id INTEGER PRIMARY KEY,
+    shop_id INTEGER,
+    shop_name TEXT NOT NULL,
+    person TEXT NOT NULL DEFAULT '',
+    quote TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+  )`,
 ];
 
 // تعديلات على جداول موجودة (بتنطبق مرة وحدة؛ لو العمود موجود بنتجاهل الخطأ)
@@ -436,4 +445,8 @@ export const MIGRATIONS = [
   // 📊 أول رسالة: وصلت؟ انقرت؟ (إشعارات الحالة من Meta)
   'ALTER TABLE prospects ADD COLUMN delivered_at INTEGER',
   'ALTER TABLE prospects ADD COLUMN read_at INTEGER',
+  // 🎁 عرض أول المحلات: مين أخد مكان، وكم خصم وكم شهر غطّت كل دفعة
+  'ALTER TABLE shops ADD COLUMN founder_at INTEGER',
+  'ALTER TABLE payments ADD COLUMN discount REAL NOT NULL DEFAULT 0',
+  'ALTER TABLE payments ADD COLUMN promo_months INTEGER NOT NULL DEFAULT 0',
 ];

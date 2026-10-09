@@ -1083,6 +1083,9 @@ export const PLANS = {
   pro: { name: 'مميز', month: 25, year: 250 },
 };
 export const BASIC_LIMITS = { branches: 1, staff: 2, broadcasts: 4 };
+// 🎁 عرض أول المحلات: أول 20 محل بيشتركوا بياخدوا خصم 30% على أول 3 شهور.
+// الشهري: أول 3 دفعات بالخصم. السنوي: بينخصم منه خصم الشهور اللي ضايلة. المكان بينحجز لما تتأكد أول حوالة
+export const PROMO = { pct: 30, months: 3, total: 20 };
 // التجربة المجانية ومحل العرض على المميز، والمشترك حسب الباقة اللي دفعها
 const isPro = (shop) => shop.plan !== 'basic' || !shop.paid || !!shop.demo;
 const PRO_SQL = "(s.plan <> 'basic' OR s.paid = 0 OR s.demo = 1)";
@@ -1360,6 +1363,8 @@ async function site(c) {
     signupOpen: !c.env.SIGNUP_CODE,
     apple: !!(await appleConfig(c, { withKey: false })),
     plans: PLANS,
+    promo: await promoInfo(c),
+    testimonials: (await testimonialList(c, 6)).map(({ shop, person, quote, logo }) => ({ shop, person, quote, logo })),
     sales: !!aiConfig(c.env),
   });
 }
@@ -1570,9 +1575,11 @@ async function adminShopPlan(c, id) {
   if (!shop) fail(404, 'ما لقينا المحل');
   const tier = readTier(c.body.tier);
   if (c.body.action === 'month' || c.body.action === 'year') {
+    // بنسجّلها كدفعة (كاش أو تحويل برّا المنصة) عشان الإيرادات وعمولة المندوب، بخصم أول المحلات إذا إله
+    const q = quote(tier, c.body.action, await promoMonths(c, shop));
     await extendPlan(c.db, shop, c.body.action, tier);
-    // بنسجّلها كدفعة (كاش أو تحويل برّا المنصة) عشان الإيرادات وعمولة المندوب
-    await c.db.run("INSERT INTO payments (shop_id, plan, tier, amount, payer, status, created_at, decided_at) VALUES (?, ?, ?, ?, 'تفعيل يدوي', 'approved', ?, ?)", shop.id, c.body.action, tier, planPrice(tier, c.body.action), Date.now(), Date.now());
+    await c.db.run("INSERT INTO payments (shop_id, plan, tier, amount, discount, promo_months, payer, status, created_at, decided_at) VALUES (?, ?, ?, ?, ?, ?, 'تفعيل يدوي', 'approved', ?, ?)", shop.id, c.body.action, tier, q.amount, q.discount, q.promoMonths, Date.now(), Date.now());
+    if (q.promoMonths) await c.db.run('UPDATE shops SET founder_at = ? WHERE id = ? AND founder_at IS NULL', Date.now(), shop.id);
   }
   // تبديل الباقة بدون دفعة (تصحيح، أو ترقية بالفرق برّا المنصة)
   else if (c.body.action === 'basic' || c.body.action === 'pro') await c.db.run('UPDATE shops SET plan = ? WHERE id = ?', c.body.action, shop.id);
@@ -1592,6 +1599,45 @@ async function extendPlan(db, shop, period, tier) {
 
 // ─── الدفع بـ CliQ: صاحب المحل بيحوّل وبيبلّغ، ومدير المنصة بيتأكد من حسابه وبيفعّل بكبسة ───
 const planPrice = (tier, period) => PLANS[tier === 'basic' ? 'basic' : 'pro'][period];
+const money2 = (v) => Math.round(v * 100) / 100;
+
+// كم محل بالعرض: PROMO_TOTAL من إعدادات Cloudflare بيغيّره (0 = العرض وقف)
+const promoTotal = (env) => (/^\d{1,4}$/.test(String(env.PROMO_TOTAL ?? '')) ? Number(env.PROMO_TOTAL) : PROMO.total);
+// كم مكان ضايل بعرض أول المحلات (محل العرض ما بينحسب)
+async function promoLeft(c) {
+  const total = promoTotal(c.env);
+  if (!total) return 0;
+  const r = await c.db.get('SELECT COUNT(*) AS n FROM shops WHERE founder_at IS NOT NULL AND demo = 0');
+  return Math.max(0, total - r.n);
+}
+// كم شهر خصم ضايل لهالمحل: إله مكان (أو في مكان وهو لسا ما اشترك قبل)، ناقص الشهور اللي أخدها (الحوالات اللي بتستنى بتنحسب)
+async function promoMonths(c, shop) {
+  if (shop.demo) return 0;
+  if (!shop.founder_at) {
+    if (shop.paid || !(await promoLeft(c))) return 0;
+    if (await c.db.get("SELECT 1 FROM payments WHERE shop_id = ? AND status = 'approved' LIMIT 1", shop.id)) return 0;
+  }
+  const used = await c.db.get("SELECT COALESCE(SUM(promo_months), 0) AS n FROM payments WHERE shop_id = ? AND status <> 'rejected'", shop.id);
+  return Math.max(0, PROMO.months - used.n);
+}
+// السعر اللي بيدفعه هالمحل هلأ: { amount, discount, promoMonths }
+function quote(tier, period, months) {
+  const p = PLANS[readTier(tier)];
+  if (!months) return { amount: p[period], discount: 0, promoMonths: 0 };
+  const promoMonths = period === 'month' ? 1 : months;
+  const discount = money2((p.month * promoMonths * PROMO.pct) / 100);
+  return { amount: money2(p[period] - discount), discount, promoMonths };
+}
+async function shopPrices(c, shop) {
+  const months = await promoMonths(c, shop);
+  const prices = {};
+  for (const tier of ['basic', 'pro']) prices[tier] = { month: quote(tier, 'month', months).amount, year: quote(tier, 'year', months).amount };
+  return { months, prices };
+}
+const promoInfo = async (c) => {
+  const left = await promoLeft(c);
+  return left ? { ...PROMO, total: promoTotal(c.env), left } : null;
+};
 const CLIQ_RE = /^[A-Za-z0-9._+\- ]{3,40}$/;
 
 async function cliqInfo(db) {
@@ -1600,13 +1646,17 @@ async function cliqInfo(db) {
   return { alias, name: (await getSetting(db, 'cliq_name')) || '', bank: (await getSetting(db, 'cliq_bank')) || '' };
 }
 
-const paymentView = (p) => ({ id: p.id, plan: p.plan, tier: readTier(p.tier), amount: p.amount, payer: p.payer, ref: p.ref, status: p.status, createdAt: p.created_at, decidedAt: p.decided_at });
+const paymentView = (p) => ({ id: p.id, plan: p.plan, tier: readTier(p.tier), amount: p.amount, discount: p.discount || 0, payer: p.payer, ref: p.ref, status: p.status, createdAt: p.created_at, decidedAt: p.decided_at });
 
 async function billing(c) {
   const payments = await c.db.all('SELECT * FROM payments WHERE shop_id = ? ORDER BY created_at DESC LIMIT 10', c.shop.id);
+  const { months, prices } = await shopPrices(c, c.shop);
   return json({
     subscription: await subscription(c, c.shop),
     plans: PLANS,
+    // الأسعار لهالمحل (بخصم أول المحلات إذا إله)، وكم شهر خصم ضايله، وكم مكان ضايل بالعرض
+    prices,
+    promo: { ...PROMO, total: promoTotal(c.env), monthsLeft: months, left: await promoLeft(c), founder: !!c.shop.founder_at },
     plan: planInfo(c.shop),
     limits: BASIC_LIMITS,
     currency: 'JOD',
@@ -1622,14 +1672,15 @@ async function billingClaim(c) {
   const plan = c.body.plan;
   if (plan !== 'month' && plan !== 'year') fail(400, 'اختار شهر أو سنة');
   const tier = readTier(c.body.tier);
-  const amount = planPrice(tier, plan);
+  const q = quote(tier, plan, await promoMonths(c, c.shop));
+  const amount = q.amount;
   const payer = clean(c.body.payer, 60);
   if (payer.length < 2) fail(400, 'اكتب اسم اللي حوّل (متل ما بيطلع بالحوالة)');
   await rateLimit(c, `claim:${c.shop.id}`, 5, 24 * 60 * MIN, 'بلّغت كتير اليوم، استنى لنتأكد من الحوالات');
   const pending = await c.db.get("SELECT COUNT(*) AS n FROM payments WHERE shop_id = ? AND status = 'pending'", c.shop.id);
   if (pending.n >= 2) fail(409, 'عندك حوالات لسا عم نتأكد منها');
-  await c.db.run('INSERT INTO payments (shop_id, plan, tier, amount, payer, ref, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)', c.shop.id, plan, tier, amount, payer, clean(c.body.ref, 60), Date.now());
-  await notifyAdmin(c, { title: '💳 حوالة CliQ للتأكيد', body: `${c.shop.name} · ${PLANS[tier].name} · ${amount} دينار من ${payer}`, url: `${c.origin}/app#admin` });
+  await c.db.run('INSERT INTO payments (shop_id, plan, tier, amount, discount, promo_months, payer, ref, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)', c.shop.id, plan, tier, amount, q.discount, q.promoMonths, payer, clean(c.body.ref, 60), Date.now());
+  await notifyAdmin(c, { title: '💳 حوالة CliQ للتأكيد', body: `${c.shop.name} · ${PLANS[tier].name} · ${amount} دينار من ${payer}${q.discount ? ' 🎁 بخصم أول المحلات' : ''}`, url: `${c.origin}/app#admin` });
   return billing(c);
 }
 
@@ -1651,6 +1702,8 @@ async function adminPaymentDecide(c, id) {
   // العلامة أول، عشان لو انكبس الزر مرتين ما ينمدد الاشتراك مرتين
   const r = await c.db.run("UPDATE payments SET status = ?, decided_at = ? WHERE id = ? AND status = 'pending'", action === 'approve' ? 'approved' : 'rejected', Date.now(), p.id);
   if (r.changes && action === 'approve') {
+    // أول حوالة بالخصم: المحل بياخد مكانه بعرض أول المحلات
+    if (p.promo_months) await c.db.run('UPDATE shops SET founder_at = ? WHERE id = ? AND founder_at IS NULL', Date.now(), p.shop_id);
     await extendPlan(c.db, await shopRow(c.db, p.shop_id), p.plan, p.tier);
     await notifyOwners(c, p.shop_id, { title: '✅ انفعّل اشتراكك', body: `وصلتنا حوالتك (${p.amount} دينار) على الباقة ${readTier(p.tier) === 'basic' ? 'الأساسية' : 'المميزة'}. شكراً إلك 🙏`, url: `${c.origin}/app#settings` });
   }
@@ -2915,13 +2968,13 @@ const ownerWhatsapp = (env) => (/^\d{8,15}$/.test(String(env.WHATSAPP_NUMBER || 
 async function salesSystem(c, channel, prospect, offer) {
   const first = prospect && await c.db.get("SELECT text FROM sales_msgs WHERE prospect_id = ? AND role <> 'in' ORDER BY id LIMIT 1", prospect.id);
   const rules = sales.salesRules({
-    plans: PLANS, features: FEATURES, apple: !!(await appleConfig(c, { withKey: false })), signupOpen: !c.env.SIGNUP_CODE, origin: c.origin, ownerWhatsapp: ownerWhatsapp(c.env),
+    plans: PLANS, features: FEATURES, apple: !!(await appleConfig(c, { withKey: false })), signupOpen: !c.env.SIGNUP_CODE, origin: c.origin, ownerWhatsapp: ownerWhatsapp(c.env), promo: promoTotal(c.env) ? { ...PROMO, total: promoTotal(c.env) } : null,
   });
   const t = perks.localTime('JO');
   const today = `${t.year}-${String(t.month).padStart(2, '0')}-${String(t.day).padStart(2, '0')}`;
   return [
     { type: 'text', text: rules, cache_control: { type: 'ephemeral' } },
-    { type: 'text', text: sales.salesContext({ channel, today, prospect, firstMessage: first && first.text, offer, offerLink: offer ? offerLink(c, offer.code) : null, guidance: await getSetting(c.db, 'sales_guidance'), pageLink: prospect && prospect.code ? `${c.origin}/?p=${prospect.code}` : null }) },
+    { type: 'text', text: sales.salesContext({ channel, today, prospect, firstMessage: first && first.text, offer, offerLink: offer ? offerLink(c, offer.code) : null, guidance: await getSetting(c.db, 'sales_guidance'), pageLink: prospect && prospect.code ? `${c.origin}/?p=${prospect.code}` : null, promoLeft: promoTotal(c.env) ? await promoLeft(c) : null }) },
   ];
 }
 
@@ -3924,6 +3977,35 @@ async function adminResellerPayout(c, id) {
   return adminResellers(c);
 }
 
+// ─── 💬 آراء المحلات بصفحة البيع: مدير المنصة بيضيف رأي حقيقي من محل عنا (بإذن صاحبه)، وبيطلع بالموقع لحاله ───
+async function testimonialList(c, limit = 30) {
+  const rows = await c.db.all('SELECT t.*, s.name AS live_name, s.logo_version FROM testimonials t LEFT JOIN shops s ON s.id = t.shop_id ORDER BY t.created_at DESC LIMIT ?', limit);
+  return rows.map((t) => ({
+    id: t.id, shopId: t.shop_id, shop: t.live_name || t.shop_name, person: t.person, quote: t.quote,
+    logo: t.live_name ? `/media/logo/${t.shop_id}.png?v=${t.logo_version}` : null, createdAt: t.created_at,
+  }));
+}
+
+async function adminTestimonials(c) {
+  await requireAdmin(c);
+  if (c.req.method === 'POST') {
+    const shop = await c.db.get('SELECT id, name FROM shops WHERE id = ? AND demo = 0', Number(c.body.shopId));
+    if (!shop) fail(400, 'اختار المحل');
+    const quote = clean(c.body.quote, 300).replace(/^[«"']+|[»"']+$/g, '').trim();
+    if (quote.length < 10) fail(400, 'اكتب رأي صاحب المحل (جملة على الأقل)');
+    if ((await c.db.get('SELECT COUNT(*) AS n FROM testimonials')).n >= 30) fail(400, 'وصلت لأكتر عدد آراء، احذف رأي قديم');
+    await c.db.run('INSERT INTO testimonials (shop_id, shop_name, person, quote, created_at) VALUES (?, ?, ?, ?, ?)', shop.id, shop.name, clean(c.body.person, 60), quote, Date.now());
+  }
+  const shops = await c.db.all('SELECT id, name FROM shops WHERE demo = 0 ORDER BY name LIMIT 500');
+  return json({ testimonials: await testimonialList(c), shops });
+}
+
+async function adminDeleteTestimonial(c, id) {
+  await requireAdmin(c);
+  await c.db.run('DELETE FROM testimonials WHERE id = ?', Number(id));
+  return adminTestimonials(c);
+}
+
 // صفحة المندوب (برابط سري): محلاته وعمولته
 async function partnerStats(c, token) {
   const r = await c.db.get('SELECT * FROM resellers WHERE token = ?', token);
@@ -4029,6 +4111,9 @@ const API = [
   ['GET', /^\/api\/admin\/resellers$/, adminResellers, 'staff'],
   ['POST', /^\/api\/admin\/resellers$/, adminAddReseller, 'staff'],
   ['POST', /^\/api\/admin\/resellers\/(\d+)\/payout$/, adminResellerPayout, 'staff'],
+  ['GET', /^\/api\/admin\/testimonials$/, adminTestimonials, 'staff'],
+  ['POST', /^\/api\/admin\/testimonials$/, adminTestimonials, 'staff'],
+  ['DELETE', /^\/api\/admin\/testimonials\/(\d+)$/, adminDeleteTestimonial, 'staff'],
   ['GET', /^\/api\/partner\/([a-z2-9]{20})$/, partnerStats],
   ['GET', /^\/api\/billing$/, billing, 'owner'],
   ['POST', /^\/api\/billing\/claim$/, billingClaim, 'owner'],

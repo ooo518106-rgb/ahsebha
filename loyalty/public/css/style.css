@@ -556,6 +556,28 @@ html[dir="ltr"] .marquee-track { animation-name: marqueeLtr; }
 .plan .price span { color: var(--muted); font-size: .92rem; }
 /* 💎 الباقتين بميزاتهم */
 .plans-tiers { max-width: 860px; }
+.plan .price s { color: var(--muted); font-size: 1.3rem; align-self: center; }
+.plan .promo-note { color: var(--caramel); font-weight: 600; margin-top: -6px; }
+/* 💬 آراء أصحاب المحلات */
+.reviews { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; }
+.review { margin: 0; background: var(--card); border: 1px solid var(--border); border-radius: 22px; padding: 20px; display: grid; gap: 16px; align-content: space-between; box-shadow: var(--shadow-sm); }
+.review blockquote { margin: 0; font-size: 1rem; line-height: 1.8; }
+.review figcaption { display: flex; align-items: center; gap: 10px; }
+.review figcaption img { width: 44px; height: 44px; border-radius: 12px; object-fit: cover; flex: none; }
+.review figcaption b { display: block; }
+.review figcaption span { color: var(--muted); font-size: .86rem; }
+/* 🎁 عرض أول المحلات */
+.promo-band { max-width: 860px; margin: 0 auto 22px; display: flex; align-items: center; gap: 18px; padding: 16px 20px; border-radius: 22px; background: color-mix(in srgb, var(--caramel) 12%, var(--card)); border: 1px solid color-mix(in srgb, var(--caramel) 45%, transparent); text-align: start; }
+.promo-band > div:first-child { flex: 1; display: grid; gap: 4px; }
+.promo-band > div:first-child b { font-size: 1.05rem; }
+.promo-band > div:first-child span { color: var(--muted); font-size: .9rem; }
+.promo-left { display: grid; justify-items: center; gap: 2px; min-width: 96px; position: relative; padding-bottom: 10px; }
+.promo-left b { font-size: 1.8rem; line-height: 1; color: var(--caramel); }
+.promo-left span { font-size: .78rem; color: var(--muted); }
+.promo-left i { position: absolute; bottom: 0; inset-inline: 6px; height: 5px; border-radius: 4px; background: color-mix(in srgb, var(--caramel) 20%, transparent); }
+.promo-left i::after { content: ""; position: absolute; inset-block: 0; inset-inline-start: 0; width: var(--w); border-radius: inherit; background: var(--caramel); }
+.hero-promo { display: inline-block; margin-top: 16px; padding: 8px 14px; border-radius: 14px; background: rgba(228, 170, 110, .14); border: 1px solid rgba(228, 170, 110, .35); color: #f2c48f; font-size: .88rem; font-weight: 600; text-decoration: none; animation: rise .8s .4s var(--ease) both; }
+@media (max-width: 560px) { .promo-band { flex-direction: column; text-align: center; } }
 .feats { list-style: none; margin: 4px 0 0; padding: 16px 0 0; display: grid; gap: 10px; text-align: start; border-top: 1px solid var(--border); }
 .feats li { display: flex; gap: 10px; align-items: flex-start; font-size: .9rem; line-height: 1.55; }
 .feats li i { flex: none; width: 22px; height: 22px; margin-top: 1px; border-radius: 50%; display: grid; place-items: center; font-style: normal; font-size: .72rem; font-weight: 700; }

@@ -10,7 +10,7 @@ const HOUR = 36e5;
 const amman = (hour, days = 0) => { const d = new Date(Date.now() + days * DAY); return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), hour - 3, 0); };
 
 // منصة فيها مدير (أول حساب) ومحل تاني، وخدمة إشعارات وهمية بتفك الرسائل
-async function platform() {
+async function platform(env = { PROMO_TOTAL: '0' }) { // بالأسعار الكاملة إلا إذا الاختبار بدّه عرض أول المحلات
   const sent = [];
   const devices = new Map();
   const fetchImpl = async (url, init) => {
@@ -18,7 +18,7 @@ async function platform() {
     sent.push({ url, msg: d ? JSON.parse(await d.decrypt(new Uint8Array(init.body))) : null });
     return new Response(null, { status: 201 });
   };
-  const w = await setup({ fetch: fetchImpl });
+  const w = await setup({ fetch: fetchImpl, ...env });
   const admin = w.client();
   await signup(admin, { shopName: 'Platform' });
   await admin.get('/api/me');

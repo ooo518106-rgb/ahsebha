@@ -1665,12 +1665,16 @@ async function loadBilling() {
       : html`<p class="alert bad small">⏳ الاشتراك خالص. الكاشير متوقف لحد ما تجدّد، وزبائنك ونقاطهم محفوظين.</p>`;
   let tier = mine || 'pro';
   let period = 'month';
+  // الأسعار لمحلك (بخصم أول المحلات إذا إلك)
+  const price = b.prices || b.plans;
+  const promo = b.promo && b.promo.monthsLeft > 0 ? b.promo : null;
+  const promoNote = promo ? html`<p class="alert ok small">🎁 <b>عرض أول ${promo.total} محل:</b> خصم ${promo.pct}% على ${promo.monthsLeft === promo.months ? `أول ${promo.months} شهور` : `الـ ${promo.monthsLeft} ${promo.monthsLeft === 1 ? 'شهر' : 'شهور'} الجاية`} من اشتراكك، وبينحسب لحاله تحت.${promo.founder ? '' : ` ضايل ${promo.left} مكان بس.`}</p>` : '';
   const wa = b.whatsapp ? `https://wa.me/${b.whatsapp}?text=${encodeURIComponent(`مرحبا، بدي أشترك بنقاطك لمحل ${state.shop.name}`)}` : null;
-  render(box, html`<h2>💳 الاشتراك</h2>${status}
+  render(box, html`<h2>💳 الاشتراك</h2>${status}${promoNote}
     <div class="tier-pick" id="tierPick" role="radiogroup" aria-label="الباقة">${['basic', 'pro'].map((t) => html`<div class="tier-card ${t === tier ? 'on' : ''}" role="radio" tabindex="0" aria-checked="${t === tier}" data-tier="${t}">
         <b>${t === 'pro' ? '💎' : '⭐'} ${b.plans[t].name} ${mine === t ? html`<span class="badge ok">باقتك</span>` : ''}</b>
-        <span class="price"><span class="num">${b.plans[t].month}</span> <span class="small muted">دينار بالشهر</span></span>
-        <span class="small muted">أو <span class="num">${b.plans[t].year}</span> بالسنة (وفّر <span class="num">${b.plans[t].month * 12 - b.plans[t].year}</span>)</span>
+        <span class="price">${promo ? html`<s class="small muted num">${b.plans[t].month}</s> ` : ''}<span class="num">${price[t].month}</span> <span class="small muted">دينار بالشهر${promo ? ` · أول ${promo.monthsLeft === 1 ? 'شهر' : `${promo.monthsLeft} شهور`}` : ''}</span></span>
+        <span class="small muted">أو <span class="num">${price[t].year}</span> بالسنة${promo ? '' : html` (وفّر <span class="num">${b.plans[t].month * 12 - b.plans[t].year}</span>)`}</span>
         <span class="small">${PLAN_BLURB[t]}</span>
       </div>`)}</div>
     <details><summary class="small">قارن الباقتين ميزة ميزة</summary>${raw(compareHTML())}</details>
@@ -1691,17 +1695,17 @@ async function loadBilling() {
         <p class="hint">منتأكد من الحوالة ومنفعّل اشتراكك عادةً بنفس اليوم. إذا رقّيت من الأساسي للمميز، الباقة بتتحوّل أول ما نأكد.</p>
       </form>` : ''}
     ${wa ? html`<a class="btn ${b.cliq ? 'ghost' : ''} block wa" href="${wa}" target="_blank" rel="noopener">${b.cliq ? 'سؤال؟ احكي معنا عالواتساب' : 'اشترك عالواتساب'}</a>` : ''}
-    ${b.payments.length ? html`<h3 style="margin-top:6px">حوالاتك</h3><ul class="list">${b.payments.map((p) => html`<li><div class="main"><b>${tierName(p.tier)} · ${p.plan === 'year' ? 'سنة' : 'شهر'} · <span class="num">${p.amount}</span> دينار</b>
+    ${b.payments.length ? html`<h3 style="margin-top:6px">حوالاتك</h3><ul class="list">${b.payments.map((p) => html`<li><div class="main"><b>${tierName(p.tier)} · ${p.plan === 'year' ? 'سنة' : 'شهر'} · <span class="num">${p.amount}</span> دينار${p.discount ? ' 🎁' : ''}</b>
         <span class="small muted">${p.payer}${p.ref ? ` · ${p.ref}` : ''} · ${ago(p.createdAt)}</span></div><span class="badge ${PAY_STATUS[p.status][1]}">${PAY_STATUS[p.status][0]}</span></li>`)}</ul>` : ''}`);
   bindCopy(box);
   const form = $('#payForm', box);
   const draw = () => {
     $$('.tier-card', box).forEach((c) => { const on = c.dataset.tier === tier; c.classList.toggle('on', on); c.setAttribute('aria-checked', String(on)); });
     if (!form) return;
-    $$('[data-amt]', form).forEach((el) => { el.textContent = b.plans[tier][el.dataset.amt]; });
+    $$('[data-amt]', form).forEach((el) => { el.textContent = price[tier][el.dataset.amt]; });
     $$('#planSeg button', form).forEach((x) => x.classList.toggle('on', x.dataset.period === period));
-    $('#payAmount', form).textContent = b.plans[tier][period];
-    $('#paySubmit', form).textContent = `حوّلت ${b.plans[tier][period]} دينار للباقة ${tierThe(tier)} ✅`;
+    $('#payAmount', form).textContent = price[tier][period];
+    $('#paySubmit', form).textContent = `حوّلت ${price[tier][period]} دينار للباقة ${tierThe(tier)} ✅`;
   };
   $$('.tier-card', box).forEach((c) => {
     const pick = () => { tier = c.dataset.tier; draw(); };
@@ -1929,14 +1933,15 @@ async function admin() {
   let stats;
   let salesSt;
   let backupSt;
+  let testi;
   const nav = state.nav;
   try {
-    [{ leads }, { shops, signupOpen }, appleSt, pay, { resellers }, stats, salesSt, backupSt] = await Promise.all([api('/api/admin/leads'), api('/api/admin/shops'), api('/api/admin/apple'), api('/api/admin/payments'), api('/api/admin/resellers'), api('/api/admin/stats'), api('/api/admin/sales'), api('/api/admin/backup/status')]);
+    [{ leads }, { shops, signupOpen }, appleSt, pay, { resellers }, stats, salesSt, backupSt, testi] = await Promise.all([api('/api/admin/leads'), api('/api/admin/shops'), api('/api/admin/apple'), api('/api/admin/payments'), api('/api/admin/resellers'), api('/api/admin/stats'), api('/api/admin/sales'), api('/api/admin/backup/status'), api('/api/admin/testimonials')]);
   } catch (e) { if (nav === state.nav) render(view, html`<p class="alert bad">${e.message}</p>`); return; }
   if (nav !== state.nav) return;
   const fresh = leads.filter((l) => l.status === 'new').length;
   render(view, html`
-    ${subnav('admin', [['overview', '📊 الأرقام'], ['pay', `💳 الحوالات${pay.payments.some((p) => p.status === 'pending') ? ' •' : ''}`], ['shops', `🏪 المحلات والطلبات${fresh ? ` (${fresh})` : ''}`], ['sales', `🎯 المبيعات${salesSt.counts.hot ? ` (🔥 ${salesSt.counts.hot})` : ''}`], ['partners', '🤝 المندوبين'], ['apple', '🍎 Apple Wallet'], ['backup', `💾 النسخ${backupSt.last && backupSt.last.ok ? '' : ' •'}`], ['updates', `🆕 التحديثات (${stats.version})`]])}
+    ${subnav('admin', [['overview', '📊 الأرقام'], ['pay', `💳 الحوالات${pay.payments.some((p) => p.status === 'pending') ? ' •' : ''}`], ['shops', `🏪 المحلات والطلبات${fresh ? ` (${fresh})` : ''}`], ['sales', `🎯 المبيعات${salesSt.counts.hot ? ` (🔥 ${salesSt.counts.hot})` : ''}`], ['partners', '🤝 المندوبين'], ['reviews', `💬 الآراء${testi.testimonials.length ? ` (${testi.testimonials.length})` : ''}`], ['apple', '🍎 Apple Wallet'], ['backup', `💾 النسخ${backupSt.last && backupSt.last.ok ? '' : ' •'}`], ['updates', `🆕 التحديثات (${stats.version})`]])}
     <div class="group" data-group="overview">
     <a class="panel version-chip" href="#admin/updates" data-goto-updates>
       <span class="badge ok num">الإصدار ${stats.version}</span>
@@ -2010,6 +2015,7 @@ async function admin() {
     <div class="group" data-group="partners">
     ${resellersPanel(resellers)}
     </div>
+    <div class="group" data-group="reviews">${testimonialsPanel(testi)}</div>
     <div class="group" data-group="apple">
     <section class="panel stack" id="applePanel">${applePanel(appleSt)}</section>
     </div>
@@ -2021,6 +2027,7 @@ async function admin() {
   bindApple();
   bindPayments();
   bindResellers();
+  bindTestimonials();
   bindSales(salesSt);
   $$('[data-shop-menu]').forEach((b) => {
     const shop = shops.find((x) => String(x.id) === b.dataset.shopMenu);
@@ -2444,6 +2451,42 @@ function bindResellers() {
   };
 }
 
+// 💬 آراء أصحاب المحلات بصفحة البيع (رأي حقيقي، بإذن صاحب المحل)
+function testimonialsPanel(d) {
+  return html`<section class="panel stack" id="testimonialsPanel">
+    <h2>💬 آراء المحلات بالموقع</h2>
+    <p class="hint">لما صاحب محل مشترك يحكيلك رأيه، خذ إذنه واكتبه هون متل ما قاله. أول ما تضيف أول رأي، بيطلع قسم «محلات بتستعمل نقاطك» بصفحة الموقع مع شعار المحل. الصفحة بتعرض آخر 6 آراء.</p>
+    ${d.testimonials.length ? html`<ul class="list">${d.testimonials.map((t) => html`<li style="align-items:flex-start"><div class="main">
+        <b>${t.shop}${t.person ? html` <span class="small muted">· ${t.person}</span>` : ''}</b>
+        <span class="small">«${t.quote}»</span>
+        <span class="small muted">${ago(t.createdAt)}</span></div>
+        <button class="btn sm ghost" type="button" data-del-testimonial="${t.id}">حذف</button></li>`)}</ul>` : html`<p class="muted small">ما في آراء لسا، والقسم مخفي بالموقع.</p>`}
+    <details${d.testimonials.length ? '' : ' open'}><summary class="btn ghost block">+ أضف رأي</summary>
+      <form class="stack" id="testimonialForm" style="margin-top:10px">
+        <div class="field"><label for="t-shop">المحل</label><select id="t-shop" name="shopId" required><option value="">اختار المحل…</option>${d.shops.map((x) => html`<option value="${x.id}">${x.name}</option>`)}</select></div>
+        <div class="field"><label for="t-person">مين قال الرأي <span class="hint">(اختياري)</span></label><input id="t-person" name="person" maxlength="60" placeholder="أبو أحمد، صاحب المحل"></div>
+        <div class="field"><label for="t-quote">الرأي</label><textarea id="t-quote" name="quote" rows="3" maxlength="300" required placeholder="من وقت ما حطينا نقاطك، الزباين صاروا يرجعوا أكتر"></textarea></div>
+        <button class="btn" type="submit">إضافة</button>
+      </form></details>
+  </section>`;
+}
+
+function bindTestimonials() {
+  const box = $('#testimonialsPanel');
+  if (!box) return;
+  const redraw = (d) => { box.outerHTML = String(testimonialsPanel(d)); bindTestimonials(); };
+  $$('[data-del-testimonial]', box).forEach((b) => {
+    b.onclick = async () => {
+      if (!confirm('تحذف هالرأي من الموقع؟')) return;
+      try { redraw(await api(`/api/admin/testimonials/${b.dataset.delTestimonial}`, { method: 'DELETE' })); toast('انحذف', 'ok'); } catch (e) { toast(e.message, 'bad'); }
+    };
+  });
+  $('#testimonialForm', box).onsubmit = async (e) => {
+    e.preventDefault();
+    try { redraw(await api('/api/admin/testimonials', { method: 'POST', body: Object.fromEntries(new FormData(e.target)) })); toast('انضاف الرأي، وطالع بالموقع ✅', 'ok'); } catch (err) { toast(err.message, 'bad'); }
+  };
+}
+
 // ─── لوحة مدير المنصة: حوالات CliQ وإعداداتها ───
 function paymentsPanel(pay) {
   const c = pay.cliq || {};
@@ -2451,7 +2494,7 @@ function paymentsPanel(pay) {
     <h2>💳 حوالات الاشتراك</h2>
     ${pay.payments.length ? html`<ul class="list">${pay.payments.map((p) => html`<li style="align-items:flex-start"><div class="main">
         <b>${p.shopName} <span class="badge ${PAY_STATUS[p.status][1]}">${PAY_STATUS[p.status][0]}</span></b>
-        <span class="small">${p.tier === 'basic' ? '⭐ أساسي' : '💎 مميز'} · ${p.plan === 'year' ? 'سنة' : 'شهر'} · <span class="num">${p.amount}</span> دينار</span>
+        <span class="small">${p.tier === 'basic' ? '⭐ أساسي' : '💎 مميز'} · ${p.plan === 'year' ? 'سنة' : 'شهر'} · <span class="num">${p.amount}</span> دينار${p.discount ? html` <span class="badge ok">🎁 خصم أول المحلات</span>` : ''}</span>
         <span class="small muted">من: ${p.payer}${p.ref ? html` · رقم: <span dir="ltr">${p.ref}</span>` : ''} · ${ago(p.createdAt)}</span>
         ${p.status === 'pending' ? html`<div class="row" style="margin-top:6px">
           <button class="btn sm" type="button" data-pay="${p.id}" data-act="approve">✅ وصلت، فعّل</button>

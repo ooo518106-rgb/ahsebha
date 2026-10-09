@@ -360,9 +360,9 @@ test('صفحة الخصوصية وإيميل التواصل', async () => {
   const { PLAN_DEFAULTS, FEATURES } = await import('../public/js/plans.js');
   assert.deepEqual(PLAN_DEFAULTS, PLANS, 'أسعار صفحة البيع نفس أسعار السيرفر');
   assert.equal(FEATURES.length, 15);
-  assert.deepEqual((await c.get('/api/site')).data, { contactEmail: 'privacy@example.com', whatsapp: null, signupOpen: true, apple: false, plans: PLANS, sales: false });
-  const { client: client2 } = await setup({ WHATSAPP_NUMBER: '962798900911', SIGNUP_CODE: 'x' });
-  assert.deepEqual((await client2().get('/api/site')).data, { contactEmail: null, whatsapp: '962798900911', signupOpen: false, apple: false, plans: PLANS, sales: false });
+  assert.deepEqual((await c.get('/api/site')).data, { contactEmail: 'privacy@example.com', whatsapp: null, signupOpen: true, apple: false, plans: PLANS, promo: { pct: 30, months: 3, total: 20, left: 20 }, testimonials: [], sales: false });
+  const { client: client2 } = await setup({ WHATSAPP_NUMBER: '962798900911', SIGNUP_CODE: 'x', PROMO_TOTAL: '0' });
+  assert.deepEqual((await client2().get('/api/site')).data, { contactEmail: null, whatsapp: '962798900911', signupOpen: false, apple: false, plans: PLANS, promo: null, testimonials: [], sales: false });
 });
 
 test('طلبات الاشتراك: من صفحة البيع، وبيشوفها مدير المنصة بس', async () => {
@@ -474,7 +474,7 @@ test('ترحيل الجداول: الأعمدة الجديدة بتنضاف لق
 });
 
 test('الدفع بـ CliQ: المحل بيبلّغ عن الحوالة، ومدير المنصة بيأكد فبيتمدد الاشتراك', async () => {
-  const { client, db } = await setup();
+  const { client, db } = await setup({ PROMO_TOTAL: '0' }); // بالسعر الكامل (عرض أول المحلات إله اختبار لحاله)
   const admin = client();
   await signup(admin, { shopName: 'Platform' });
   const owner = client();
@@ -513,6 +513,80 @@ test('الدفع بـ CliQ: المحل بيبلّغ عن الحوالة، ومد
   const p2 = (await admin.get('/api/admin/payments')).data.payments.find((p) => p.status === 'pending');
   await admin.post(`/api/admin/payments/${p2.id}`, { action: 'reject' });
   assert.equal((await db.get('SELECT active_until FROM shops WHERE id = ?', shop.id)).active_until, after.active_until);
+});
+
+test('عرض أول المحلات: خصم 30% على أول 3 شهور لأول المحلات، والمكان بينحجز لما تتأكد الحوالة', async () => {
+  const { client, db } = await setup({ PROMO_TOTAL: '2' });
+  const admin = client();
+  await signup(admin, { shopName: 'Platform' });
+  await admin.put('/api/admin/settings', { cliqAlias: 'NUQATAK' });
+  const owner = client();
+  const { shop } = await signup(owner, { shopName: 'Cafe' });
+  assert.deepEqual((await client().get('/api/site')).data.promo, { pct: 30, months: 3, total: 2, left: 2 });
+  let b = (await owner.get('/api/billing')).data;
+  assert.deepEqual(b.prices, { basic: { month: 8.4, year: 109.2 }, pro: { month: 17.5, year: 227.5 } }, 'السنوي: بينخصم منه خصم 3 شهور');
+  assert.equal(b.promo.monthsLeft, 3);
+  // الشهري بالخصم، والحوالة اللي بتستنى بتحجز شهرها
+  b = (await owner.post('/api/billing/claim', { plan: 'month', tier: 'pro', payer: 'أحمد' })).data;
+  assert.equal(b.payments[0].amount, 17.5);
+  assert.equal(b.payments[0].discount, 7.5);
+  assert.equal(b.promo.monthsLeft, 2);
+  b = (await owner.post('/api/billing/claim', { plan: 'month', tier: 'basic', payer: 'أحمد' })).data;
+  assert.equal(b.payments[0].amount, 8.4);
+  assert.equal(b.promo.monthsLeft, 1);
+  const [second, first] = (await admin.get('/api/admin/payments')).data.payments;
+  await admin.post(`/api/admin/payments/${first.id}`, { action: 'approve' });
+  assert.ok((await db.get('SELECT founder_at FROM shops WHERE id = ?', shop.id)).founder_at, 'أخد مكانه');
+  assert.equal((await client().get('/api/site')).data.promo.left, 1);
+  await admin.post(`/api/admin/payments/${second.id}`, { action: 'reject' });
+  b = (await owner.get('/api/billing')).data;
+  assert.equal(b.promo.monthsLeft, 2, 'المرفوضة رجّعت شهرها');
+  assert.equal(b.promo.founder, true);
+  // السنوي بعد شهر: بينخصم خصم الشهرين الباقيين، وبعدها السعر العادي
+  b = (await owner.post('/api/billing/claim', { plan: 'year', tier: 'pro', payer: 'أحمد' })).data;
+  assert.equal(b.payments[0].amount, 235);
+  await admin.post(`/api/admin/payments/${b.payments[0].id}`, { action: 'approve' });
+  b = (await owner.get('/api/billing')).data;
+  assert.deepEqual(b.prices.pro, { month: 25, year: 250 });
+  b = (await owner.post('/api/billing/claim', { plan: 'month', tier: 'pro', payer: 'أحمد' })).data;
+  assert.equal(b.payments[0].amount, 25);
+  assert.equal(b.payments[0].discount, 0);
+  // التفعيل اليدوي من مدير المنصة بياخد آخر مكان
+  const owner2 = client();
+  const { shop: shop2 } = await signup(owner2, { shopName: 'Bakery' });
+  assert.equal((await admin.post(`/api/admin/shops/${shop2.id}/plan`, { action: 'month', tier: 'basic' })).status, 200);
+  assert.equal((await db.get("SELECT amount FROM payments WHERE shop_id = ? AND payer = 'تفعيل يدوي'", shop2.id)).amount, 8.4);
+  assert.equal((await client().get('/api/site')).data.promo, null, 'خلصت الأماكن');
+  // اللي بعدهم بالسعر العادي
+  const owner3 = client();
+  await signup(owner3, { shopName: 'Late' });
+  b = (await owner3.get('/api/billing')).data;
+  assert.deepEqual(b.prices.basic, { month: 12, year: 120 });
+  assert.equal(b.promo.left, 0);
+  assert.equal(b.promo.monthsLeft, 0);
+  const sales = await import('../src/sales.js');
+  assert.match(sales.salesContext({ today: 'x', promoLeft: 0 }), /عرض أول المحلات خلص/);
+  assert.match(sales.salesContext({ today: 'x', promoLeft: 7 }), /ضايل 7 مكان/);
+});
+
+test('آراء المحلات: مدير المنصة بيضيف رأي من محل عنا، وبيطلع بصفحة البيع، وبينحذف', async () => {
+  const { client } = await setup();
+  const admin = client();
+  await signup(admin, { shopName: 'Platform' });
+  const owner = client();
+  const { shop } = await signup(owner, { shopName: 'كوفي الورد' });
+  assert.equal((await owner.post('/api/admin/testimonials', { shopId: shop.id, quote: 'زباينا صاروا يرجعوا أكتر' })).status, 403, 'بس مدير المنصة');
+  assert.equal((await admin.post('/api/admin/testimonials', { shopId: 999, quote: 'زباينا صاروا يرجعوا أكتر' })).status, 400);
+  assert.equal((await admin.post('/api/admin/testimonials', { shopId: shop.id, quote: 'حلو' })).status, 400, 'قصير كتير');
+  const r = await admin.post('/api/admin/testimonials', { shopId: shop.id, person: 'أبو أحمد', quote: '«زباينا صاروا يرجعوا أكتر من أول شهر»' });
+  assert.equal(r.status, 200);
+  assert.ok(r.data.shops.some((x) => x.name === 'كوفي الورد'));
+  const t = r.data.testimonials[0];
+  assert.equal(t.quote, 'زباينا صاروا يرجعوا أكتر من أول شهر', 'بدون علامات الاقتباس');
+  assert.deepEqual((await client().get('/api/site')).data.testimonials, [{ shop: 'كوفي الورد', person: 'أبو أحمد', quote: 'زباينا صاروا يرجعوا أكتر من أول شهر', logo: `/media/logo/${shop.id}.png?v=0` }]);
+  assert.equal((await client().get(`/media/logo/${shop.id}.png`)).status, 200);
+  assert.equal((await admin.del(`/api/admin/testimonials/${t.id}`)).status, 200);
+  assert.deepEqual((await client().get('/api/site')).data.testimonials, []);
 });
 
 test('الدومين الرسمي: صفحات العنوان القديم بتتحوّل، والـ API وApple والصور بيضلوا شغّالين', async () => {

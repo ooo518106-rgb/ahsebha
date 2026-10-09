@@ -79,7 +79,8 @@ test('مساعد المبيعات بالموقع: بيبعت لـ Claude الت�
   assert.deepEqual(b.system[0].cache_control, { type: 'ephemeral' });
   assert.match(b.system[0].text, /أساسي 12 دينار بالشهر أو 120 دينار بالسنة/);
   assert.match(b.system[0].text, /مميز 25 دينار بالشهر أو 250 دينار بالسنة/);
-  assert.match(b.system[0].text, /ما في خصم أبداً/);
+  assert.match(b.system[0].text, /العرض الوحيد بالسعر: «عرض أول المحلات»: أول 20 محل بيشتركوا بياخدوا خصم 30% على أول 3 شهور \(الأساسي 8\.4 دينار/);
+  assert.match(b.system[0].text, /غير هيك السعر ثابت/);
   assert.match(b.system[0].text, /لـ 30 يوم كحد أقصى/);
   assert.match(b.system[0].text, /https:\/\/nuqatak\.test\/#start/);
   assert.match(b.system[1].text, /القناة: المحادثة على موقع نقاطك/);
@@ -724,7 +725,7 @@ test('Gemini: بمفتاح GEMINI_API_KEY الوكيل بيحكي ويفاوض �
   const gen = g.calls.find((c) => c.url.includes(':generateContent'));
   assert.match(gen.url, /models\/gemini-3\.6-flash:generateContent$/);
   assert.equal(gen.headers.get('x-goog-api-key'), 'g-key');
-  assert.match(gen.body.systemInstruction.parts[0].text, /ما في خصم أبداً/);
+  assert.match(gen.body.systemInstruction.parts[0].text, /غير هيك السعر ثابت/);
   const decl = gen.body.tools[0].functionDeclarations;
   assert.deepEqual(decl.map((d) => d.name), ['make_offer', 'save_contact']);
   assert.equal(decl[0].parameters.type, 'OBJECT');

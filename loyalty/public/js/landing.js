@@ -1,5 +1,5 @@
 // صفحة البيع: بطاقة تجريبية، طلب اشتراك (فورم أو واتساب)، ودخول المحلات
-import { $, $$, api, qrSVG, render } from './common.js';
+import { $, $$, api, html, qrSVG, render } from './common.js';
 import { PLAN_DEFAULTS, featuresHTML } from './plans.js';
 import { mountSales } from './sales.js';
 
@@ -110,18 +110,21 @@ function showWhatsApp(text = 'مرحبا، بدي أعرف أكتر عن نقا�
   $$('[data-wa]').forEach((a) => { a.href = waLink(text); a.classList.remove('hidden'); });
 }
 
-// 💎 الباقتين بميزاتهم (بتنرسم فوراً، وبتتحدّث بأسعار السيرفر)
-function drawPlans(plans = PLAN_DEFAULTS) {
+// 💎 الباقتين بميزاتهم (بتنرسم فوراً، وبتتحدّث بأسعار السيرفر وعرض أول المحلات إذا في أماكن)
+const off = (v, pct) => Math.round(v * (100 - pct)) / 100;
+function drawPlans(plans = PLAN_DEFAULTS, promo = null) {
   const box = $('#planCards');
   if (!box) return;
   const card = (tier, best) => {
     const p = plans[tier];
     const save = p.month * 12 - p.year;
+    const year = promo ? Math.round((p.year - (p.month * promo.months * promo.pct) / 100) * 100) / 100 : p.year;
     return `<div class="plan${best ? ' best' : ''}">
       ${best ? '<span class="badge ok">الأكثر طلباً</span>' : ''}
       <h3>${tier === 'pro' ? '💎' : '⭐'} ${p.name}</h3>
-      <div class="price"><b class="num">${p.month}</b><span>دينار / بالشهر</span></div>
-      <p class="small muted">أو <b class="num">${p.year}</b> دينار بالسنة${save > 0 ? ` (وفّر ${save})` : ''}</p>
+      <div class="price">${promo ? `<s class="num">${p.month}</s>` : ''}<b class="num">${promo ? off(p.month, promo.pct) : p.month}</b><span>دينار / بالشهر</span></div>
+      ${promo ? `<p class="small promo-note">🎁 أول ${promo.months} شهور، وبعدها ${p.month}</p>` : ''}
+      <p class="small muted">أو <b class="num">${year}</b> دينار ${promo ? 'لأول سنة' : 'بالسنة'}${save > 0 && !promo ? ` (وفّر ${save})` : ''}</p>
       <a class="btn block${best ? '' : ' ghost'}" href="#contact" data-start>ابدأ التجربة المجانية</a>
       ${featuresHTML(tier)}
     </div>`;
@@ -130,8 +133,31 @@ function drawPlans(plans = PLAN_DEFAULTS) {
 }
 drawPlans();
 
+// 🎁 عرض أول المحلات: كم مكان ضايل (العدد الحقيقي من السيرفر)
+function showPromo(pr) {
+  const taken = pr.total - pr.left;
+  const band = $('#promoBand');
+  band.innerHTML = `<div><b>🎁 عرض أول ${pr.total} محل</b><span>خصم ${pr.pct}% على أول ${pr.months} شهور من الاشتراك، وبينحسب لحاله وقت الدفع.</span></div>
+    <div class="promo-left"><b class="num">${pr.left}</b><span>مكان ضايل</span><i style="--w:${Math.round((taken / pr.total) * 100)}%"></i></div>`;
+  band.classList.remove('hidden');
+  const hero = $('#heroPromo');
+  hero.textContent = `🎁 خصم ${pr.pct}% على أول ${pr.months} شهور لأول ${pr.total} محل · ضايل ${pr.left} مكان`;
+  hero.classList.remove('hidden');
+}
+
+// 💬 آراء أصحاب المحلات (بيضيفها مدير المنصة)؛ القسم مخفي لحد أول رأي
+function showReviews(list) {
+  render($('#reviewList'), html`${list.map((t) => html`<figure class="review">
+    <blockquote>«${t.quote}»</blockquote>
+    <figcaption>${t.logo ? html`<img src="${t.logo}" alt="" width="44" height="44" loading="lazy">` : ''}<div><b>${t.shop}</b>${t.person ? html`<span>${t.person}</span>` : ''}</div></figcaption>
+  </figure>`)}`);
+  $('#reviews').classList.remove('hidden');
+}
+
 api('/api/site').then(async (s) => {
-  if (s.plans) drawPlans(s.plans);
+  if (s.plans) drawPlans(s.plans, s.promo);
+  if (s.promo) showPromo(s.promo);
+  if (s.testimonials && s.testimonials.length) showReviews(s.testimonials);
   whatsapp = s.whatsapp;
   signupOpen = s.signupOpen;
   if (s.apple === false) $('#faqIphone').textContent = 'لهلأ بياخدوا بطاقة على المتصفح فيها نفس الـ QR، وبتشتغل عادي مع الكاشير.';
