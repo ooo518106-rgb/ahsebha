@@ -3,10 +3,13 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { gunzipSync } from 'node:zlib';
+import { DatabaseSync } from 'node:sqlite';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { setup, signup } from './helpers.mjs';
 import { runScheduled } from '../src/app.js';
+import { sqlite } from '../src/db.js';
+import { MIGRATIONS, SCHEMA } from '../src/schema.js';
 
 // إيميل وهمي متل Cloudflare send_email
 function mailer() {
@@ -50,6 +53,30 @@ test('💾 نسخة احتياطية: تنزيل لمدير المنصة بس، 
   const sql = execFileSync('node', ['scripts/restore-backup.mjs', path.join(dir, 'b.json.gz')], { stdio: ['ignore', 'pipe', 'pipe'] }).toString();
   assert.match(sql, /DELETE FROM "members";/);
   assert.match(sql, /'سارة O''Neil'/);
+});
+
+test('restore preserves prepaid balances, administrator identity, and reinstates deletion guard', async () => {
+  const w = await setup();
+  const admin = w.client();
+  await signup(admin);
+  await admin.put('/api/shop/perks', { creditOn: true, creditBonus: 0 });
+  const member = (await admin.post('/api/members', { name: 'Funded Customer', phone: '0791234567' })).data.member;
+  await admin.post(`/api/members/${member.id}/credit/topup`, { amount: 5 });
+  const backup = await admin.get('/api/admin/backup');
+  const dir = mkdtempSync(path.join(tmpdir(), 'nq-restore-funded-'));
+  const file = path.join(dir, 'backup.json.gz');
+  writeFileSync(file, Buffer.from(backup.data));
+  const sql = execFileSync('node', ['scripts/restore-backup.mjs', file], { stdio: ['ignore', 'pipe', 'pipe'] }).toString();
+  const raw = new DatabaseSync(':memory:');
+  try {
+    raw.exec('PRAGMA foreign_keys = ON');
+    await sqlite(raw).init(SCHEMA, MIGRATIONS);
+    raw.exec(`BEGIN; ${sql} COMMIT;`);
+    assert.equal(raw.prepare('SELECT credit FROM members WHERE id = ?').get(member.id).credit, 5000);
+    const identity = raw.prepare("SELECT v FROM platform_settings WHERE k = 'platform_admin_user_id'").get().v;
+    assert.equal(raw.prepare('SELECT COUNT(*) AS n FROM users WHERE identity = ?').get(identity).n, 1);
+    assert.throws(() => raw.exec('DELETE FROM members'), /member_funds_unsettled/);
+  } finally { raw.close(); }
 });
 
 test('💾 كل أسبوع بتنبعت نسخة على إيميل مدير المنصة (إذا Email Routing مربوط)', async () => {

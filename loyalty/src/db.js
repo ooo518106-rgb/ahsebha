@@ -10,6 +10,14 @@ function migrationsSig(list) {
   return `${list.length}:${h.toString(16)}`;
 }
 const SIG_KEY = 'schema_migrations';
+// Preserve the existing administrator once, never grant administration to a new signup.
+const ADMIN_MIGRATION = [
+  `INSERT OR IGNORE INTO platform_settings (k, v)
+   SELECT 'platform_admin_user_id', u.identity FROM users u JOIN shops s ON s.id = u.shop_id
+   WHERE s.demo = 0 AND ? = 1 AND NOT EXISTS (SELECT 1 FROM platform_settings WHERE k = 'platform_admin_pinned')
+   ORDER BY u.id LIMIT 1`,
+  `INSERT OR IGNORE INTO platform_settings (k, v) VALUES ('platform_admin_pinned', '1')`,
+];
 
 export function d1(DB) {
   const stmt = (sql, a) => DB.prepare(sql).bind(...args(a));
@@ -28,6 +36,7 @@ export function d1(DB) {
       for (const m of migrations) {
         try { await DB.prepare(m).run(); } catch (e) { if (!/duplicate column/i.test(String(e.message))) throw e; }
       }
+      await DB.batch([DB.prepare(ADMIN_MIGRATION[0]).bind(done ? 1 : 0), DB.prepare(ADMIN_MIGRATION[1])]);
       await DB.prepare('INSERT INTO platform_settings (k, v) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v').bind(SIG_KEY, sig).run();
     },
   };
@@ -62,6 +71,12 @@ export function sqlite(db) {
       for (const m of migrations) {
         try { db.exec(m); } catch (e) { if (!/duplicate column/i.test(String(e.message))) throw e; }
       }
+      db.exec('BEGIN');
+      try {
+        db.prepare(ADMIN_MIGRATION[0]).run(done ? 1 : 0);
+        db.exec(ADMIN_MIGRATION[1]);
+        db.exec('COMMIT');
+      } catch (e) { db.exec('ROLLBACK'); throw e; }
       db.prepare('INSERT INTO platform_settings (k, v) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v').run(SIG_KEY, sig);
     },
   };

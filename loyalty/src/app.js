@@ -16,6 +16,7 @@ import { defaultLogoPng } from './png.js';
 import { heroKey, parseKey, peekStrip, renderKey, stripFiles, stripKey, STRIP_VERSION } from './strip.js';
 import * as backup from './backup.js';
 import * as social from './social.js';
+import { extendUntilSql } from './subscription.js';
 import { earnFor, progress, rewardCost, rewardRule, stampsLine, unitLabel, unitWord } from '../public/js/rules.js';
 import { FEATURES } from '../public/js/plans.js';
 import { b64ToBytes, bytesToB64, clean, fail, HttpError, isUniqueError, json, normPhone, randomDigits, randomToken, sha256Hex } from './util.js';
@@ -625,7 +626,7 @@ async function notifyOwners(c, shopId, message) {
 }
 
 async function notifyAdmin(c, message) {
-  const row = await c.db.get(FIRST_USER);
+  const row = await c.db.get(PLATFORM_USER);
   if (row && row.id) notifyUsers(c, [row.id], message);
 }
 
@@ -938,15 +939,15 @@ async function reminderJob(c, platformShop, now) {
 
 // 🎁 الهدية اللي ما انستلمت خلال 30 يوم بترجع لصاحبها
 async function giftRefundJob(c, now) {
-  const due = await c.db.all('SELECT * FROM credit_gifts WHERE claimed_at IS NULL AND refunded_at IS NULL AND created_at <= ? LIMIT 50', now - GIFT_DAYS * DAY);
+  const due = await c.db.all('SELECT g.* FROM credit_gifts g JOIN members m ON m.id = g.from_member AND m.shop_id = g.shop_id AND m.token = g.from_token WHERE g.claimed_at IS NULL AND g.refunded_at IS NULL AND g.created_at <= ? LIMIT 50', now - GIFT_DAYS * DAY);
   let n = 0;
   for (const g of due) {
     const tag = `gift-back:${g.id}`; // مفتاح فريد: لو اشتغلت تشغيلتين سوا، التانية بتفشل كلها
     try {
       const res = await c.db.batch([
-        ['UPDATE credit_gifts SET refunded_at = ? WHERE id = ? AND claimed_at IS NULL AND refunded_at IS NULL', [now, g.id]],
-        ["INSERT INTO credit_txns (shop_id, member_id, kind, amount, note, idem, created_at) SELECT ?, id, 'topup', ?, '↩️ رجعت هدية ما انستلمت', ?, ? FROM members WHERE id = ? AND EXISTS (SELECT 1 FROM credit_gifts WHERE id = ? AND refunded_at = ?)", [g.shop_id, g.amount, tag, now, g.from_member, g.id, now]],
-        ['UPDATE members SET credit = credit + ? WHERE id = ? AND EXISTS (SELECT 1 FROM credit_txns WHERE shop_id = ? AND idem = ? AND member_id = ? AND created_at = ?)', [g.amount, g.from_member, g.shop_id, tag, g.from_member, now]],
+        ['UPDATE credit_gifts SET refunded_at = ? WHERE id = ? AND claimed_at IS NULL AND refunded_at IS NULL AND EXISTS (SELECT 1 FROM members WHERE id = credit_gifts.from_member AND shop_id = credit_gifts.shop_id AND token = credit_gifts.from_token)', [now, g.id]],
+        ["INSERT INTO credit_txns (shop_id, member_id, kind, amount, note, idem, created_at) SELECT ?, id, 'topup', ?, '↩️ رجعت هدية ما انستلمت', ?, ? FROM members WHERE id = ? AND shop_id = ? AND token = ? AND EXISTS (SELECT 1 FROM credit_gifts WHERE id = ? AND refunded_at = ?)", [g.shop_id, g.amount, tag, now, g.from_member, g.shop_id, g.from_token, g.id, now]],
+        ['UPDATE members SET credit = credit + ? WHERE id = ? AND shop_id = ? AND token = ? AND EXISTS (SELECT 1 FROM credit_txns WHERE shop_id = ? AND idem = ? AND member_id = ? AND created_at = ?)', [g.amount, g.from_member, g.shop_id, g.from_token, g.shop_id, tag, g.from_member, now]],
       ]);
       if (res[0].changes) n++;
     } catch (e) {
@@ -1039,14 +1040,16 @@ function memberByPhone(db, shop, phone, cols = 'id') {
 
 async function createMember(db, shop, name, phone, { birthday = null, referredBy = null, lang = 'ar' } = {}) {
   const now = Date.now();
+  const managementKey = randomToken(32);
+  const managementHash = await sha256Hex(managementKey);
   if (await memberByPhone(db, shop, phone)) fail(409, DUPLICATE_PHONE);
   for (let i = 0; i < 6; i++) {
     try {
       const r = await db.run(
-        'INSERT INTO members (shop_id, token, card_no, name, phone, birthday, bday_set_at, referred_by, lang, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        shop.id, randomToken(), randomDigits(8), name, phone, birthday, birthday ? now : null, referredBy, lang === 'en' ? 'en' : 'ar', now,
+        'INSERT INTO members (shop_id, token, card_no, name, phone, birthday, bday_set_at, referred_by, lang, created_at, management_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        shop.id, randomToken(), randomDigits(8), name, phone, birthday, birthday ? now : null, referredBy, lang === 'en' ? 'en' : 'ar', now, managementHash,
       );
-      return db.get('SELECT * FROM members WHERE id = ?', r.lastId);
+      return { ...(await db.get('SELECT * FROM members WHERE id = ?', r.lastId)), managementKey };
     } catch (e) {
       if (!isUniqueError(e)) throw e;
       if (/phone/.test(e.message)) fail(409, DUPLICATE_PHONE);
@@ -1102,12 +1105,12 @@ function requirePro(c, what) {
 const planInfo = (shop) => ({ tier: isPro(shop) ? 'pro' : 'basic', chosen: shop.plan === 'basic' ? 'basic' : 'pro', name: PLANS[isPro(shop) ? 'pro' : 'basic'].name, limits: isPro(shop) ? null : BASIC_LIMITS });
 const DAY = 864e5;
 
-// صاحب المنصة = أول حساب حقيقي انعمل عليها. حساب العرض ما بينحسب، حتى لو حدا فتحه قبل ما صاحب المنصة يسجّل
-const FIRST_USER = 'SELECT u.id, u.shop_id FROM users u JOIN shops s ON s.id = u.shop_id WHERE s.demo = 0 ORDER BY u.id LIMIT 1';
+// Administrator identity is pinned once during legacy migration or secret bootstrap.
+const PLATFORM_USER = "SELECT u.id, u.shop_id FROM users u JOIN shops s ON s.id = u.shop_id JOIN platform_settings p ON p.k = 'platform_admin_user_id' AND p.v = u.identity WHERE u.role = 'owner' AND s.demo = 0";
 
 // محل صاحب المنصة ما بيخلص اشتراكه
 async function platformShopId(db) {
-  const row = await db.get(FIRST_USER);
+  const row = await db.get(PLATFORM_USER);
   return row ? row.shop_id : null;
 }
 
@@ -1145,15 +1148,24 @@ const MIN = 60 * 1000;
 
 // حذف الزبون وكل سجله نهائياً، وإيقاف بطاقته بمحفظة Google لو كان حافظها
 async function deleteMember(c, shop, m) {
-  await c.db.batch([
+  // Never discard prepaid money or an unsettled gift during a privacy deletion.
+  if (m.credit > 0 || await c.db.get('SELECT 1 FROM credit_gifts WHERE from_member = ? AND shop_id = ? AND claimed_at IS NULL AND refunded_at IS NULL', m.id, shop.id)) {
+    fail(409, 'قبل حذف البطاقة، صفّي الرصيد والهدايا المعلّقة مع صاحب المحل.');
+  }
+  try { await c.db.batch([
     ['DELETE FROM txns WHERE member_id = ? AND shop_id = ?', [m.id, shop.id]],
     ['DELETE FROM push_subs WHERE member_id = ?', [m.id]],
     ['DELETE FROM member_coupons WHERE member_id = ?', [m.id]],
     ['DELETE FROM credit_txns WHERE member_id = ?', [m.id]],
     ['DELETE FROM reviews WHERE member_id = ?', [m.id]],
     ['DELETE FROM members WHERE id = ? AND shop_id = ?', [m.id, shop.id]],
+    ['DELETE FROM credit_gifts WHERE shop_id = ? AND (from_member = ? OR claimed_by = ?)', [shop.id, m.id, m.id]],
+    ['UPDATE members SET referred_by = NULL WHERE referred_by = ?', [m.id]],
     ['DELETE FROM apple_regs WHERE serial = ?', [m.token]],
-  ]);
+  ]); } catch (e) {
+    if (/member_funds_unsettled/.test(String(e.message))) fail(409, 'قبل حذف البطاقة، صفّي الرصيد والهدايا المعلّقة مع صاحب المحل.');
+    throw e;
+  }
   const cfg = gw.googleConfig(c.env);
   if (cfg && m.gw_object) {
     c.waitUntil(gw.patchObject(cfg, { id: gw.objectId(cfg, m.id), state: 'INACTIVE' }).catch((e) => console.error('gwallet deactivate:', e.message)));
@@ -1202,7 +1214,7 @@ async function join(c, slug) {
   if ((c.body.bdayDay || c.body.bdayMonth) && !birthday) fail(400, 'تاريخ الميلاد مش صحيح');
   const referrer = await referrerOf(c, shop, c.body.ref);
   const m = await createMember(c.db, shop, readName(c.body.name), memberPhone(c.body.phone, shop), { birthday, referredBy: referrer ? referrer.id : null, lang: c.body.lang });
-  return json({ token: m.token, url: `${c.origin}/c/${m.token}` }, 201);
+  return json({ token: m.token, managementKey: m.managementKey, url: `${c.origin}/c/${m.token}` }, 201);
 }
 
 async function cardInfo(c, token) {
@@ -1253,6 +1265,22 @@ async function confirmPhone(c, shop, m) {
   if (!phoneForms(raw, shop.country).includes(m.phone)) fail(403, 'رقم الجوال مش نفس رقم البطاقة');
 }
 
+async function requireCardManagement(c, m) {
+  const key = c.req.headers.get('x-card-management-key') || '';
+  if (!/^[a-z2-9]{32}$/.test(key) || !m.management_hash || await sha256Hex(key) !== m.management_hash) {
+    fail(403, 'لإدارة البطاقة، افتحها من جهاز التسجيل أو اطلب رابط إدارة خاص من صاحب المحل.');
+  }
+}
+
+// The owner verifies the customer in person; staff cannot mint a management link.
+async function memberManagement(c, id) {
+  noDemo(c, 'رابط إدارة البطاقة');
+  const m = await memberOf(c, id);
+  const key = randomToken(32);
+  await c.db.run('UPDATE members SET management_hash = ? WHERE id = ? AND shop_id = ?', await sha256Hex(key), m.id, c.shop.id);
+  return json({ url: `${c.origin}/c/${m.token}#manage=${key}` });
+}
+
 // ─── 🎁 إهداء رصيد لصاحب ───
 const GIFT_DAYS = 30;
 async function createGift(c, token) {
@@ -1260,6 +1288,7 @@ async function createGift(c, token) {
   if (!m) fail(404, 'ما لقينا هالبطاقة');
   const shop = await shopRow(c.db, m.shop_id);
   if (!shop.credit_on) fail(400, 'الرصيد مش مفعّل بهالمحل');
+  await requireCardManagement(c, m);
   const amount = readMoney(c.body.amount);
   if (amount < 500) fail(400, 'أقل هدية نص دينار');
   await confirmPhone(c, shop, m);
@@ -1268,9 +1297,9 @@ async function createGift(c, token) {
   const now = Date.now();
   // نفس شرط الرصيد على التلات جمل جوّا نفس العملية: يا بيصيروا كلهم يا ولا وحدة
   const res = await c.db.batch([
-    ['INSERT INTO credit_gifts (shop_id, from_member, amount, code, created_at) SELECT ?, id, ?, ?, ? FROM members WHERE id = ? AND credit >= ?', [shop.id, amount, code, now, m.id, amount]],
-    ["INSERT INTO credit_txns (shop_id, member_id, kind, amount, note, created_at) SELECT ?, id, 'spend', ?, '🎁 هدية لصاحب', ? FROM members WHERE id = ? AND credit >= ?", [shop.id, amount, now, m.id, amount]],
-    ['UPDATE members SET credit = credit - ?, updated_at = ? WHERE id = ? AND credit >= ?', [amount, now, m.id, amount]],
+    ['INSERT INTO credit_gifts (shop_id, from_member, from_token, amount, code, created_at) SELECT ?, id, token, ?, ?, ? FROM members WHERE id = ? AND shop_id = ? AND token = ? AND management_hash = ? AND credit >= ?', [shop.id, amount, code, now, m.id, shop.id, m.token, m.management_hash, amount]],
+    ["INSERT INTO credit_txns (shop_id, member_id, kind, amount, note, created_at) SELECT ?, id, 'spend', ?, '🎁 هدية لصاحب', ? FROM members WHERE id = ? AND shop_id = ? AND token = ? AND management_hash = ? AND credit >= ?", [shop.id, amount, now, m.id, shop.id, m.token, m.management_hash, amount]],
+    ['UPDATE members SET credit = credit - ?, updated_at = ? WHERE id = ? AND shop_id = ? AND token = ? AND management_hash = ? AND credit >= ?', [amount, now, m.id, shop.id, m.token, m.management_hash, amount]],
   ]);
   if (!res[2].changes) fail(409, `رصيدك ما بيكفي (رصيدك ${money(m.credit)} ${shop.currency})`);
   return json({ code, url: `${c.origin}/g/${code}`, amount: amount / 1000, credit: (m.credit - amount) / 1000 }, 201);
@@ -1280,8 +1309,8 @@ async function giftInfo(c, code) {
   const g = await c.db.get('SELECT * FROM credit_gifts WHERE code = ?', code);
   if (!g) fail(404, 'ما لقينا الهدية');
   const shop = await shopRow(c.db, g.shop_id);
-  const from = await c.db.get('SELECT name FROM members WHERE id = ?', g.from_member);
-  const open = !g.claimed_at && !g.refunded_at && g.created_at > Date.now() - GIFT_DAYS * DAY;
+  const from = await c.db.get('SELECT name FROM members WHERE id = ? AND shop_id = ? AND token = ?', g.from_member, g.shop_id, g.from_token);
+  const open = !!from && !g.claimed_at && !g.refunded_at && g.created_at > Date.now() - GIFT_DAYS * DAY;
   return json({ shop: publicShopView(shop, c.origin), amount: g.amount / 1000, from: perks.firstName(from?.name || ''), open });
 }
 
@@ -1298,7 +1327,7 @@ async function claimGift(c, code) {
   let res;
   try {
     res = await c.db.batch([
-      ['UPDATE credit_gifts SET claimed_by = ?, claimed_at = ? WHERE id = ? AND claimed_at IS NULL AND refunded_at IS NULL AND created_at > ?', [m.id, now, g.id, now - GIFT_DAYS * DAY]],
+      ['UPDATE credit_gifts SET claimed_by = ?, claimed_at = ? WHERE id = ? AND claimed_at IS NULL AND refunded_at IS NULL AND created_at > ? AND EXISTS (SELECT 1 FROM members WHERE id = credit_gifts.from_member AND shop_id = credit_gifts.shop_id AND token = credit_gifts.from_token) AND EXISTS (SELECT 1 FROM members WHERE id = ? AND shop_id = ? AND token = ?)', [m.id, now, g.id, now - GIFT_DAYS * DAY, m.id, g.shop_id, m.token]],
       ["INSERT INTO credit_txns (shop_id, member_id, kind, amount, note, idem, created_at) SELECT ?, ?, 'topup', ?, '🎁 هدية من صاحب', ?, ? WHERE EXISTS (SELECT 1 FROM credit_gifts WHERE id = ? AND claimed_by = ? AND claimed_at = ?)", [g.shop_id, m.id, g.amount, tag, now, g.id, m.id, now]],
       ['UPDATE members SET credit = credit + ?, updated_at = ? WHERE id = ? AND EXISTS (SELECT 1 FROM credit_txns WHERE shop_id = ? AND idem = ? AND member_id = ? AND created_at = ?)', [g.amount, now, m.id, g.shop_id, tag, m.id, now]],
     ]);
@@ -1354,6 +1383,7 @@ async function deleteCard(c, token) {
   const m = await c.db.get('SELECT * FROM members WHERE token = ?', token);
   if (!m) fail(404, 'ما لقينا هالبطاقة');
   const shop = await shopRow(c.db, m.shop_id);
+  await requireCardManagement(c, m);
   await confirmPhone(c, shop, m);
   await deleteMember(c, shop, m);
   return json({ ok: true });
@@ -1403,7 +1433,7 @@ async function saveLead(c, b, source) {
 
 // مدير المنصة = أول حساب حقيقي انعمل عليها (صاحب المنصة)
 async function isPlatformAdmin(c) {
-  const first = await c.db.get(FIRST_USER);
+  const first = await c.db.get(PLATFORM_USER);
   return !!(c.user && first && first.id === c.user.id);
 }
 
@@ -1411,7 +1441,7 @@ async function isPlatformAdmin(c) {
 // كل أسبوع (ليلة الجمعة، 3 الصبح بعمّان) بتنبعت نسخة على إيميل مدير المنصة، إذا الإيميل مربوط (MAIL)
 const BACKUP_EVERY = 7 * DAY;
 async function adminEmail(db) {
-  const u = await db.get(FIRST_USER);
+  const u = await db.get(PLATFORM_USER);
   return u ? (await db.get('SELECT email FROM users WHERE id = ?', u.id)).email : null;
 }
 
@@ -1671,6 +1701,18 @@ async function requireAdmin(c) {
   if (!(await isPlatformAdmin(c))) fail(403, 'هاي الصفحة لمدير المنصة بس');
 }
 
+async function bootstrapAdmin(c) {
+  noDemo(c, 'تهيئة مدير المنصة');
+  await rateLimit(c, `bootstrap:${c.ip}`, 5, HOUR);
+  if (await getSetting(c.db, 'platform_admin_user_id')) fail(409, 'مدير المنصة محدد من قبل');
+  const expected = String(c.env.PLATFORM_SETUP_CODE || '');
+  const supplied = String(c.body.code || '');
+  if (expected.length < 32 || supplied.length > 200 || await sha256Hex(supplied) !== await sha256Hex(expected)) fail(403, 'رمز تهيئة المنصة غير صحيح');
+  const r = await c.db.run("INSERT OR IGNORE INTO platform_settings (k, v) SELECT 'platform_admin_user_id', identity FROM users WHERE id = ? AND role = 'owner'", c.user.id);
+  if (!r.changes) fail(409, 'مدير المنصة محدد من قبل');
+  return me(c);
+}
+
 // مدير المنصة بيرتّب منيو أي محل (مثلاً المحل بعتله المنيو عالواتساب): نفس إجراءات المنيو بس على المحل المختار
 const forShop = (fn) => async (c, shopId, ...rest) => {
   await requireAdmin(c);
@@ -1765,9 +1807,12 @@ async function adminShopPlan(c, id) {
   if (c.body.action === 'month' || c.body.action === 'year') {
     // بنسجّلها كدفعة (كاش أو تحويل برّا المنصة) عشان الإيرادات وعمولة المندوب، بخصم أول المحلات إذا إله
     const q = quote(tier, c.body.action, await discountsFor(c, shop));
-    await extendPlan(c.db, shop, c.body.action, tier);
-    await c.db.run("INSERT INTO payments (shop_id, plan, tier, amount, discount, promo_months, deal_months, payer, status, created_at, decided_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'تفعيل يدوي', 'approved', ?, ?)", shop.id, c.body.action, tier, q.amount, q.discount, q.promoMonths, q.dealMonths, Date.now(), Date.now());
-    if (q.promoMonths) await c.db.run('UPDATE shops SET founder_at = ? WHERE id = ? AND founder_at IS NULL', Date.now(), shop.id);
+    const now = Date.now();
+    await c.db.batch([
+      planExtension(shop.id, c.body.action, tier, now),
+      ["INSERT INTO payments (shop_id, plan, tier, amount, discount, promo_months, deal_months, payer, status, created_at, decided_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'تفعيل يدوي', 'approved', ?, ?)", [shop.id, c.body.action, tier, q.amount, q.discount, q.promoMonths, q.dealMonths, now, now]],
+      ...(q.promoMonths ? [['UPDATE shops SET founder_at = ? WHERE id = ? AND founder_at IS NULL', [now, shop.id]]] : []),
+    ]);
   }
   // تبديل الباقة بدون دفعة (تصحيح، أو ترقية بالفرق برّا المنصة)
   else if (c.body.action === 'basic' || c.body.action === 'pro') await c.db.run('UPDATE shops SET plan = ? WHERE id = ?', c.body.action, shop.id);
@@ -1796,11 +1841,9 @@ async function adminShopDeal(c, id) {
 
 // تمديد الاشتراك شهر أو سنة من آخر يوم فيه (أو من اليوم لو كان خالص)، على الباقة اللي دفعها
 const readTier = (v) => (v === 'basic' ? 'basic' : 'pro');
-async function extendPlan(db, shop, period, tier) {
-  const current = shop.active_until ?? shop.created_at + TRIAL_DAYS * DAY;
-  const d = new Date(Math.max(Date.now(), current));
-  if (period === 'month') d.setMonth(d.getMonth() + 1); else d.setFullYear(d.getFullYear() + 1);
-  await db.run('UPDATE shops SET active_until = ?, paid = 1, plan = ? WHERE id = ?', d.getTime(), readTier(tier), shop.id);
+function planExtension(shopId, period, tier, now, paymentId = null) {
+  const pending = paymentId === null ? '' : " AND EXISTS (SELECT 1 FROM payments WHERE id = ? AND shop_id = shops.id AND status = 'pending')";
+  return [`UPDATE shops SET active_until = ${extendUntilSql(period, now, TRIAL_DAYS)}, paid = 1, plan = ? WHERE id = ?${pending}`, [readTier(tier), shopId, ...(paymentId === null ? [] : [paymentId])]];
 }
 
 // ─── الدفع بـ CliQ: صاحب المحل بيحوّل وبيبلّغ، ومدير المنصة بيتأكد من حسابه وبيفعّل بكبسة ───
@@ -1901,8 +1944,10 @@ async function billingClaim(c) {
   if (q.amount === 0) {
     await rateLimit(c, `claim:${c.shop.id}`, 5, 24 * 60 * MIN, 'فعّلت كتير اليوم، جرّب بكرا');
     const now = Date.now();
-    await c.db.run("INSERT INTO payments (shop_id, plan, tier, amount, discount, promo_months, deal_months, payer, status, created_at, decided_at) VALUES (?, ?, ?, 0, ?, ?, ?, 'خصم 100%', 'approved', ?, ?)", c.shop.id, plan, tier, q.discount, q.promoMonths, q.dealMonths, now, now);
-    await extendPlan(c.db, c.shop, plan, tier);
+    await c.db.batch([
+      ["INSERT INTO payments (shop_id, plan, tier, amount, discount, promo_months, deal_months, payer, status, created_at, decided_at) VALUES (?, ?, ?, 0, ?, ?, ?, 'خصم 100%', 'approved', ?, ?)", [c.shop.id, plan, tier, q.discount, q.promoMonths, q.dealMonths, now, now]],
+      planExtension(c.shop.id, plan, tier, now),
+    ]);
     await notifyAdmin(c, { title: '🎁 محل فعّل اشتراكه بخصم 100%', body: `${c.shop.name} · ${PLANS[tier].name} · ${plan === 'year' ? 'سنة' : 'شهر'}`, url: `${c.origin}/app#admin` });
     c.shop = await shopRow(c.db, c.shop.id);
     return billing(c);
@@ -1934,12 +1979,20 @@ async function adminPaymentDecide(c, id) {
   if (!['approve', 'reject'].includes(action)) fail(400, 'إجراء غير معروف');
   const p = await c.db.get("SELECT * FROM payments WHERE id = ? AND status = 'pending'", Number(id));
   if (!p) fail(404, 'ما لقينا حوالة بتستنى');
-  // العلامة أول، عشان لو انكبس الزر مرتين ما ينمدد الاشتراك مرتين
-  const r = await c.db.run("UPDATE payments SET status = ?, decided_at = ? WHERE id = ? AND status = 'pending'", action === 'approve' ? 'approved' : 'rejected', Date.now(), p.id);
-  if (r.changes && action === 'approve') {
-    // أول حوالة بالخصم: المحل بياخد مكانه بعرض أول المحلات
-    if (p.promo_months) await c.db.run('UPDATE shops SET founder_at = ? WHERE id = ? AND founder_at IS NULL', Date.now(), p.shop_id);
-    await extendPlan(c.db, await shopRow(c.db, p.shop_id), p.plan, p.tier);
+  const now = Date.now();
+  let changed;
+  if (action === 'reject') {
+    changed = (await c.db.run("UPDATE payments SET status = 'rejected', decided_at = ? WHERE id = ? AND status = 'pending'", now, p.id)).changes;
+  } else {
+    // All writes commit together. A replay sees a non-pending payment inside the batch.
+    const result = await c.db.batch([
+      planExtension(p.shop_id, p.plan, p.tier, now, p.id),
+      ...(p.promo_months ? [["UPDATE shops SET founder_at = ? WHERE id = ? AND founder_at IS NULL AND EXISTS (SELECT 1 FROM payments WHERE id = ? AND status = 'pending')", [now, p.shop_id, p.id]]] : []),
+      ["UPDATE payments SET status = 'approved', decided_at = ? WHERE id = ? AND status = 'pending'", [now, p.id]],
+    ]);
+    changed = result.at(-1).changes;
+  }
+  if (changed && action === 'approve') {
     await notifyOwners(c, p.shop_id, { title: '✅ انفعّل اشتراكك', body: `وصلتنا حوالتك (${p.amount} دينار) على الباقة ${readTier(p.tier) === 'basic' ? 'الأساسية' : 'المميزة'}. شكراً إلك 🙏`, url: `${c.origin}/app#settings` });
   }
   return adminPayments(c);
@@ -2114,6 +2167,7 @@ async function me(c) {
   if (isAdmin && !c.env.PUBLIC_URL && (await getSetting(c.db, 'origin')) !== c.origin) await setSetting(c.db, 'origin', c.origin);
   return json({
     user: { id: c.user.id, name: c.user.name, email: c.user.email, role: c.user.role, branchId: c.user.branch_id || null, isAdmin },
+    canBootstrap: c.user.role === 'owner' && !c.shop.demo && String(c.env.PLATFORM_SETUP_CODE || '').length >= 32 && !(await getSetting(c.db, 'platform_admin_user_id')),
     shop: shopView(c.shop, c.origin),
     google: googleStatus(c, c.shop),
     subscription: await subscription(c, c.shop),
@@ -2161,8 +2215,13 @@ async function changePassword(c) {
   const row = await c.db.get('SELECT pw_hash FROM users WHERE id = ?', c.user.id);
   if (!(await auth.verifyPassword(String(c.body.current || ''), row.pw_hash))) fail(400, 'كلمة السر الحالية غلط');
   auth.checkPasswordStrength(c.body.next);
-  await c.db.run('UPDATE users SET pw_hash = ? WHERE id = ?', await auth.hashPassword(c.body.next), c.user.id);
-  return json({ ok: true });
+  const hash = await auth.hashPassword(c.body.next);
+  await c.db.batch([
+    ['UPDATE users SET pw_hash = ?, failed = 0, locked_until = 0 WHERE id = ?', [hash, c.user.id]],
+    ['DELETE FROM sessions WHERE user_id = ?', [c.user.id]],
+  ]);
+  const session = await auth.createSession(c.db, c.user.id);
+  return json({ ok: true }, 200, { 'set-cookie': auth.sessionCookie(session, c.req) });
 }
 
 // ─── الزبائن والنقاط ───
@@ -2243,7 +2302,7 @@ async function addMember(c) {
   const existing = await memberByPhone(c.db, c.shop, phone);
   if (existing) return json({ error: 'هالرقم إله بطاقة من قبل', memberId: existing.id }, 409);
   const m = await createMember(c.db, c.shop, name, phone);
-  return json({ member: viewFor(c, m), cardUrl: `${c.origin}/c/${m.token}` }, 201);
+  return json({ member: viewFor(c, m), cardUrl: `${c.origin}/c/${m.token}#manage=${m.managementKey}` }, 201);
 }
 
 // الكاشير بيمسح QR (توكن أو رابط البطاقة) أو بيكتب رقم البطاقة أو الجوال
@@ -2314,10 +2373,17 @@ async function earn(c, id) {
   // العروض: نقاط دبل بالوقت، رجعة الزبون الغايب، والمستوى
   const p = perks.applyPerks(c.shop, m, r.delta, now);
   const note = p.reasons.length ? p.reasons.join(' · ') : null;
+  const key = idemKey(c.body.key) || randomToken(32);
+  const staffGuard = c.user.role === 'staff';
+  const t = perks.localTime(c.shop.country, now);
+  const dayStart = now - (t.mins * 60 + new Date(now).getUTCSeconds()) * 1000 - now % 1000;
+  const guardSql = staffGuard ? ` AND (? <= 0 OR last_visit IS NULL OR last_visit <= ?) AND (? <= 0 OR (SELECT COUNT(*) FROM txns WHERE member_id = members.id AND kind = 'earn' AND created_at >= ?) < ?)` : '';
+  const guardArgs = staffGuard ? [c.shop.guard_cooldown, now - c.shop.guard_cooldown * MIN, c.shop.guard_daily, dayStart, c.shop.guard_daily] : [];
   const res = await applyTxn(c, [
-    ['INSERT INTO txns (shop_id, member_id, kind, delta, amount, user_id, note, idem, branch_id, created_at) VALUES (?, ?, \'earn\', ?, ?, ?, ?, ?, ?, ?)', [c.shop.id, m.id, p.delta, r.amount, c.user.id, note, idemKey(c.body.key), branchFor(c), now]],
-    ['UPDATE members SET balance = balance + ?, lifetime = lifetime + ?, visits = visits + 1, last_visit = ?, updated_at = ? WHERE id = ? AND shop_id = ?', [p.delta, p.delta, now, now, m.id, c.shop.id]],
+    [`INSERT INTO txns (shop_id, member_id, kind, delta, amount, user_id, note, idem, branch_id, created_at) SELECT ?, id, 'earn', ?, ?, ?, ?, ?, ?, ? FROM members WHERE id = ? AND shop_id = ?${guardSql}`, [c.shop.id, p.delta, r.amount, c.user.id, note, key, branchFor(c), now, m.id, c.shop.id, ...guardArgs]],
+    ["UPDATE members SET balance = balance + ?, lifetime = lifetime + ?, visits = visits + 1, last_visit = ?, updated_at = ? WHERE id = ? AND shop_id = ? AND EXISTS (SELECT 1 FROM txns WHERE shop_id = ? AND member_id = members.id AND kind = 'earn' AND idem = ?)", [p.delta, p.delta, now, now, m.id, c.shop.id, c.shop.id, key]],
   ]);
+  if (res && !res[0].changes) fail(409, 'وصل الزبون لحد الزيارات أو انضافت له نقاط قبل شوي. خلّي المالك يراجع العملية.');
   const ref = res ? await rewardReferral(c, m, now) : null;
   if (res && c.user.role === 'staff' && p.delta >= guardBig(c.shop)) {
     await alertOwner(c, `big:${c.user.id}:${m.id}`, {
@@ -2877,7 +2943,7 @@ async function topup(c, id) {
 }
 
 async function spend(c, id) {
-  await requireActive(c);
+  // Existing prepaid money remains spendable when the merchant subscription expires.
   const m = await memberOf(c, id);
   const amount = readMoney(c.body.amount);
   const now = Date.now();
@@ -4400,6 +4466,7 @@ const API = [
   ['POST', /^\/api\/auth\/reset$/, resetPassword],
   ['POST', /^\/api\/admin\/shops\/(\d+)\/reset-link$/, adminResetLink, 'staff'],
   ['GET', /^\/api\/me$/, me, 'staff'],
+  ['POST', /^\/api\/platform\/bootstrap$/, bootstrapAdmin, 'owner'],
   ['PUT', /^\/api\/me\/password$/, changePassword, 'staff'],
   ['POST', /^\/api\/me\/push$/, userPushSubscribe, 'staff'],
   ['DELETE', /^\/api\/me\/push$/, userPushUnsubscribe, 'staff'],
@@ -4412,6 +4479,7 @@ const API = [
   ['POST', /^\/api\/members\/(\d+)\/earn$/, earn, 'staff'],
   ['POST', /^\/api\/members\/(\d+)\/redeem$/, redeem, 'staff'],
   ['POST', /^\/api\/members\/(\d+)\/adjust$/, adjust, 'owner'],
+  ['POST', /^\/api\/members\/(\d+)\/management$/, memberManagement, 'owner'],
   ['DELETE', /^\/api\/members\/(\d+)$/, removeMember, 'owner'],
   ['GET', /^\/api\/activity$/, activity, 'staff'],
   ['GET', /^\/api\/reports$/, reports, 'owner'],

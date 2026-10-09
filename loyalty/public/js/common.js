@@ -17,8 +17,8 @@ export function html(strings, ...vals) {
 }
 export function render(el, tpl) { el.innerHTML = String(tpl); return el; }
 
-export async function api(path, { method = 'GET', body } = {}) {
-  const init = { method, credentials: 'same-origin', headers: {} };
+export async function api(path, { method = 'GET', body, headers = {} } = {}) {
+  const init = { method, credentials: 'same-origin', headers: { ...headers } };
   if (method !== 'GET') {
     init.headers['content-type'] = 'application/json';
     init.body = JSON.stringify(body ?? {});
@@ -28,6 +28,15 @@ export async function api(path, { method = 'GET', body } = {}) {
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw Object.assign(new Error(data.error || 'صار خطأ، جرّب كمان مرة'), { status: res.status, data });
   return data;
+}
+
+export function saveCardManagement(token, key) {
+  if (!/^[a-z2-9]{20}$/.test(token) || !/^[a-z2-9]{32}$/.test(key)) return;
+  try { localStorage.setItem(`loy_manage_${token}`, key); } catch { /* Private browsing may disable storage. */ }
+}
+
+export function cardManagement(token) {
+  try { return localStorage.getItem(`loy_manage_${token}`) || ''; } catch { return ''; }
 }
 
 export function toast(msg, kind = '') {

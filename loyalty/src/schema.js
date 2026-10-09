@@ -1,4 +1,9 @@
 // الجداول — كل الأوقات بالمللي ثانية (Date.now())، وكل جدول مربوط بالمحل (shop_id)
+export const MEMBER_DELETE_GUARD = `CREATE TRIGGER IF NOT EXISTS protect_member_funds BEFORE DELETE ON members
+  WHEN NOT EXISTS (SELECT 1 FROM shops WHERE id = OLD.shop_id AND demo = 1)
+  AND (OLD.credit > 0 OR EXISTS (SELECT 1 FROM credit_gifts WHERE from_member = OLD.id AND shop_id = OLD.shop_id AND claimed_at IS NULL AND refunded_at IS NULL))
+  BEGIN SELECT RAISE(ABORT, 'member_funds_unsettled'); END`;
+
 export const SCHEMA = [
   `CREATE TABLE IF NOT EXISTS shops (
     id INTEGER PRIMARY KEY,
@@ -469,4 +474,21 @@ export const MIGRATIONS = [
   'ALTER TABLE shops ADD COLUMN deal_months INTEGER NOT NULL DEFAULT 0',
   'ALTER TABLE shops ADD COLUMN deal_at INTEGER',
   'ALTER TABLE payments ADD COLUMN deal_months INTEGER NOT NULL DEFAULT 0',
+  // The cashier QR never contains the private card-management credential.
+  'ALTER TABLE members ADD COLUMN management_hash TEXT',
+  'ALTER TABLE users ADD COLUMN identity TEXT',
+  'UPDATE users SET identity = lower(hex(randomblob(16))) WHERE identity IS NULL',
+  'CREATE UNIQUE INDEX IF NOT EXISTS users_identity ON users(identity)',
+  `CREATE TRIGGER IF NOT EXISTS create_user_identity AFTER INSERT ON users WHEN NEW.identity IS NULL
+   BEGIN UPDATE users SET identity = lower(hex(randomblob(16))) WHERE id = NEW.id; END`,
+  'ALTER TABLE credit_gifts ADD COLUMN from_token TEXT',
+  // Only attach a legacy gift when the original debit still proves its ownership.
+  // Deleted/reused identities must remain unresolved instead of receiving someone else's money.
+  `UPDATE credit_gifts SET from_token = (
+    SELECT m.token FROM members m WHERE m.id = credit_gifts.from_member AND m.shop_id = credit_gifts.shop_id
+    AND m.created_at <= credit_gifts.created_at
+    AND EXISTS (SELECT 1 FROM credit_txns t WHERE t.member_id = m.id AND t.shop_id = m.shop_id
+      AND t.kind = 'spend' AND t.amount = credit_gifts.amount AND t.created_at = credit_gifts.created_at AND t.note = '🎁 هدية لصاحب')
+  ) WHERE from_token IS NULL`,
+  MEMBER_DELETE_GUARD,
 ];
