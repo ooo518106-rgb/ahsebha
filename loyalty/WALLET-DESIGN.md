@@ -1,15 +1,21 @@
-# Wallet design 1.84
+# Wallet design 1.85
 
-Apple keeps its native merchant logo, points header, secondary fields and QR. The new strip contains a segmented halo and a large reward illustration. Google uses the same composition in its hero aspect ratio. Shop colour, points rules, card identity and customer data remain unchanged.
+Version 4 replaces the halo artwork with a large percentage, folded geometric starburst and a horizontal progress rail. The percentage and Arabic caption use bundled, OFL-licensed Readex Pro: weight 650 for figures, 500 for the caption and percent sign. Percentages use the actual reward progress, rounded down, and cannot show 100% until a reward is available. All filled dots and the “مكافأتك جاهزة” caption indicate an available reward. Other business types use this same neutral geometric composition.
 
-The coffee illustration has transparent edges. Other businesses use their corresponding reward icon. A full ring and gift indicate an available reward; partial rings use the existing points/stamps calculation. Small thresholds have one segment per unit; larger thresholds use ten progress segments.
+Apple keeps its native merchant logo, points header, name, membership number and QR. Its text fields use Wallet's own font and layout; we cannot choose a custom typeface for those fields. Reward rules, progress status and menu links remain on the back. Status changes still have a `changeMessage`. The requested scan instruction is included in the back details because Apple controls the QR area. A complete card preview is an approximation of native layout, with the exact generated strip embedded; it is not a screenshot from an iPhone.
 
-`src/wallet-geometry.js` defines vector masks. Run `node scripts/build-wallet-masks.mjs` to regenerate `src/wallet-masks.js` after a geometry change. The generated masks avoid trigonometric rendering on every request. `src/reward-art.js` embeds the compressed RGBA pixels of `public/img/reward-cup.png`, so runtime rendering needs no external image service. Decoded masks and finished PNGs have bounded caches.
+Google uses the same illustration in its hero aspect ratio. Its class template shows the current points, member name and membership number. Remaining points and reward details are retained in the details view. The rollout patches only class layout/labels and object hero images; it never overwrites live account identities, numeric balances or QR values. Class and member cursors persist each successful step so failures can resume without repeating completed updates.
 
-Existing Apple registrations are queued once for a silent update. Existing Google objects receive the new hero URI in batches of three per scheduled run, with a persisted cursor and retries after failures. This job never updates member records. Newly saved passes and normal points updates use the new artwork immediately.
+Shop colour and logo are selected by the shop owner. Light palettes receive dark artwork and dark palettes receive ivory artwork. Names and membership numbers are native fields and are never placed in public hero image URLs.
 
-## Restore the classic design
+## Rebuild artwork
 
-The remote branch `backup/wallet-before-halo-1.83` preserves the original version. For a Wallet-only rollback, keep this release's public image endpoint and change `STRIP_VERSION` in `src/strip.js` from 3 to 2. Bump `PASS_DESIGN_AT` in `src/app.js` to the rollback's UTC time, add a new changelog release, run tests and deploy. The changed revision requeues existing Wallet cards. The existing `strip-classic.js` generates the original coin design.
+Run `python scripts/build-wallet-type.py` with Pillow (RAQM), fonttools and brotli to regenerate `src/wallet-type.js` from `public/fonts/`. Run `node scripts/build-wallet-modern-masks.mjs` to regenerate `src/wallet-modern-masks.js` from the folded geometry. Workers only inflate cached masks and blend colours; they do not shape Arabic text or run trigonometry on requests.
 
-Keep both version 2 and version 3 URLs serving their original bytes: Google stores immutable hero URLs. Avoid restoring the entire repository if unrelated changes have been made since the backup.
+The v2 coin renderer and v3 halo renderer remain byte-compatible. Version 4 URLs include the exact percentage as a seventh component. All three versions remain available because existing Google passes reference immutable hero URLs. PNG caches are bounded.
+
+## Restore earlier designs
+
+The remote branch `backup/wallet-before-halo-1.83` preserves the original release; commit `b731efdf3d6553c295255d0d07f4f81edc7ca583` preserves 1.84. For an artwork-only rollback, set `STRIP_VERSION` to 2 or 3, emit that version's original six-part image key, and bump `PASS_DESIGN_AT`. To restore the old front fields too, restore `buildPassJson` and Google's original class template in a new release and requeue layout updates. Keep every image version serving its original bytes.
+
+The user approved publishing version 1.85 after reviewing the card and typography preview. Main deploys automatically through the existing Cloudflare integration.

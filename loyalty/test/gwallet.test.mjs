@@ -35,6 +35,12 @@ test('شكل الفئة والبطاقة', () => {
   assert.equal(cls.merchantLocations.length, 10, 'Google بتقبل لحد 10 مواقع');
   assert.deepEqual(cls.merchantLocations[0], { latitude: 31, longitude: 35.9 });
   assert.equal(cls.reviewStatus, 'UNDER_REVIEW');
+  assert.equal(cls.accountNameLabel, 'صاحب البطاقة');
+  assert.equal(cls.accountIdLabel, 'رقم العضوية');
+  const rows=cls.classTemplateInfo.cardTemplateOverride.cardRowTemplateInfos;
+  assert.equal(rows[0].oneItem.item.firstValue.fields[0].fieldPath,'object.loyaltyPoints');
+  assert.equal(rows[1].twoItems.startItem.firstValue.fields[0].fieldPath,'object.accountId');
+  assert.equal(rows[1].twoItems.endItem.firstValue.fields[0].fieldPath,'object.accountName');
 
   const obj = buildObject(cfg, shop, { id: 42, card_no: '12345678', name: 'أحمد', token: 'abcdefghijkmnpqrstuv', balance: 4 }, 'https://x.test');
   assert.equal(obj.id, '3388.loy_m42');
@@ -44,7 +50,7 @@ test('شكل الفئة والبطاقة', () => {
   assert.deepEqual(obj.secondaryLoyaltyPoints, { label: 'باقي للمكافأة', balance: { int: 5 } });
   assert.equal(obj.textModulesData[0].body, '●●●●○○○○○');
   assert.equal(obj.linksModuleData.uris[0].uri, 'https://x.test/c/abcdefghijkmnpqrstuv');
-  assert.match(obj.heroImage.sourceUri.uri, /^https:\/\/x\.test\/img\/hero\/g3-[0-9a-f]{6}-[a-z]+-9-4-0\.png$/, 'نفس حلقة الآيفون: 9 أختام، 4 مليانين');
+  assert.match(obj.heroImage.sourceUri.uri, /^https:\/\/x\.test\/img\/hero\/g4-[0-9a-f]{6}-[a-z]+-9-4-0-44\.png$/, 'نفس حلقة الآيفون: 9 أختام، 4 مليانين');
   assert.match(obj.heroImage.contentDescription.defaultValue.value, /^باقي 5 أختام/);
 });
 

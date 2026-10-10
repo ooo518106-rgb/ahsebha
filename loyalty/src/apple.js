@@ -214,27 +214,17 @@ export function buildPassJson(shop, member, { passTypeId, teamId, origin, authTo
     foregroundColor: light ? 'rgb(31, 26, 23)' : 'rgb(255, 255, 255)',
     labelColor: light ? 'rgb(90, 80, 72)' : 'rgb(235, 225, 215)',
     sharingProhibited: true,
+    suppressStripShine: true,
     storeCard: {
       headerFields: [{
         key: 'balance',
         label: stamps ? 'الأختام' : 'النقاط',
         value: stamps ? `${p.available && !p.toward ? p.cost : p.toward}/${p.cost}` : member.balance,
       }],
-      // الوجه: حلقة التقدّم ورسمة المكافأة (strip.png) مكان الحقل الكبير، وتحتها سطر واحد.
-      // Wallet بترتّب من الشمال، فبنحطهم بالعكس عشان ينقروا من اليمين: شو باقي ← المكافأة ← المنيو.
-      // العناوين إيموجي لأنه Wallet بتباعد حروف العناوين الصغيرة فبينمطّ الكلام العربي («الـبـطـاقـة»)
+      // Personal fields stay native and accessible; Wallet controls their typography.
       secondaryFields: [
-        // Apple ما بتسمح بروابط على وجه البطاقة، فبنقول للزبون وين يلاقي المنيو (أول إشي على الضهر)
-        // (الكلام هون ما بينكبس؛ زر ⋯ فوق ← «تفاصيل البطاقة» ← «افتح المنيو»)
-        ...(menuUrl ? [{ key: 'menuHint', label: '📋', value: '⋯ للمنيو', textAlignment: 'PKTextAlignmentLeft' }] : []),
-        { key: 'reward', label: '🎁', value: shop.reward_name, textAlignment: menuUrl ? 'PKTextAlignmentCenter' : 'PKTextAlignmentLeft' },
-        {
-          key: 'status',
-          label: p.available ? '🎉' : '⏳',
-          value: p.available ? (p.available > 1 ? `${p.available} مكافآت جاهزة` : 'مكافأتك جاهزة') : `باقي ${p.remaining} ${unitWord(shop, p.remaining)}`,
-          textAlignment: 'PKTextAlignmentRight',
-          changeMessage: '%@', // إشعار شاشة القفل لما البطاقة تتحدّث: «باقي 5 نقاط» أو «مكافأتك جاهزة»
-        },
+        { key: 'memberNumber', label: 'رقم العضوية', value: member.card_no, textAlignment: 'PKTextAlignmentLeft' },
+        { key: 'memberName', label: 'صاحب البطاقة', value: member.name, textAlignment: 'PKTextAlignmentRight' },
       ],
       backFields: [
         // 📣 آخر رسالة من المحل (آخر 30 يوم): لما تتغيّر بتطلع إشعار على شاشة القفل
@@ -243,6 +233,8 @@ export function buildPassJson(shop, member, { passTypeId, teamId, origin, authTo
         // التقييم ما بيصير جوّا المحفظة: الرابط بيفتح البطاقة على الويب عند النجوم
         ...(shop.review_on ? [{ key: 'rate', label: 'التقييم', value: `${cardUrl}#rate`, attributedValue: link(`${cardUrl}#rate`, '⭐ قيّم زيارتك') }] : []),
         ...shopLinks(shop).map((l) => ({ key: `link-${l.key}`, label: l.label, value: l.url, attributedValue: link(l.url, l.text) })),
+        { key: 'status', label: 'التقدّم', value: p.available ? (p.available > 1 ? `${p.available} مكافآت جاهزة` : 'مكافأتك جاهزة') : `باقي ${p.remaining} ${unitWord(shop, p.remaining)}`, changeMessage: '%@' },
+        { key: 'scan', label: 'اجمع نقاطك', value: 'امسح الكود عند المحل واجمع نقاطك' },
         { key: 'rule', label: 'المكافأة', value: rewardRule(shop) },
         { key: 'name', label: 'الاسم', value: member.name },
         { key: 'card', label: 'رقم البطاقة', value: member.card_no },

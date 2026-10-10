@@ -47,6 +47,17 @@ export async function signJwt(claims, privateKeyPem) {
 
 const ar = (value) => ({ defaultValue: { language: 'ar', value } });
 
+const field = fieldPath => ({ firstValue: { fields: [{ fieldPath }] } });
+// Keep reward/remaining data in the details view, and show personal identity on the front.
+export const membershipLayout = () => ({
+  accountIdLabel: 'رقم العضوية',
+  accountNameLabel: 'صاحب البطاقة',
+  classTemplateInfo: { cardTemplateOverride: { cardRowTemplateInfos: [
+    { oneItem: { item: field('object.loyaltyPoints') } },
+    { twoItems: { startItem: field('object.accountId'), endItem: field('object.accountName') } },
+  ] } },
+});
+
 export function buildClass(cfg, shop, origin, { menuUrl = null } = {}) {
   const locations = JSON.parse(shop.locations || '[]').slice(0, 10);
   const cls = {
@@ -60,8 +71,7 @@ export function buildClass(cfg, shop, origin, { menuUrl = null } = {}) {
     hexBackgroundColor: shop.color,
     reviewStatus: 'UNDER_REVIEW',
     countryCode: shop.country,
-    accountIdLabel: 'رقم البطاقة',
-    accountNameLabel: 'الاسم',
+    ...membershipLayout(),
     multipleDevicesAndHoldersAllowedStatus: 'ONE_USER_ALL_DEVICES',
     textModulesData: [{ id: 'reward', header: 'المكافأة', body: rewardRule(shop) }],
   };
@@ -92,7 +102,7 @@ export function buildObject(cfg, shop, member, origin) {
     secondaryLoyaltyPoints: p.available
       ? { label: 'مكافآت جاهزة', balance: { int: p.available } }
       : { label: 'باقي للمكافأة', balance: { int: p.remaining } },
-    // حلقة تقدّم ورسمة مكافأة، بنفس لون المحل وبنفس حالة بطاقة الآيفون
+    // Exact progress, geometric folds and Readex Pro; the shop owns its colour.
     heroImage: { sourceUri: { uri: `${origin}${heroPath(shop, member.balance)}` }, contentDescription: { defaultValue: { language: 'ar', value: p.available ? `${shop.reward_name}: جاهزة` : `باقي ${p.remaining} ${unitWord(shop, p.remaining)} لـ ${shop.reward_name}` } } },
     textModulesData: [{ id: 'progress', header: shop.reward_name, body: stamps ? stampsLine(shop, member.balance) : `${p.toward} / ${p.cost} ${unitWord(shop, p.cost)}` }],
     linksModuleData: { uris: [
@@ -153,6 +163,14 @@ async function upsert(cfg, type, body) {
 }
 export const upsertClass = (cfg, cls) => upsert(cfg, 'loyaltyClass', cls);
 export const upsertObject = (cfg, obj) => upsert(cfg, 'loyaltyObject', obj);
+
+export async function patchClassLayout(cfg, shopId) {
+  const r = await call(cfg, 'PATCH', `/loyaltyClass/${encodeURIComponent(classId(cfg, shopId))}`, membershipLayout());
+  // A shop whose saved objects have disappeared will get the layout at its next upsert.
+  if (r.status === 404) return false;
+  if (!r.ok) throw gError(r);
+  return true;
+}
 
 // تحديث بطاقة زبون بعد ما تتغيّر نقاطه؛ false يعني الزبون لسا ما حفظها بمحفظته
 export async function patchObject(cfg, obj) {

@@ -93,7 +93,7 @@ test('Apple Wallet من الإعداد للبطاقة الموقّعة وخدم�
   assert.deepEqual([...files['strip@3x.png'].subarray(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10], 'صورة الدواير PNG');
   assert.equal(files['strip@3x.png'].readUInt32BE(16), 1125, 'عرضها 3x');
   assert.equal(files['strip@3x.png'].readUInt32BE(20), 432, 'طولها 144 نقطة (مكان الشريط بالبطاقة اللي عليها QR)');
-  assert.ok((await db.get('SELECT k FROM strip_cache')).k.startsWith('s3|'), 'الصورة انحفظت عشان ما تنرسم كل مرة');
+  assert.ok((await db.get('SELECT k FROM strip_cache')).k.startsWith('s4|'), 'الصورة انحفظت عشان ما تنرسم كل مرة');
   const pass = JSON.parse(files['pass.json']);
   assert.equal(pass.passTypeIdentifier, 'pass.com.nuqatak.test');
   assert.equal(pass.teamIdentifier, 'ABCDE12345');
@@ -103,7 +103,7 @@ test('Apple Wallet من الإعداد للبطاقة الموقّعة وخدم�
   assert.deepEqual(pass.barcodes[0], { format: 'PKBarcodeFormatQR', message: token, messageEncoding: 'iso-8859-1', altText: pass.storeCard.backFields.find((f) => f.key === 'card').value });
   assert.equal(pass.logoText, 'موكا كوفي هاوس', 'بدون شعار مرفوع: الاسم مكتوب');
   assert.equal(pass.storeCard.primaryFields, undefined, 'مكان الحقل الكبير للدواير');
-  assert.deepEqual(pass.storeCard.secondaryFields.map((f) => [f.label, f.value, f.textAlignment]), [['🎁', 'مشروب مجاني', 'PKTextAlignmentLeft'], ['⏳', 'باقي 100 نقطة', 'PKTextAlignmentRight']], 'من اليمين: شو باقي ← المكافأة');
+  assert.deepEqual(pass.storeCard.secondaryFields.map((f) => [f.label, f.value, f.textAlignment]), [['رقم العضوية', pass.barcodes[0].altText, 'PKTextAlignmentLeft'], ['صاحب البطاقة', pass.storeCard.backFields.find(f => f.key === 'name').value, 'PKTextAlignmentRight']], 'الاسم ورقم العضوية على الوجه');
   assert.deepEqual(pass.locations, [{ latitude: 31.7167, longitude: 35.7939, relevantText: 'موكا كوفي هاوس ترحب بكم ☕' }]);
   assert.equal(pass.storeCard.headerFields[0].value, 0);
   // manifest = SHA-1 لكل ملف، والتوقيع صحيح بالسلسلة
@@ -169,13 +169,13 @@ test('بطاقة Apple: رابط المنيو على ضهر البطاقة إذ�
   const menu = buildPassJson(shop, member, { ...opts, menuUrl: 'https://x.test/m/mocha' }).storeCard.backFields.find((f) => f.key === 'menu');
   assert.equal(menu.value, 'https://x.test/m/mocha');
   assert.match(menu.attributedValue, /<a href="https:\/\/x\.test\/m\/mocha">/);
-  // المنيو أول إشي على الضهر، وبعده التقييم وروابط المحل. وعلى الوجه سطر بيقول وين المنيو
+  // المنيو أول إشي على الضهر، وبعده التقييم وروابط المحل. والوجه مخصص لاسم الزبون ورقم العضوية
   const full = buildPassJson({ ...shop, review_on: 1, links: JSON.stringify({ instagram: 'https://instagram.com/mocha.jo', whatsapp: 'https://wa.me/962791234567', website: 'javascript:alert(1)' }) }, member, { ...opts, menuUrl: 'https://x.test/m/mocha' }).storeCard;
   assert.deepEqual(full.backFields.map((f) => f.key).slice(0, 4), ['menu', 'rate', 'link-instagram', 'link-whatsapp']);
   assert.ok(!full.backFields.some((f) => f.key === 'link-website'), 'بس روابط https');
   assert.match(full.backFields[1].attributedValue, /#rate">⭐ قيّم زيارتك</);
   assert.match(full.backFields[2].attributedValue, />@mocha\.jo</);
-  assert.deepEqual(full.secondaryFields.map((f) => f.key), ['menuHint', 'reward', 'status'], 'المنيو عالشمال، وشو باقي عاليمين');
+  assert.deepEqual(full.secondaryFields.map((f) => f.key), ['memberNumber', 'memberName'], 'الوجه للهوية الشخصية والمنيو على الظهر');
 });
 
 test('📍 مسافة الترحيب: المحل بيصغّرها (maxDistance) أو بيطفّيها، والافتراضي اللي بيقرره الآيفون', async () => {

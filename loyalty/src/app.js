@@ -294,7 +294,7 @@ async function appleConfig(c, { withKey = true } = {}) {
 }
 
 // وقت آخر تغيير بشكل البطاقة: البطاقات القديمة على الآيفونات بتعتبر حالها قديمة وبتنزّل الشكل الجديد لما تتحدّث
-const PASS_DESIGN_AT = Date.UTC(2026, 9, 9, 21, 43, 41);
+const PASS_DESIGN_AT = Date.UTC(2026, 9, 10, 17, 30);
 async function passDesignAt(c) {
   let state;
   try { state = JSON.parse(await getSetting(c.db, 'wallet_design_rollout')); } catch { /* first deployment */ }
@@ -765,7 +765,7 @@ export async function runScheduled(ctx, now = Date.now()) {
     out.demoReset = true;
   }
   await c.db.run('DELETE FROM rate_hits WHERE expires_at < ?', now);
-  await c.db.run('DELETE FROM strip_cache WHERE k NOT GLOB ?', '[sg][23]|*'); // Keep immutable URLs used by saved Google cards
+  await c.db.run('DELETE FROM strip_cache WHERE k NOT GLOB ?', '[sg][234]|*'); // Keep immutable URLs used by saved Google cards
   return out;
 }
 
@@ -777,7 +777,8 @@ async function walletDesignJob(c, now) {
   try { state = JSON.parse(await getSetting(c.db, 'wallet_design_rollout')); } catch { /* old or absent state */ }
   if (!state || state.revision !== revision) {
     const max = await c.db.get('SELECT COALESCE(MAX(id), 0) AS id FROM members WHERE gw_object = 1');
-    state = { revision, at: now, cursor: 0, target: max.id };
+    const shops = await c.db.get('SELECT COALESCE(MAX(shop_id), 0) AS id FROM members WHERE gw_object = 1');
+    state = { revision, at: now, cursor: 0, target: max.id, classCursor: 0, classTarget: shops.id };
     await c.db.batch([
       ['INSERT OR IGNORE INTO apple_queue (push_token, queued_at) SELECT DISTINCT push_token, ? FROM apple_regs', [now]],
       ["INSERT INTO platform_settings (k, v) VALUES ('wallet_design_rollout', ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v", [JSON.stringify(state)]],
@@ -787,6 +788,21 @@ async function walletDesignJob(c, now) {
   const cfg = gw.googleConfig(c.env);
   if (!cfg) return 'google-off';
   if (c.budget < 2) return 'wait';
+  // Patch layout separately from live balances/identity. Persist each success for retries.
+  if (!state.classesDone) {
+    const shops = await c.db.all('SELECT id FROM shops WHERE id > ? AND id <= ? AND EXISTS (SELECT 1 FROM members WHERE shop_id = shops.id AND gw_object = 1) ORDER BY id LIMIT ?', state.classCursor || 0, state.classTarget || 0, Math.min(3, Math.floor(c.budget / 2)));
+    for (const shop of shops) {
+      c.budget -= 2;
+      await gw.patchClassLayout(cfg, shop.id);
+      state.classCursor = shop.id;
+      await setSetting(c.db, 'wallet_design_rollout', JSON.stringify(state));
+    }
+    if (!shops.length || state.classCursor >= state.classTarget) {
+      state.classesDone = true;
+      await setSetting(c.db, 'wallet_design_rollout', JSON.stringify(state));
+    }
+    if (!state.classesDone || c.budget < 2) return 'classes';
+  }
   const rows = await c.db.all('SELECT * FROM members WHERE gw_object = 1 AND id > ? AND id <= ? ORDER BY id LIMIT ?', state.cursor, state.target, Math.min(3, Math.floor(c.budget / 2)));
   for (const m of rows) {
     const shop = await shopRow(c.db, m.shop_id);
