@@ -294,7 +294,7 @@ async function appleConfig(c, { withKey = true } = {}) {
 }
 
 // وقت آخر تغيير بشكل البطاقة: البطاقات القديمة على الآيفونات بتعتبر حالها قديمة وبتنزّل الشكل الجديد لما تتحدّث
-const PASS_DESIGN_AT = Date.UTC(2026, 9, 10, 17, 30);
+const PASS_DESIGN_AT = Date.UTC(2026, 9, 10, 19, 25);
 async function passDesignAt(c) {
   let state;
   try { state = JSON.parse(await getSetting(c.db, 'wallet_design_rollout')); } catch { /* first deployment */ }

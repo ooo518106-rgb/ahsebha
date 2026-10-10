@@ -1,4 +1,7 @@
-# Wallet design 1.85
+# Wallet design 1.86
+
+Version 5 (1.86) keeps the 1.85 artwork but fills the progress dots from the right (Arabic reading order) and drops the lighter background gradient, so the strip matches the pass colour instead of showing as a box. On the Apple front, the secondary fields are the member name and the remaining-points status (with `changeMessage`), labelled with emoji because Wallet letter-spaces small labels and breaks Arabic joining. The card number stays under the QR. v4 URLs keep serving their original bytes.
+
 
 Version 4 replaces the halo artwork with a large percentage, folded geometric starburst and a horizontal progress rail. The percentage and Arabic caption use bundled, OFL-licensed Readex Pro: weight 650 for figures, 500 for the caption and percent sign. Percentages use the actual reward progress, rounded down, and cannot show 100% until a reward is available. All filled dots and the “مكافأتك جاهزة” caption indicate an available reward. Other business types use this same neutral geometric composition.
 
