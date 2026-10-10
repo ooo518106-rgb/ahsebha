@@ -14,6 +14,7 @@ import * as sales from './sales.js';
 import * as wa from './whatsapp.js';
 import { defaultLogoPng } from './png.js';
 import { heroKey, parseKey, peekStrip, renderKey, stripFiles, stripKey, STRIP_VERSION } from './strip.js';
+import { BLOG } from './blog-list.js';
 import * as backup from './backup.js';
 import { MEMBER_DELETE_GUARD } from './schema.js';
 import * as social from './social.js';
@@ -5310,8 +5311,8 @@ async function page(c, file) {
 
 // 🌐 الدومين الرسمي (PUBLIC_URL، مثلاً https://nuqatak.com): صفحات العنوان القديم (workers.dev) و www بتتحوّل لحالها.
 // الـ API وخدمة Apple والصور و sw.js بيضلوا شغّالين على كل العناوين، عشان البطاقات اللي بالمحافظ والإشعارات اللي انبعتت قبل
-const PAGE_RE = /^\/(?:$|index\.html$|app\/?$|privacy\/?$|terms\/?$|cards\/?$|(?:j|m|print)\/[a-z0-9-]{3,40}\/?$|(?:c|g|partner)\/[a-z2-9]{20}\/?$)/;
-// 🔎 Google: شو يقرأ (الصفحة الرئيسية، الشروط، الخصوصية، صفحات المحلات والمنيو) وشو لأ (اللوحة، بطاقات الزبائن، الهدايا، الـ API)
+const PAGE_RE = /^\/(?:$|index\.html$|app\/?$|privacy\/?$|terms\/?$|cards\/?$|blog(?:\/[a-z0-9-]{3,80})?\/?$|(?:j|m|print)\/[a-z0-9-]{3,40}\/?$|(?:c|g|partner)\/[a-z2-9]{20}\/?$)/;
+// 🔎 Google: شو يقرأ (الصفحة الرئيسية، المقالات، الشروط، الخصوصية، صفحات المحلات والمنيو) وشو لأ (اللوحة، بطاقات الزبائن، الهدايا، الـ API)
 function robotsTxt(c) {
   const body = ['User-agent: *', 'Disallow: /api/', 'Disallow: /app', 'Disallow: /c/', 'Disallow: /g/', 'Disallow: /cards', 'Disallow: /partner/', 'Disallow: /print/', 'Disallow: /apple/', '', `Sitemap: ${c.origin}/sitemap.xml`, ''].join('\n');
   return new Response(body, { headers: { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'public, max-age=3600' } });
@@ -5319,8 +5320,8 @@ function robotsTxt(c) {
 
 function sitemapXml(c) {
   const day = CHANGELOG[0].date;
-  const urls = [['/', '1.0', 'weekly'], ['/terms', '0.3', 'monthly'], ['/privacy', '0.3', 'monthly']];
-  const body = `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls.map(([u, pr, f]) => `  <url><loc>${c.origin}${u}</loc><lastmod>${day}</lastmod><changefreq>${f}</changefreq><priority>${pr}</priority></url>`).join('\n')}\n</urlset>\n`;
+  const urls = [['/', '1.0', 'weekly'], ['/blog', '0.8', 'weekly'], ...BLOG.map((b) => [`/blog/${b.slug}`, '0.7', 'monthly', b.date]), ['/terms', '0.3', 'monthly'], ['/privacy', '0.3', 'monthly']];
+  const body = `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls.map(([u, pr, f, d]) => `  <url><loc>${c.origin}${u}</loc><lastmod>${d || day}</lastmod><changefreq>${f}</changefreq><priority>${pr}</priority></url>`).join('\n')}\n</urlset>\n`;
   return new Response(body, { headers: { 'content-type': 'application/xml; charset=utf-8', 'cache-control': 'public, max-age=3600' } });
 }
 
@@ -5355,6 +5356,12 @@ export async function handle(req, ctx) {
     if (p === '/' || p === '/index.html') return await page(c, '/index.html');
     if (p === '/privacy' || p === '/privacy/') return await page(c, '/privacy.html');
     if (p === '/terms' || p === '/terms/') return await page(c, '/terms.html');
+    // 📝 المدونة: بس المقالات اللي بالقائمة (src/blog-list.js)، والباقي 404
+    if (p === '/blog' || p === '/blog/') return await page(c, '/blog/index.html');
+    if (p.startsWith('/blog/')) {
+      const slug = p.slice(6).replace(/\/$/, '');
+      return BLOG.some((b) => b.slug === slug) ? await page(c, `/blog/${slug}.html`) : notFound(c);
+    }
     // نفس صفحة الخصوصية لـ Meta (تعليمات حذف البيانات): ما بتتحوّل للدومين، لأنه زاحف Meta ما بيعدّي حماية البوتات عليه
     if (p === '/data-deletion' || p === '/data-deletion/') return await page(c, '/privacy.html');
     if (/^\/partner\/[a-z2-9]{20}\/?$/.test(p)) return await page(c, '/partner.html');
