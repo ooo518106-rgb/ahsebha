@@ -212,35 +212,57 @@ async function apnsConfig(c) {
 
 async function applePush(c, serials, { limit = 300 } = {}) {
   if (!serials.length) return null;
-  const regs = await c.db.all(`SELECT DISTINCT push_token FROM apple_regs WHERE serial IN (${serials.map(() => '?').join(',')}) LIMIT ${limit}`, ...serials);
-  return apnsSend(c, regs);
+  const marks = serials.map(() => '?').join(',');
+  // Persist before sending: a network/key failure must not lose the update.
+  // Each new change advances the queue tag, even within the same millisecond.
+  await c.db.run(`INSERT INTO apple_queue (push_token, queued_at)
+    SELECT DISTINCT push_token, ? FROM apple_regs WHERE serial IN (${marks}) LIMIT ?
+    ON CONFLICT(push_token) DO UPDATE SET queued_at = MAX(apple_queue.queued_at + 1, excluded.queued_at)`, Date.now(), ...serials, limit);
+  const regs = await c.db.all(`SELECT DISTINCT q.push_token, q.queued_at FROM apple_queue q
+    JOIN apple_regs r ON r.push_token = q.push_token WHERE r.serial IN (${marks})
+    ORDER BY q.queued_at LIMIT ?`, ...serials, Math.min(limit, APPLE_BATCH));
+  return apnsSend(c, regs, { retry: true });
 }
 
 // 🍎 دور أجهزة الآيفون (رسالة جديدة لكتير زبائن): كل طلب لـ Apple طلب فرعي، والخطة المجانية بتسمح بـ 50 بالتشغيلة
 const APPLE_BATCH = 25;
 async function appleQueueDrain(c, max = APPLE_BATCH) {
-  const rows = await c.db.all('SELECT push_token FROM apple_queue ORDER BY queued_at LIMIT ?', max);
+  const rows = await c.db.all('SELECT push_token, queued_at FROM apple_queue ORDER BY queued_at LIMIT ?', max);
   if (!rows.length) return 0;
-  const mine = [];
-  for (const r of rows) if ((await c.db.run('DELETE FROM apple_queue WHERE push_token = ?', r.push_token)).changes) mine.push(r); // ما ينبعت مرتين
-  const out = await apnsSend(c, mine);
+  const out = await apnsSend(c, rows);
   return out ? out.sent : 0;
 }
 
-async function apnsSend(c, regs) {
+async function apnsSend(c, regs, { retry = false } = {}) {
   if (!regs.length) return null;
   const cfg = await apnsConfig(c);
   if (!cfg) return null;
-  const jwt = await apple.apnsJwt(cfg);
+  let jwt = await apple.apnsJwt(cfg);
   const out = { at: Date.now(), sent: 0, failed: 0, reason: null };
   for (const r of regs) {
     let res;
     try { res = await apple.sendPassPush(cfg, jwt, r.push_token); } catch (e) { res = { status: 0, reason: clean(e.message, 80) }; }
-    if (res.status === 200) { out.sent++; continue; }
+    // One immediate retry per batch; keep the rest for cron within the Worker request budget.
+    if (retry && (res.status === 0 || res.status >= 500 || res.reason === 'ExpiredProviderToken')) {
+      retry = false;
+      if (res.reason === 'ExpiredProviderToken') { apple.forgetApnsToken(); jwt = await apple.apnsJwt(cfg); }
+      try { res = await apple.sendPassPush(cfg, jwt, r.push_token); } catch (e) { res = { status: 0, reason: clean(e.message, 80) }; }
+    }
+    if (res.status === 200) {
+      out.sent++;
+      // A newer change queued during this request still needs its own notification.
+      await c.db.run('DELETE FROM apple_queue WHERE push_token = ? AND queued_at = ?', r.push_token, r.queued_at);
+      continue;
+    }
     out.failed++;
     out.reason = res.reason || `HTTP ${res.status}`;
     // الجهاز شال البطاقة أو التوكن مش صالح: منشيله. المفتاح غلط: منعيد عمل التوكن المرة الجاية
-    if (res.status === 410 || res.reason === 'BadDeviceToken' || res.reason === 'Unregistered') await c.db.run('DELETE FROM apple_regs WHERE push_token = ?', r.push_token);
+    if (res.status === 410 || res.reason === 'BadDeviceToken' || res.reason === 'Unregistered') {
+      await c.db.batch([
+        ['DELETE FROM apple_regs WHERE push_token = ?', [r.push_token]],
+        ['DELETE FROM apple_queue WHERE push_token = ?', [r.push_token]],
+      ]);
+    }
     if (res.status === 403) apple.forgetApnsToken();
   }
   await c.db.run('UPDATE apple_config SET apns_last = ? WHERE id = 1', JSON.stringify(out));
@@ -443,7 +465,9 @@ async function appleService(c) {
     if (!m) return new Response(null, { status: 404 });
     const { bytes, updated } = await pkpassFor(c, cfg, m);
     const ims = Date.parse(c.req.headers.get('if-modified-since') || '');
-    if (ims && Math.floor(updated / 1000) * 1000 <= ims) return new Response(null, { status: 304 });
+    // HTTP dates have second precision. Keep our milliseconds so a newer balance
+    // in the same second is never mistaken for the copy already on the device.
+    if (Number.isFinite(ims) && updated <= ims) return new Response(null, { status: 304 });
     return pkpassResponse(bytes, updated);
   }
   return new Response(null, { status: 404 });
@@ -781,7 +805,7 @@ async function walletDesignJob(c, now) {
     const shops = await c.db.get('SELECT COALESCE(MAX(shop_id), 0) AS id FROM members WHERE gw_object = 1');
     state = { revision, at: now, cursor: 0, target: max.id, classCursor: 0, classTarget: shops.id };
     await c.db.batch([
-      ['INSERT OR IGNORE INTO apple_queue (push_token, queued_at) SELECT DISTINCT push_token, ? FROM apple_regs', [now]],
+      ['INSERT INTO apple_queue (push_token, queued_at) SELECT DISTINCT push_token, ? FROM apple_regs WHERE 1 ON CONFLICT(push_token) DO UPDATE SET queued_at = MAX(apple_queue.queued_at + 1, excluded.queued_at)', [now]],
       ["INSERT INTO platform_settings (k, v) VALUES ('wallet_design_rollout', ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v", [JSON.stringify(state)]],
     ]);
   }
@@ -3334,7 +3358,7 @@ async function shopNews(c, shop, segment, text, now) {
   const r = await c.db.run(`UPDATE members SET news = ?, news_at = ?, updated_at = ? WHERE shop_id = ? AND ${seg.where}`, clean(text, 300), now, now, shop.id, ...seg.args(shop, now));
   if (!r.changes || !(await c.db.get('SELECT 1 FROM apple_config WHERE id = 1 AND cert IS NOT NULL AND apns_key IS NOT NULL'))) return 0;
   const q = await c.db.run(
-    'INSERT OR IGNORE INTO apple_queue (push_token, queued_at) SELECT DISTINCT r.push_token, ? FROM apple_regs r JOIN members m ON m.token = r.serial WHERE m.shop_id = ? AND m.news_at = ?',
+    'INSERT INTO apple_queue (push_token, queued_at) SELECT DISTINCT r.push_token, ? FROM apple_regs r JOIN members m ON m.token = r.serial WHERE m.shop_id = ? AND m.news_at = ? ON CONFLICT(push_token) DO UPDATE SET queued_at = MAX(apple_queue.queued_at + 1, excluded.queued_at)',
     now, shop.id, now,
   );
   return q.changes;

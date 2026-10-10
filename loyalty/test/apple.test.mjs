@@ -6,6 +6,7 @@ import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { authTokenFor, generateKeyAndCsr, zip } from '../src/apple.js';
+import { runScheduled } from '../src/app.js';
 import { setup, signup } from './helpers.mjs';
 
 // سلسلة شهادات تجريبية بتشبه تبعت Apple: جذر ← وسيطة (WWDR) ← شهادة Pass Type ID
@@ -144,8 +145,17 @@ test('Apple Wallet من الإعداد للبطاقة الموقّعة وخدم�
   assert.equal(latest.status, 200);
   const updated = JSON.parse(unzipAll(Buffer.from(latest.data))['pass.json']);
   assert.equal(updated.storeCard.headerFields[0].value, 25);
-  const lm = latest.headers.get('last-modified');
-  assert.equal((await guest.req('GET', `/apple/v1/passes/pass.com.nuqatak.test/${token}`, undefined, { ...auth, 'if-modified-since': lm })).status, 304);
+  // Deterministic same-second regression: the old response returned 304 for a new balance.
+  const second = Math.ceil(Date.now() / 1000) * 1000 + 1000;
+  await db.run('UPDATE members SET updated_at = ? WHERE id = ?', second, memberId);
+  await db.run('UPDATE shops SET updated_at = ? WHERE slug = ?', second, shop.slug);
+  const conditional = { ...auth, 'if-modified-since': new Date(second).toUTCString() };
+  const serviceUrl = `/apple/v1/passes/pass.com.nuqatak.test/${token}`;
+  assert.equal((await guest.req('GET', serviceUrl, undefined, conditional)).status, 304, 'نسخة بدون تغيير بتضل 304');
+  await db.run('UPDATE members SET balance = 26, updated_at = ? WHERE id = ?', second + 1, memberId);
+  const sameSecond = await guest.req('GET', serviceUrl, undefined, conditional);
+  assert.equal(sameSecond.status, 200, 'نقاط جديدة بنفس الثانية بتوصل');
+  assert.equal(JSON.parse(unzipAll(sameSecond.data)['pass.json']).storeCard.headerFields[0].value, 26);
   assert.equal((await guest.req('POST', '/apple/v1/log', { logs: ['test'] })).status, 200);
 
   // حذف البطاقة بيشيل التسجيل
@@ -221,10 +231,10 @@ test('🔔 تحديث بطاقات الآيفون لحالها: مفتاح APNs�
     const u = String(url);
     if (!u.startsWith('https://api.push.apple.com/')) return new Response(null, { status: 201 });
     pushes.push({ url: u, headers: new Headers(init.headers), body: init.body });
-    const r = reply(u);
+    const r = await reply(u);
     return new Response(r.body ? JSON.stringify(r.body) : null, { status: r.status });
   };
-  const { db, client } = await setup({ APPLE_WWDR_PEM: readFileSync(path.join(dir, 'wwdr.pem'), 'utf8'), fetch });
+  const { db, client, env } = await setup({ APPLE_WWDR_PEM: readFileSync(path.join(dir, 'wwdr.pem'), 'utf8'), fetch, PUBLIC_URL: 'https://loyalty.test' });
   const admin = client();
   const { shop } = await signup(admin, { shopName: 'Mocha Coffee' });
   const b64 = (u8) => Buffer.from(u8).toString('base64');
@@ -242,6 +252,9 @@ test('🔔 تحديث بطاقات الآيفون لحالها: مفتاح APNs�
   await admin.post(`/api/members/${memberId}/earn`, { amount: 5 });
   await admin.flush();
   assert.equal(pushes.length, 0);
+  assert.equal((await db.get('SELECT COUNT(*) AS n FROM apple_queue')).n, 1, 'بدون مفتاح: التحديث محفوظ');
+  await runScheduled({ db, env, waitUntil: () => {} });
+  assert.equal((await db.get('SELECT COUNT(*) AS n FROM apple_queue')).n, 1, 'المهام ما بتمسح الدور قبل تجهيز Apple');
 
   // مفتاح P-256 متل ملف .p8 تبع Apple
   const pair = await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify']);
@@ -275,6 +288,36 @@ test('🔔 تحديث بطاقات الآيفون لحالها: مفتاح APNs�
   assert.equal(dec(c).iss, 'ABCDE12345');
   assert.ok(await crypto.subtle.verify({ name: 'ECDSA', hash: 'SHA-256' }, pair.publicKey, Buffer.from(sig, 'base64url'), new TextEncoder().encode(`${h}.${c}`)), 'التوقيع صحيح');
   assert.equal((await admin.get('/api/admin/apple')).data.apns.last.sent, 1);
+  assert.equal((await db.get('SELECT COUNT(*) AS n FROM apple_queue')).n, 0);
+
+  // A brief outage recovers immediately; a continuing outage is retried by cron.
+  pushes.length = 0;
+  let attempts = 0;
+  reply = () => ++attempts === 1 ? { status: 503, body: { reason: 'ServiceUnavailable' } } : { status: 200 };
+  await admin.post(`/api/members/${memberId}/earn`, { amount: 1 });
+  await admin.flush();
+  assert.equal(pushes.length, 2, 'محاولة سريعة بعد خطأ مؤقت');
+  assert.equal((await db.get('SELECT COUNT(*) AS n FROM apple_queue')).n, 0);
+  reply = () => { throw new Error('network unavailable'); };
+  await admin.post(`/api/members/${memberId}/earn`, { amount: 1 });
+  await admin.flush();
+  assert.equal((await db.get('SELECT COUNT(*) AS n FROM apple_queue')).n, 1, 'فشل الشبكة ما بيضيّع التحديث');
+  await runScheduled({ db, env, waitUntil: () => {} });
+  assert.equal((await db.get('SELECT COUNT(*) AS n FROM apple_queue')).n, 1, 'فشل المهام بيحتفظ بالتحديث للمرة الجاية');
+  reply = () => ({ status: 200 });
+  await runScheduled({ db, env, waitUntil: () => {} });
+  assert.equal((await db.get('SELECT COUNT(*) AS n FROM apple_queue')).n, 0, 'نجاح الإرسال بيفرّغ الدور');
+
+  reply = async () => {
+    await db.run('UPDATE apple_queue SET queued_at = queued_at + 1 WHERE push_token = ?', 'aa11');
+    return { status: 200 };
+  };
+  await admin.post(`/api/members/${memberId}/earn`, { amount: 1 });
+  await admin.flush();
+  assert.equal((await db.get('SELECT COUNT(*) AS n FROM apple_queue')).n, 1, 'تغيير جديد أثناء الإرسال ما بينمسح');
+  reply = () => ({ status: 200 });
+  await runScheduled({ db, env, waitUntil: () => {} });
+  assert.equal((await db.get('SELECT COUNT(*) AS n FROM apple_queue')).n, 0);
 
   // تغيير بالمحل (الاسم) ← كل بطاقاته بتتحدّث
   pushes.length = 0;
@@ -305,5 +348,6 @@ test('🔔 تحديث بطاقات الآيفون لحالها: مفتاح APNs�
   await admin.post(`/api/members/${memberId}/earn`, { amount: 3 });
   await admin.flush();
   assert.equal((await db.get('SELECT COUNT(*) AS n FROM apple_regs')).n, 0);
+  assert.equal((await db.get('SELECT COUNT(*) AS n FROM apple_queue')).n, 0, 'الجهاز اللي شال البطاقة ما بنضل نعيد الإرسال إله');
   assert.equal((await admin.get('/api/admin/apple')).data.apns.last.reason, 'Unregistered');
 });
