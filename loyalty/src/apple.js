@@ -221,10 +221,18 @@ export function buildPassJson(shop, member, { passTypeId, teamId, origin, authTo
         label: stamps ? 'الأختام' : 'النقاط',
         value: stamps ? `${p.available && !p.toward ? p.cost : p.toward}/${p.cost}` : member.balance,
       }],
-      // Personal fields stay native and accessible; Wallet controls their typography.
+      // تحت الرسمة: الاسم، وشو باقي للمكافأة (بيطلع إشعار شاشة القفل لما يتغيّر).
+      // العناوين إيموجي: Wallet بتباعد حروف العناوين الصغيرة، فالعربي بينقطع («الـبـطـاقـة»).
+      // رقم البطاقة مش هون: مكتوب تحت الـ QR.
       secondaryFields: [
-        { key: 'memberNumber', label: 'رقم العضوية', value: member.card_no, textAlignment: 'PKTextAlignmentLeft' },
-        { key: 'memberName', label: 'صاحب البطاقة', value: member.name, textAlignment: 'PKTextAlignmentRight' },
+        { key: 'memberName', label: '👤', value: member.name, textAlignment: 'PKTextAlignmentLeft' },
+        {
+          key: 'status',
+          label: p.available ? '🎉' : '🎁',
+          value: p.available ? (p.available > 1 ? `${p.available} مكافآت جاهزة` : 'مكافأتك جاهزة') : `باقي ${p.remaining} ${unitWord(shop, p.remaining)}`,
+          textAlignment: 'PKTextAlignmentRight',
+          changeMessage: '%@',
+        },
       ],
       backFields: [
         // 📣 آخر رسالة من المحل (آخر 30 يوم): لما تتغيّر بتطلع إشعار على شاشة القفل
@@ -233,7 +241,6 @@ export function buildPassJson(shop, member, { passTypeId, teamId, origin, authTo
         // التقييم ما بيصير جوّا المحفظة: الرابط بيفتح البطاقة على الويب عند النجوم
         ...(shop.review_on ? [{ key: 'rate', label: 'التقييم', value: `${cardUrl}#rate`, attributedValue: link(`${cardUrl}#rate`, '⭐ قيّم زيارتك') }] : []),
         ...shopLinks(shop).map((l) => ({ key: `link-${l.key}`, label: l.label, value: l.url, attributedValue: link(l.url, l.text) })),
-        { key: 'status', label: 'التقدّم', value: p.available ? (p.available > 1 ? `${p.available} مكافآت جاهزة` : 'مكافأتك جاهزة') : `باقي ${p.remaining} ${unitWord(shop, p.remaining)}`, changeMessage: '%@' },
         { key: 'scan', label: 'اجمع نقاطك', value: 'امسح الكود عند المحل واجمع نقاطك' },
         { key: 'rule', label: 'المكافأة', value: rewardRule(shop) },
         { key: 'name', label: 'الاسم', value: member.name },

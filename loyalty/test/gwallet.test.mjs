@@ -50,7 +50,7 @@ test('شكل الفئة والبطاقة', () => {
   assert.deepEqual(obj.secondaryLoyaltyPoints, { label: 'باقي للمكافأة', balance: { int: 5 } });
   assert.equal(obj.textModulesData[0].body, '●●●●○○○○○');
   assert.equal(obj.linksModuleData.uris[0].uri, 'https://x.test/c/abcdefghijkmnpqrstuv');
-  assert.match(obj.heroImage.sourceUri.uri, /^https:\/\/x\.test\/img\/hero\/g4-[0-9a-f]{6}-[a-z]+-9-4-0-44\.png$/, 'نفس حلقة الآيفون: 9 أختام، 4 مليانين');
+  assert.match(obj.heroImage.sourceUri.uri, /^https:\/\/x\.test\/img\/hero\/g5-[0-9a-f]{6}-[a-z]+-9-4-0-44\.png$/, 'نفس حلقة الآيفون: 9 أختام، 4 مليانين');
   assert.match(obj.heroImage.contentDescription.defaultValue.value, /^باقي 5 أختام/);
 });
 

@@ -19,7 +19,7 @@ function pixels(png) {
 }
 
 test('الحلقة بتعرض الرصيد الفعلي وبتضل واضحة بالألوان الفاتحة والغامقة',async()=>{
-  assert.equal(STRIP_VERSION,4);
+  assert.equal(STRIP_VERSION,5);
   for(const color of ['#2f5d50','#ffffff','#101010','#fdcb33']) {
     const bg=color.slice(1).match(/../g).map(v=>parseInt(v,16));
     for(const balance of [0,4,9,10]) {
@@ -75,7 +75,7 @@ test('تحديث المحافظ على دفعات، بيعيد الفشل وبي
   assert.deepEqual(Object.keys(classes[0].body).sort(),['accountIdLabel','accountNameLabel','classTemplateInfo']);
   assert.equal(calls.length,8,'محاولة فاشلة وسبع ناجحة، بدون تكرار الناجح');
   for(const call of calls) {
-    assert.match(call.body.heroImage.sourceUri.uri,/\/g4-/);
+    assert.match(call.body.heroImage.sourceUri.uri,/\/g5-/);
     assert.deepEqual(Object.keys(call.body).sort(),['heroImage','id'],'التحديث ما بيلمَس حقول النقاط والـ QR');
   }
 });
@@ -109,4 +109,22 @@ test('التصميم الهندسي: النسبة الدقيقة والأختا�
     const img=pixels(await stripPng({color:'#205447',program_type:'stamps',stamps_required:slots},0,'g'));
     assert.deepEqual([img.w,img.h],[1032,336]);
   }
+});
+
+test('v5: النقاط بتتعبّى من اليمين والشريط بنفس لون البطاقة، وv4 ما تغيّرت',async()=>{
+  const dots=async(key)=>{
+    const img=pixels(await renderKey(key));
+    const bg=key.split('|')[1].slice(1).match(/../g).map(v=>parseInt(v,16));
+    const spacing=(375*.65-24)/9;
+    const lit=[];
+    for(let n=0;n<10;n++){ const px=img.pixel((24+n*spacing)*3,144*.88*3); lit.push(Math.max(...px.map((v,i)=>Math.abs(v-bg[i])))>100); }
+    return {img,bg,lit};
+  };
+  const v5=await dots('s5|#2f5d50|cup|10|3|0|30');
+  assert.deepEqual(v5.lit,[false,false,false,false,false,false,false,true,true,true],'3 نقاط من اليمين');
+  assert.deepEqual(v5.img.pixel(1120,5),v5.bg,'طرف الشريط اليمين بنفس لون البطاقة (ما في صندوق)');
+  assert.deepEqual(v5.img.pixel(1120,425),v5.bg);
+  const v4=await dots('s4|#2f5d50|cup|10|3|0|30');
+  assert.deepEqual(v4.lit,[true,true,true,false,false,false,false,false,false,false],'روابط v4 القديمة بترجع نفس الصورة');
+  assert.notDeepEqual(v4.img.pixel(1120,5),v4.bg);
 });

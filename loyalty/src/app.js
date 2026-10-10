@@ -765,7 +765,7 @@ export async function runScheduled(ctx, now = Date.now()) {
     out.demoReset = true;
   }
   await c.db.run('DELETE FROM rate_hits WHERE expires_at < ?', now);
-  await c.db.run('DELETE FROM strip_cache WHERE k NOT GLOB ?', '[sg][234]|*'); // Keep immutable URLs used by saved Google cards
+  await c.db.run('DELETE FROM strip_cache WHERE k NOT GLOB ?', '[sg][2345]|*'); // Keep immutable URLs used by saved Google cards
   return out;
 }
 
